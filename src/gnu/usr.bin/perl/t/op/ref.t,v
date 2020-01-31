@@ -1,0 +1,731 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	OPENBSD_4_4:1.1.1.2
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200606302200:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200601311430:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2005.02.05.17.24.01;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.01;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.06.30.22.46.55;	author tg;	state Exp;
+branches;
+next	;
+commitid	10044A5A6F7276AA324;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#!./perl
+
+BEGIN {
+    chdir 't' if -d 't';
+    @@INC = qw(. ../lib);
+}
+
+print "1..70\n";
+
+require 'test.pl';
+
+# Test glob operations.
+
+$bar = "ok 1\n";
+$foo = "ok 2\n";
+{
+    local(*foo) = *bar;
+    print $foo;
+}
+print $foo;
+
+$baz = "ok 3\n";
+$foo = "ok 4\n";
+{
+    local(*foo) = 'baz';
+    print $foo;
+}
+print $foo;
+
+$foo = "ok 6\n";
+{
+    local(*foo);
+    print $foo;
+    $foo = "ok 5\n";
+    print $foo;
+}
+print $foo;
+
+# Test fake references.
+
+$baz = "ok 7\n";
+$bar = 'baz';
+$foo = 'bar';
+print $$$foo;
+
+# Test real references.
+
+$FOO = \$BAR;
+$BAR = \$BAZ;
+$BAZ = "ok 8\n";
+print $$$FOO;
+
+# Test references to real arrays.
+
+@@ary = (9,10,11,12);
+$ref[0] = \@@a;
+$ref[1] = \@@b;
+$ref[2] = \@@c;
+$ref[3] = \@@d;
+for $i (3,1,2,0) {
+    push(@@{$ref[$i]}, "ok $ary[$i]\n");
+}
+print @@a;
+print ${$ref[1]}[0];
+print @@{$ref[2]}[0];
+print @@{'d'};
+
+# Test references to references.
+
+$refref = \\$x;
+$x = "ok 13\n";
+print $$$refref;
+
+# Test nested anonymous lists.
+
+$ref = [[],2,[3,4,5,]];
+print scalar @@$ref == 3 ? "ok 14\n" : "not ok 14\n";
+print $$ref[1] == 2 ? "ok 15\n" : "not ok 15\n";
+print ${$$ref[2]}[2] == 5 ? "ok 16\n" : "not ok 16\n";
+print scalar @@{$$ref[0]} == 0 ? "ok 17\n" : "not ok 17\n";
+
+print $ref->[1] == 2 ? "ok 18\n" : "not ok 18\n";
+print $ref->[2]->[0] == 3 ? "ok 19\n" : "not ok 19\n";
+
+# Test references to hashes of references.
+
+$refref = \%whatever;
+$refref->{"key"} = $ref;
+print $refref->{"key"}->[2]->[0] == 3 ? "ok 20\n" : "not ok 20\n";
+
+# Test to see if anonymous subarrays spring into existence.
+
+$spring[5]->[0] = 123;
+$spring[5]->[1] = 456;
+push(@@{$spring[5]}, 789);
+print join(':',@@{$spring[5]}) eq "123:456:789" ? "ok 21\n" : "not ok 21\n";
+
+# Test to see if anonymous subhashes spring into existence.
+
+@@{$spring2{"foo"}} = (1,2,3);
+$spring2{"foo"}->[3] = 4;
+print join(':',@@{$spring2{"foo"}}) eq "1:2:3:4" ? "ok 22\n" : "not ok 22\n";
+
+# Test references to subroutines.
+
+sub mysub { print "ok 23\n" }
+$subref = \&mysub;
+&$subref;
+
+$subrefref = \\&mysub2;
+$$subrefref->("ok 24\n");
+sub mysub2 { print shift }
+
+# Test the ref operator.
+
+print ref $subref	eq CODE  ? "ok 25\n" : "not ok 25\n";
+print ref $ref		eq ARRAY ? "ok 26\n" : "not ok 26\n";
+print ref $refref	eq HASH  ? "ok 27\n" : "not ok 27\n";
+
+# Test anonymous hash syntax.
+
+$anonhash = {};
+print ref $anonhash	eq HASH  ? "ok 28\n" : "not ok 28\n";
+$anonhash2 = {FOO => BAR, ABC => XYZ,};
+print join('', sort values %$anonhash2) eq BARXYZ ? "ok 29\n" : "not ok 29\n";
+
+# Test bless operator.
+
+package MYHASH;
+
+$object = bless $main'anonhash2;
+print ref $object	eq MYHASH  ? "ok 30\n" : "not ok 30\n";
+print $object->{ABC}	eq XYZ     ? "ok 31\n" : "not ok 31\n";
+
+$object2 = bless {};
+print ref $object2	eq MYHASH  ? "ok 32\n" : "not ok 32\n";
+
+# Test ordinary call on object method.
+
+&mymethod($object,33);
+
+sub mymethod {
+    local($THIS, @@ARGS) = @@_;
+    die 'Got a "' . ref($THIS). '" instead of a MYHASH'
+	unless ref $THIS eq MYHASH;
+    print $THIS->{FOO} eq BAR  ? "ok $ARGS[0]\n" : "not ok $ARGS[0]\n";
+}
+
+# Test automatic destructor call.
+
+$string = "not ok 34\n";
+$object = "foo";
+$string = "ok 34\n";
+$main'anonhash2 = "foo";
+$string = "";
+
+DESTROY {
+    return unless $string;
+    print $string;
+
+    # Test that the object has not already been "cursed".
+    print ref shift ne HASH ? "ok 35\n" : "not ok 35\n";
+}
+
+# Now test inheritance of methods.
+
+package OBJ;
+
+@@ISA = (BASEOBJ);
+
+$main'object = bless {FOO => foo, BAR => bar};
+
+package main;
+
+# Test arrow-style method invocation.
+
+print $object->doit("BAR") eq bar ? "ok 36\n" : "not ok 36\n";
+
+# Test indirect-object-style method invocation.
+
+$foo = doit $object "FOO";
+print $foo eq foo ? "ok 37\n" : "not ok 37\n";
+
+sub BASEOBJ'doit {
+    local $ref = shift;
+    die "Not an OBJ" unless ref $ref eq OBJ;
+    $ref->{shift()};
+}
+
+package UNIVERSAL;
+@@ISA = 'LASTCHANCE';
+
+package LASTCHANCE;
+sub foo { print $_[1] }
+
+package WHATEVER;
+foo WHATEVER "ok 38\n";
+
+#
+# test the \(@@foo) construct
+#
+package main;
+@@foo = \(1..3);
+@@bar = \(@@foo);
+@@baz = \(1,@@foo,@@bar);
+print @@bar == 3 ? "ok 39\n" : "not ok 39\n";
+print grep(ref($_), @@bar) == 3 ? "ok 40\n" : "not ok 40\n";
+print @@baz == 3 ? "ok 41\n" : "not ok 41\n";
+
+my(@@fuu) = \(1..2,3);
+my(@@baa) = \(@@fuu);
+my(@@bzz) = \(1,@@fuu,@@baa);
+print @@baa == 3 ? "ok 42\n" : "not ok 42\n";
+print grep(ref($_), @@baa) == 3 ? "ok 43\n" : "not ok 43\n";
+print @@bzz == 3 ? "ok 44\n" : "not ok 44\n";
+
+# also, it can't be an lvalue
+eval '\\($x, $y) = (1, 2);';
+print $@@ =~ /Can\'t modify.*ref.*in.*assignment/ ? "ok 45\n" : "not ok 45\n";
+
+# test for proper destruction of lexical objects
+
+sub larry::DESTROY { print "# larry\nok 46\n"; }
+sub curly::DESTROY { print "# curly\nok 47\n"; }
+sub moe::DESTROY   { print "# moe\nok 48\n"; }
+
+{
+    my ($joe, @@curly, %larry);
+    my $moe = bless \$joe, 'moe';
+    my $curly = bless \@@curly, 'curly';
+    my $larry = bless \%larry, 'larry';
+    print "# leaving block\n";
+}
+
+print "# left block\n";
+
+# another glob test
+
+$foo = "not ok 49";
+{ local(*bar) = "foo" }
+$bar = "ok 49";
+local(*bar) = *bar;
+print "$bar\n";
+
+$var = "ok 50";
+$_   = \$var;
+print $$_,"\n";
+
+# test if reblessing during destruction results in more destruction
+
+{
+    package A;
+    sub new { bless {}, shift }
+    DESTROY { print "# destroying 'A'\nok 52\n" }
+    package _B;
+    sub new { bless {}, shift }
+    DESTROY { print "# destroying '_B'\nok 51\n"; bless shift, 'A' }
+    package main;
+    my $b = _B->new;
+}
+
+# test if $_[0] is properly protected in DESTROY()
+
+{
+    my $i = 0;
+    local $SIG{'__DIE__'} = sub {
+	my $m = shift;
+	if ($i++ > 4) {
+	    print "# infinite recursion, bailing\nnot ok 53\n";
+	    exit 1;
+        }
+	print "# $m";
+	if ($m =~ /^Modification of a read-only/) { print "ok 53\n" }
+    };
+    package C;
+    sub new { bless {}, shift }
+    DESTROY { $_[0] = 'foo' }
+    {
+	print "# should generate an error...\n";
+	my $c = C->new;
+    }
+    print "# good, didn't recurse\n";
+}
+
+# test if refgen behaves with autoviv magic
+
+{
+    my @@a;
+    $a[1] = "ok 54\n";
+    print ${\$_} for @@a;
+}
+
+# This test is the reason for postponed destruction in sv_unref
+$a = [1,2,3];
+$a = $a->[1];
+print "not " unless $a == 2;
+print "ok 55\n";
+
+# This test used to coredump. The BEGIN block is important as it causes the
+# op that created the constant reference to be freed. Hence the only
+# reference to the constant string "pass" is in $a. The hack that made
+# sure $a = $a->[1] would work didn't work with references to constants.
+
+my $test = 56;
+
+foreach my $lexical ('', 'my $a; ') {
+  my $expect = "pass\n";
+  my $result = runperl (switches => ['-wl'], stderr => 1,
+    prog => $lexical . 'BEGIN {$a = \q{pass}}; $a = $$a; print $a');
+
+  if ($? == 0 and $result eq $expect) {
+    print "ok $test\n";
+  } else {
+    print "not ok $test # \$? = $?\n";
+    print "# expected ", _qq ($expect), ", got ", _qq ($result), "\n";
+  }
+  $test++;
+}
+
+sub x::DESTROY {print "ok ", $test + shift->[0], "\n"}
+{ my $a1 = bless [3],"x";
+  my $a2 = bless [2],"x";
+  { my $a3 = bless [1],"x";
+    my $a4 = bless [0],"x";
+    567;
+  }
+}
+$test+=4;
+
+my $result = runperl (switches=>['-l'],
+                      prog=> 'print 1; print qq-*$\*-;print 1;');
+my $expect = "1\n*\n*\n1\n";
+if ($result eq $expect) {
+  print "ok $test\n";
+} else {
+  print "not ok $test\n";
+  foreach ($expect, $result) {
+    s/\n/\\n/gs;
+  }
+  print "# expected \"$expect\", got \"$result\"\n";
+}
+
+# bug #21347
+
+runperl(prog => 'sub UNIVERSAL::AUTOLOAD { qr// } a->p' );
+if ($? != 0) { print "not " };
+print "ok ",++$test," - UNIVERSAL::AUTOLOAD called when freeing qr//\n";
+
+runperl(prog => 'sub UNIVERSAL::DESTROY { warn } bless \$a, A', stderr => 1);
+if ($? != 0) { print "not " };
+print "ok ",++$test," - warn called inside UNIVERSAL::DESTROY\n";
+
+
+# bug #22719
+
+runperl(prog => 'sub f { my $x = shift; *z = $x; } f({}); f();');
+if ($? != 0) { print "not " };
+print "ok ",++$test," - coredump on typeglob = (SvRV && !SvROK)\n";
+
+# bug #27268: freeing self-referential typeglobs could trigger
+# "Attempt to free unreferenced scalar" warnings
+
+$result = runperl(
+    prog => 'use Symbol;my $x=bless \gensym,"t"; print;*$$x=$x',
+    stderr => 1
+);
+print "not " if length $result;
+print "ok ",++$test," - freeing self-referential typeglob\n";
+print "# got: $result\n" if length $result;
+
+# using a regex in the destructor for STDOUT segfaulted because the
+# REGEX pad had already been freed (ithreads build only). The
+# object is required to trigger the early freeing of GV refs to to STDOUT
+
+$result = runperl(
+    prog => '$x=bless[]; sub IO::Handle::DESTROY{$_="bad";s/bad/ok/;print}',
+    stderr => 1
+);
+print "not " unless $result =~ /^(ok)+$/;
+print "ok ",++$test," - STDOUT destructor\n";
+print "# got: $result\n" unless $result =~ /^(ok)+$/;
+
+# test global destruction
+
+++$test;
+my $test1 = $test + 1;
+my $test2 = $test + 2;
+
+package FINALE;
+
+{
+    $ref3 = bless ["ok $test2\n"];	# package destruction
+    my $ref2 = bless ["ok $test1\n"];	# lexical destruction
+    local $ref1 = bless ["ok $test\n"];	# dynamic destruction
+    1;					# flush any temp values on stack
+}
+
+DESTROY {
+    print $_[0][0];
+}
+
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import Perl 5.8.8 from OpenLSD
+@
+text
+@d8 2
+a10 3
+use strict qw(refs subs);
+
+plan (74);
+d14 2
+a15 2
+$bar = "one";
+$foo = "two";
+d18 1
+a18 1
+    is($foo, 'one');
+d20 1
+a20 1
+is ($foo, 'two');
+d22 2
+a23 2
+$baz = "three";
+$foo = "four";
+d26 1
+a26 1
+    is ($foo, 'three');
+d28 1
+a28 1
+is ($foo, 'four');
+d30 1
+a30 1
+$foo = "global";
+d33 3
+a35 3
+    is ($foo, undef);
+    $foo = "local";
+    is ($foo, 'local');
+d37 1
+a37 1
+is ($foo, 'global');
+a38 2
+{
+    no strict 'refs';
+d41 4
+a44 5
+    $baz = "valid";
+    $bar = 'baz';
+    $foo = 'bar';
+    is ($$$foo, 'valid');
+}
+d50 2
+a51 2
+$BAZ = "hit";
+is ($$$FOO, 'hit');
+d55 1
+a55 2
+my $test = curr_test();
+@@ary = ($test,$test+1,$test+2,$test+3);
+d66 1
+a66 5
+{
+    no strict 'refs';
+    print @@{'d'};
+}
+curr_test($test+4);
+d71 2
+a72 2
+$x = "Good";
+is ($$$refref, 'Good');
+d77 4
+a80 4
+is (scalar @@$ref, 3);
+is ($$ref[1], 2);
+is (${$$ref[2]}[2], 5);
+is (scalar @@{$$ref[0]}, 0);
+d82 2
+a83 2
+is ($ref->[1], 2);
+is ($ref->[2]->[0], 3);
+d89 1
+a89 1
+is ($refref->{"key"}->[2]->[0], 3);
+d96 1
+a96 1
+is (join(':',@@{$spring[5]}), "123:456:789");
+d102 1
+a102 1
+is (join(':',@@{$spring2{"foo"}}), "1:2:3:4");
+d106 3
+a108 7
+{
+    my $called;
+    sub mysub { $called++; }
+    $subref = \&mysub;
+    &$subref;
+    is ($called, 1);
+}
+d111 2
+a112 2
+is ($$subrefref->("GOOD"), "good");
+sub mysub2 { lc shift }
+d116 3
+a118 3
+is (ref $subref, 'CODE');
+is (ref $ref, 'ARRAY');
+is (ref $refref, 'HASH');
+d123 3
+a125 3
+is (ref $anonhash, 'HASH');
+$anonhash2 = {FOO => 'BAR', ABC => 'XYZ',};
+is (join('', sort values %$anonhash2), 'BARXYZ');
+d132 2
+a133 2
+main::is (ref $object, 'MYHASH');
+main::is ($object->{ABC}, 'XYZ');
+d136 1
+a136 1
+main::is (ref $object2,	'MYHASH');
+d140 1
+a140 1
+&mymethod($object,"argument");
+d145 2
+a146 3
+	unless ref $THIS eq 'MYHASH';
+    main::is ($ARGS[0], "argument");
+    main::is ($THIS->{FOO}, 'BAR');
+d151 1
+a151 1
+$string = "bad";
+d153 1
+a153 1
+$string = "good";
+d159 1
+a159 1
+    main::is ($string, 'good');
+d162 1
+a162 1
+    main::isnt (ref shift, 'HASH');
+d169 1
+a169 1
+@@ISA = ('BASEOBJ');
+d171 1
+a171 1
+$main'object = bless {FOO => 'foo', BAR => 'bar'};
+d177 1
+a177 1
+is ($object->doit("BAR"), 'bar');
+d182 1
+a182 1
+main::is ($foo, 'foo');
+d186 1
+a186 1
+    die "Not an OBJ" unless ref $ref eq 'OBJ';
+d194 1
+a194 1
+sub foo { main::is ($_[1], 'works') }
+d197 1
+a197 1
+foo WHATEVER "works";
+d206 3
+a208 3
+is (scalar (@@bar), 3);
+is (scalar grep(ref($_), @@bar), 3);
+is (scalar (@@baz), 3);
+d213 3
+a215 3
+is (scalar (@@baa), 3);
+is (scalar grep(ref($_), @@baa), 3);
+is (scalar (@@bzz), 3);
+d219 1
+a219 1
+like ($@@, qr/Can\'t modify.*ref.*in.*assignment/);
+d222 4
+a225 4
+$test = curr_test();
+sub larry::DESTROY { print "# larry\nok $test\n"; }
+sub curly::DESTROY { print "# curly\nok ", $test + 1, "\n"; }
+sub moe::DESTROY   { print "# moe\nok ", $test + 2, "\n"; }
+a235 1
+curr_test($test + 3);
+d239 1
+a239 2
+
+$foo = "garbage";
+d241 1
+a241 1
+$bar = "glob 3";
+d243 1
+a243 1
+is ($bar, "glob 3");
+d245 1
+a245 1
+$var = "glob 4";
+d247 1
+a247 1
+is ($$_, 'glob 4');
+d249 1
+a250 2
+# test if reblessing during destruction results in more destruction
+$test = curr_test();
+d254 1
+a254 1
+    DESTROY { print "# destroying 'A'\nok ", $test + 1, "\n" }
+d257 1
+a257 1
+    DESTROY { print "# destroying '_B'\nok $test\n"; bless shift, 'A' }
+a260 1
+curr_test($test + 2);
+a264 1
+    my $test = curr_test();
+d269 1
+a269 1
+	    print "# infinite recursion, bailing\nnot ok $test\n";
+d272 2
+a273 1
+	like ($m, qr/^Modification of a read-only/);
+d286 1
+d289 2
+a290 7
+    $a[1] = "good";
+    my $got;
+    for (@@a) {
+	$got .= ${\$_};
+	$got .= ';';
+    }
+    is ($got, ";good;");
+d296 2
+a297 1
+is ($a, 2);
+d304 1
+d311 7
+a317 2
+  is ($?, 0);
+  is ($result, $expect);
+a319 1
+$test = curr_test();
+d328 1
+a328 1
+curr_test($test+4);
+d330 12
+a341 3
+is (runperl (switches=>['-l'],
+	     prog=> 'print 1; print qq-*$\*-;print 1;'),
+    "1\n*\n*\n1\n");
+d346 2
+a347 1
+is ($?, 0, 'UNIVERSAL::AUTOLOAD called when freeing qr//');
+d350 2
+a351 1
+is ($?, 0, 'warn called inside UNIVERSAL::DESTROY');
+d357 2
+a358 1
+is ($?, 0, 'coredump on typeglob = (SvRV && !SvROK)');
+d363 1
+a363 1
+is (runperl(
+d366 4
+a369 1
+), '', 'freeing self-referential typeglob');
+d375 1
+a375 1
+like (runperl(
+d378 4
+a381 1
+      ), qr/^(ok)+$/, 'STDOUT destructor');
+a382 3
+# Bit of a hack to make test.pl happy. There are 3 more tests after it leaves.
+$test = curr_test();
+curr_test($test + 3);
+d385 1
+@
+

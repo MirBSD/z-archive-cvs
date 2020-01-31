@@ -1,0 +1,665 @@
+head	1.6;
+access;
+symbols
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.04.15.19.20.28;	author tg;	state dead;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.19.46.45;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520152445E05B912;
+
+1.4
+date	2008.06.12.20.54.01;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.04.32;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.22;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.00;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.44;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.39.32;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.43.00;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.34.26;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.38.27;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.12;	author tg;	state Exp;
+branches;
+next	;
+commitid	10052014A9975CEFD1D;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftdebug.c                                                              */
+/*                                                                         */
+/*    Debugging and logging component for Win32 (body).                    */
+/*                                                                         */
+/*  Copyright 1996-2001, 2002, 2005, 2008, 2009 by                         */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* This component contains various macros and functions used to ease the */
+  /* debugging of the FreeType engine.  Its main purpose is in assertion   */
+  /* checking, tracing, and error detection.                               */
+  /*                                                                       */
+  /* There are now three debugging modes:                                  */
+  /*                                                                       */
+  /* - trace mode                                                          */
+  /*                                                                       */
+  /*   Error and trace messages are sent to the log file (which can be the */
+  /*   standard error output).                                             */
+  /*                                                                       */
+  /* - error mode                                                          */
+  /*                                                                       */
+  /*   Only error messages are generated.                                  */
+  /*                                                                       */
+  /* - release mode:                                                       */
+  /*                                                                       */
+  /*   No error message is sent or generated.  The code is free from any   */
+  /*   debugging parts.                                                    */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+
+
+#ifdef FT_DEBUG_LEVEL_ERROR
+
+
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <windows.h>
+
+
+  FT_BASE_DEF( void )
+  FT_Message( const char*  fmt, ... )
+  {
+    static char  buf[8192];
+    va_list      ap;
+
+
+    va_start( ap, fmt );
+    vprintf( fmt, ap );
+    /* send the string to the debugger as well */
+    vsprintf( buf, fmt, ap );
+    OutputDebugStringA( buf );
+    va_end( ap );
+  }
+
+
+  FT_BASE_DEF( void )
+  FT_Panic( const char*  fmt, ... )
+  {
+    static char  buf[8192];
+    va_list      ap;
+
+
+    va_start( ap, fmt );
+    vsprintf( buf, fmt, ap );
+    OutputDebugStringA( buf );
+    va_end( ap );
+
+    exit( EXIT_FAILURE );
+  }
+
+
+#ifdef FT_DEBUG_LEVEL_TRACE
+
+
+  /* array of trace levels, initialized to 0 */
+  int  ft_trace_levels[trace_count];
+
+  /* define array of trace toggle names */
+#define FT_TRACE_DEF( x )  #x ,
+
+  static const char*  ft_trace_toggles[trace_count + 1] =
+  {
+#include FT_INTERNAL_TRACE_H
+    NULL
+  };
+
+#undef FT_TRACE_DEF
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* Initialize the tracing sub-system.  This is done by retrieving the    */
+  /* value of the "FT2_DEBUG" environment variable.  It must be a list of  */
+  /* toggles, separated by spaces, `;' or `,'.  Example:                   */
+  /*                                                                       */
+  /*    "any:3 memory:6 stream:5"                                          */
+  /*                                                                       */
+  /* This will request that all levels be set to 3, except the trace level */
+  /* for the memory and stream components which are set to 6 and 5,        */
+  /* respectively.                                                         */
+  /*                                                                       */
+  /* See the file <freetype/internal/fttrace.h> for details of the         */
+  /* available toggle names.                                               */
+  /*                                                                       */
+  /* The level must be between 0 and 6; 0 means quiet (except for serious  */
+  /* runtime errors), and 6 means _very_ verbose.                          */
+  /*                                                                       */
+  FT_BASE_DEF( void )
+  ft_debug_init( void )
+  {
+    const char*  ft2_debug = getenv( "FT2_DEBUG" );
+
+
+    if ( ft2_debug )
+    {
+      const char*  p = ft2_debug;
+      const char*  q;
+
+
+      for ( ; *p; p++ )
+      {
+        /* skip leading whitespace and separators */
+        if ( *p == ' ' || *p == '\t' || *p == ',' || *p == ';' || *p == '=' )
+          continue;
+
+        /* read toggle name, followed by ':' */
+        q = p;
+        while ( *p && *p != ':' )
+          p++;
+
+        if ( *p == ':' && p > q )
+        {
+          int  n, i, len = p - q;
+          int  level = -1, found = -1;
+
+
+          for ( n = 0; n < trace_count; n++ )
+          {
+            const char*  toggle = ft_trace_toggles[n];
+
+
+            for ( i = 0; i < len; i++ )
+            {
+              if ( toggle[i] != q[i] )
+                break;
+            }
+
+            if ( i == len && toggle[i] == 0 )
+            {
+              found = n;
+              break;
+            }
+          }
+
+          /* read level */
+          p++;
+          if ( *p )
+          {
+            level = *p++ - '0';
+            if ( level < 0 || level > 7 )
+              level = -1;
+          }
+
+          if ( found >= 0 && level >= 0 )
+          {
+            if ( found == trace_any )
+            {
+              /* special case for "any" */
+              for ( n = 0; n < trace_count; n++ )
+                ft_trace_levels[n] = level;
+            }
+            else
+              ft_trace_levels[found] = level;
+          }
+        }
+      }
+    }
+  }
+
+
+#else  /* !FT_DEBUG_LEVEL_TRACE */
+
+
+  FT_BASE_DEF( void )
+  ft_debug_init( void )
+  {
+    /* nothing */
+  }
+
+
+#endif /* !FT_DEBUG_LEVEL_TRACE */
+
+#endif /* FT_DEBUG_LEVEL_ERROR */
+
+
+/* END */
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005, 2008 by                               */
+a57 23
+#ifdef _WIN32_WCE
+
+  void
+  OutputDebugStringEx( const char*  str )
+  {
+    static WCHAR  buf[8192];
+
+
+    int sz = MultiByteToWideChar( CP_ACP, 0, str, -1, buf,
+                                  sizeof ( buf ) / sizeof ( *buf ) );
+    if ( !sz )
+      lstrcpyW( buf, L"OutputDebugStringEx: MultiByteToWideChar failed" );
+
+    OutputDebugStringW( buf );
+  }
+
+#else
+
+#define OutputDebugStringEx  OutputDebugStringA
+
+#endif
+
+
+d69 1
+a69 1
+    OutputDebugStringEx( buf );
+d83 1
+a83 1
+    OutputDebugStringEx( buf );
+a128 10
+#ifdef _WIN32_WCE
+
+    /* Windows Mobile doesn't have environment API:           */
+    /* GetEnvironmentStrings, GetEnvironmentVariable, getenv. */
+    /*                                                        */
+    /* FIXME!!! How to set debug mode?                        */
+    const char*  ft2_debug = 0;
+
+#else
+
+a130 1
+#endif
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005 by                                     */
+d51 3
+a53 3
+#  include <stdarg.h>
+#  include <stdlib.h>
+#  include <string.h>
+d55 24
+a78 1
+#  include <windows.h>
+d84 2
+a85 2
+    static char buf[8192];
+    va_list     ap;
+d92 1
+a92 1
+    OutputDebugStringA( buf );
+d100 2
+a101 2
+    static char buf[8192];
+    va_list     ap;
+d106 1
+a106 1
+    OutputDebugStringA( buf );
+d113 1
+a113 1
+#  ifdef FT_DEBUG_LEVEL_TRACE
+d120 1
+a120 1
+#    define FT_TRACE_DEF( x )  #x ,
+d124 1
+a124 1
+#    include FT_INTERNAL_TRACE_H
+d128 1
+a128 1
+#    undef FT_TRACE_DEF
+d152 10
+d164 1
+d233 1
+a233 1
+#  else  /* !FT_DEBUG_LEVEL_TRACE */
+d243 1
+a243 1
+#  endif /* !FT_DEBUG_LEVEL_TRACE */
+d247 1
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d66 2
+d178 1
+a178 1
+            if ( level < 0 || level > 6 )
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d58 1
+a58 1
+  FT_EXPORT_DEF( void )
+d72 1
+a72 1
+  FT_EXPORT_DEF( void )
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005 by                                     */
+d58 1
+a58 1
+  FT_BASE_DEF( void )
+a65 2
+    vprintf( fmt, ap );
+    /* send the string to the debugger as well */
+d72 1
+a72 1
+  FT_BASE_DEF( void )
+d176 1
+a176 1
+            if ( level < 0 || level > 7 )
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005, 2008 by                               */
+d51 3
+a53 3
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+d55 1
+a55 24
+#include <windows.h>
+
+
+#ifdef _WIN32_WCE
+
+  void
+  OutputDebugStringEx( const char*  str )
+  {
+    static WCHAR  buf[8192];
+
+
+    int sz = MultiByteToWideChar( CP_ACP, 0, str, -1, buf,
+                                  sizeof ( buf ) / sizeof ( *buf ) );
+    if ( !sz )
+      lstrcpyW( buf, L"OutputDebugStringEx: MultiByteToWideChar failed" );
+
+    OutputDebugStringW( buf );
+  }
+
+#else
+
+#define OutputDebugStringEx  OutputDebugStringA
+
+#endif
+d61 2
+a62 2
+    static char  buf[8192];
+    va_list      ap;
+d69 1
+a69 1
+    OutputDebugStringEx( buf );
+d77 2
+a78 2
+    static char  buf[8192];
+    va_list      ap;
+d83 1
+a83 1
+    OutputDebugStringEx( buf );
+d90 1
+a90 1
+#ifdef FT_DEBUG_LEVEL_TRACE
+d97 1
+a97 1
+#define FT_TRACE_DEF( x )  #x ,
+d101 1
+a101 1
+#include FT_INTERNAL_TRACE_H
+d105 1
+a105 1
+#undef FT_TRACE_DEF
+a128 10
+#ifdef _WIN32_WCE
+
+    /* Windows Mobile doesn't have environment API:           */
+    /* GetEnvironmentStrings, GetEnvironmentVariable, getenv. */
+    /*                                                        */
+    /* FIXME!!! How to set debug mode?                        */
+    const char*  ft2_debug = 0;
+
+#else
+
+a130 1
+#endif
+d199 1
+a199 1
+#else  /* !FT_DEBUG_LEVEL_TRACE */
+d209 1
+a209 1
+#endif /* !FT_DEBUG_LEVEL_TRACE */
+a212 1
+
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005 by                                     */
+d58 1
+a58 1
+  FT_BASE_DEF( void )
+d72 1
+a72 1
+  FT_BASE_DEF( void )
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005, 2008, 2009 by                         */
+d51 3
+a53 3
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+d55 1
+a55 1
+#include <windows.h>
+d61 2
+a62 2
+    static char  buf[8192];
+    va_list      ap;
+a65 2
+    vprintf( fmt, ap );
+    /* send the string to the debugger as well */
+d75 2
+a76 2
+    static char  buf[8192];
+    va_list      ap;
+d88 1
+a88 1
+#ifdef FT_DEBUG_LEVEL_TRACE
+d95 1
+a95 1
+#define FT_TRACE_DEF( x )  #x ,
+d99 1
+a99 1
+#include FT_INTERNAL_TRACE_H
+d103 1
+a103 1
+#undef FT_TRACE_DEF
+d176 1
+a176 1
+            if ( level < 0 || level > 7 )
+d197 1
+a197 1
+#else  /* !FT_DEBUG_LEVEL_TRACE */
+d207 1
+a207 1
+#endif /* !FT_DEBUG_LEVEL_TRACE */
+a210 1
+
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

@@ -1,0 +1,403 @@
+head	1.8;
+access;
+symbols
+	MIRBSD_10:1.5.0.2
+	MIRBSD_10_BASE:1.5
+	MIRBSD_9_BASE:1.4
+	MIRBSD_8:1.3.0.2
+	MIRBSD_8_BASE:1.3
+	TNF:1.1.3;
+locks; strict;
+comment	@ * @;
+
+
+1.8
+date	2013.10.31.20.06.15;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1005272B7081B0E5655;
+
+1.7
+date	2009.08.30.18.02.08;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004A9ABE9F3BE09D8C;
+
+1.6
+date	2008.11.08.23.03.50;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10049161AB22DF5DFC5;
+
+1.5
+date	2006.10.15.01.04.00;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100453189102970E3F3;
+
+1.4
+date	2006.06.02.00.18.01;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100447F83CE0FFF02BD;
+
+1.3
+date	2005.04.25.23.11.37;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.03.06.20.28.21;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.01.21.35;	author tg;	state Exp;
+branches
+	1.1.3.1;
+next	;
+
+1.1.3.1
+date	2005.02.05.01.21.35;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.8
+log
+@adapt most __attribute__((…)) occurrences to new KNF style(9)
+@
+text
+@/* $MirOS: src/lib/csu/common_elf/common.c,v 1.7 2009/08/30 18:02:08 tg Exp $
+ * derived from the following files:
+ * $NetBSD: common.c,v 1.16 2004/08/26 21:01:12 thorpej Exp $
+ * $OpenBSD: crt0.c,v 1.11 2003/06/27 22:30:38 deraadt Exp $
+ */
+
+/*
+ * Copyright (c) 2003, 2004, 2005, 2009, 2013
+ *	Thorsten "mirabilos" Glaser <tg@@mirbsd.org>
+ * Copyright (c) 1995 Christopher G. Demetriou
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *          This product includes software developed for the
+ *          NetBSD Project.  See http://www.NetBSD.org/ for
+ *          information about NetBSD.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * <<Id: LICENSE,v 1.2 2000/06/14 15:57:33 cgd Exp>>
+ */
+
+#ifndef _COMMON_H
+#error	not a stand-alone file
+#endif
+
+__RCSID("$MirOS: src/lib/csu/common_elf/common.c,v 1.7 2009/08/30 18:02:08 tg Exp $");
+
+struct ps_strings *__ps_strings = NULL;
+char __progname_storage[NAME_MAX + 1];
+
+static char *
+_strrchr(char *p, int ch)
+{
+	char *save;
+
+	for (save = NULL;; ++p) {
+		if (*p == ch)
+			save = (char *)p;
+		if (!*p)
+			return (save);
+	}
+/* NOTREACHED */
+}
+
+#ifdef MCRT0
+__asm__(".text"
+    "\n_eprol:");
+#endif
+
+void ___start(int argc, char **argv, char **envp,
+    void (*cleanup) (void) __attribute__((__unused__)),
+    const Obj_Entry *obj __attribute__((__unused__)),
+    struct ps_strings *ps_strings)
+{
+	char *namep, *s;
+
+	environ = envp;
+
+	if ((namep = argv[0]) != NULL) {	/* NULL ptr if argc == 0 */
+		if ((__progname = _strrchr(namep, '/')) == NULL)
+			__progname = namep;
+		else
+			++__progname;
+		for (s = __progname_storage; (*__progname) &&
+		    (s < &__progname_storage[NAME_MAX]); /* nothing */ )
+			*s++ = *__progname++;
+		*s = '\0';
+		__progname = __progname_storage;
+	}
+	if (ps_strings != (struct ps_strings *)0)
+		__ps_strings = ps_strings;
+
+#ifdef MCRT0
+	atexit(_mcleanup);
+	monstartup((u_long)&_eprol, (u_long)&_etext);
+#endif
+
+	atexit(_fini);
+	_init();
+
+	exit(main(argc, argv, environ));
+}
+@
+
+
+1.7
+log
+@move the environ and __progname symbols from csu to libc,
+in order to be able to build libc with -Wl,-z,defs
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/csu/common_elf/common.c,v 1.6 2008/11/08 23:03:50 tg Exp $
+d8 1
+a8 1
+ * Copyright (c) 2003, 2004, 2005, 2009
+d47 1
+a47 1
+__RCSID("$MirOS: src/lib/csu/common_elf/common.c,v 1.6 2008/11/08 23:03:50 tg Exp $");
+d72 2
+a73 2
+    void (*cleanup) (void) __attribute__((unused)),
+    const Obj_Entry *obj __attribute__((unused)),
+@
+
+
+1.6
+log
+@more mass conversions, including ancient eMail addresses
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/csu/common_elf/common.c,v 1.5 2006/10/15 01:04:00 tg Exp $
+d8 1
+a8 1
+ * Copyright (c) 2003, 2004, 2005
+d47 4
+a50 1
+__RCSID("$MirOS: src/lib/csu/common_elf/common.c,v 1.5 2006/10/15 01:04:00 tg Exp $");
+d91 1
+a91 1
+	if (ps_strings !=(struct ps_strings *)0)
+a103 2
+
+char *__progname = "";
+@
+
+
+1.5
+log
+@sprinkle more RCSID, because we can
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/csu/common_elf/common.c,v 1.4 2006/06/02 00:18:01 tg Exp $
+d9 1
+a9 1
+ *	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+d47 1
+a47 1
+__RCSID("$MirOS$");
+@
+
+
+1.4
+log
+@__CRAZY cleanup
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/csu/common_elf/common.c,v 1.3 2005/04/25 23:11:37 tg Exp $
+d43 1
+a43 1
+#ifndef	_COMMON_H
+d47 2
+d63 1
+a63 1
+#ifdef	MCRT0
+d91 1
+a91 1
+#ifdef	MCRT0
+a102 5
+
+/*
+ * NOTE: Leave the RCS ID _after_ ___start(), in case it gets placed in .text.
+ */
+__RCSID("$MirOS: src/lib/csu/common_elf/common.c,v 1.3 2005/04/25 23:11:37 tg Exp $");
+@
+
+
+1.3
+log
+@tweak and indent(1) partially
+reduce alignment, force nop insertion
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/csu/common_elf/common.c,v 1.2 2005/03/06 20:28:21 tg Exp $
+d66 4
+a69 2
+void ___start(int argc, char **argv, char **envp, void (*cleanup) (void),
+    const Obj_Entry *obj, struct ps_strings *ps_strings)
+d105 1
+a105 1
+__RCSID("$MirOS: src/lib/csu/common_elf/common.c,v 1.2 2005/03/06 20:28:21 tg Exp $");
+@
+
+
+1.2
+log
+@merge src/lib
+@
+text
+@d1 1
+a1 1
+/* $MirOS$
+d12 1
+a12 1
+ * 
+d28 1
+a28 1
+ * 
+d52 1
+a52 1
+	for (save = NULL; ; ++p) {
+d56 1
+a56 1
+			return(save);
+d63 1
+a63 1
+"\n_eprol:");
+d66 1
+a66 16
+#ifdef	DYNAMIC
+void
+_rtld_setup(void (*cleanup) __P((void)), const Obj_Entry *obj)
+{
+	if ((obj == NULL) || (obj->magic != RTLD_MAGIC))
+		_FATAL("Corrupt Obj_Entry pointer in GOT\n");
+	if (obj->version != RTLD_VERSION)
+		_FATAL("Dynamic linker version mismatch\n");
+
+	atexit(cleanup);
+}
+
+#include <dlfcn_stubs.c>
+#endif	/* DYNAMIC */
+
+void ___start(int argc, char **argv, char **envp, void (*cleanup)(void),
+d76 2
+a77 1
+		else	++__progname;
+d79 1
+a79 1
+		    (s < &__progname_storage[NAME_MAX]); /* nothing */)
+d84 1
+a84 2
+
+	if (ps_strings != (struct ps_strings *)0)
+a86 5
+#ifdef	DYNAMIC
+	if (&_DYNAMIC != NULL)
+		_rtld_setup(cleanup, obj);
+#endif
+
+d103 1
+a103 1
+__RCSID("$MirOS$");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 5
+a5 1
+/* $NetBSD: common.c,v 1.16 2004/08/26 21:01:12 thorpej Exp $ */
+d8 2
+d39 1
+a39 1
+ * 
+d43 3
+a45 3
+/*
+ * NOT A STANDALONE FILE!
+ */
+d52 1
+a52 1
+	for (save = NULL;; ++p) {
+d58 1
+a58 1
+	/* NOTREACHED */
+d61 3
+a63 6
+#ifdef MCRT0
+asm ("  .text");
+#ifdef EPROL_EXPORT
+EPROL_EXPORT;
+#endif
+asm ("_eprol:");
+d66 1
+a66 2
+#ifdef DYNAMIC
+
+d68 1
+a68 1
+_rtld_setup(void (*cleanup)(void), const Obj_Entry *obj)
+a69 1
+
+d78 46
+a123 1
+#endif /* DYNAMIC */
+@
+
+
+1.1.3.1
+log
+@The whole bunch of code we took from NetBSD(tm)
+@
+text
+@@

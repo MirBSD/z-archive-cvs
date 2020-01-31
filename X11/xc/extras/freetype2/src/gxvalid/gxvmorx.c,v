@@ -1,0 +1,358 @@
+head	1.1;
+branch	1.1.115;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.1.115.1
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype:1.1.115;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2006.06.29.18.37.41;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10044A41DBD6368BED5;
+
+1.1.1.1
+date	2008.02.26.19.53.02;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.115.1
+date	2006.06.29.18.37.41;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.2
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.3
+date	2017.04.15.15.42.08;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  gxvmorx.c                                                              */
+/*                                                                         */
+/*    TrueTypeGX/AAT morx table validation (body).                         */
+/*                                                                         */
+/*  Copyright 2005 by suzuki toshiya, Masatake YAMATO, Red Hat K.K.,       */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+/***************************************************************************/
+/*                                                                         */
+/* gxvalid is derived from both gxlayout module and otvalid module.        */
+/* Development of gxlayout is supported by the Information-technology      */
+/* Promotion Agency(IPA), Japan.                                           */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include "gxvmorx.h"
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_gxvmorx
+
+
+  static void
+  gxv_morx_subtables_validate( FT_Bytes       table,
+                               FT_Bytes       limit,
+                               FT_UShort      nSubtables,
+                               GXV_Validator  valid )
+  {
+    FT_Bytes  p = table;
+
+    GXV_Validate_Func fmt_funcs_table[] =
+    {
+      gxv_morx_subtable_type0_validate, /* 0 */
+      gxv_morx_subtable_type1_validate, /* 1 */
+      gxv_morx_subtable_type2_validate, /* 2 */
+      NULL,                             /* 3 */
+      gxv_morx_subtable_type4_validate, /* 4 */
+      gxv_morx_subtable_type5_validate, /* 5 */
+
+    };
+
+    GXV_Validate_Func  func;
+
+    FT_UShort  i;
+
+
+    GXV_NAME_ENTER( "subtables in a chain" );
+
+    for ( i = 0; i < nSubtables; i++ )
+    {
+      FT_ULong  length;
+      FT_ULong  coverage;
+      FT_ULong  subFeatureFlags;
+      FT_UInt   type;
+      FT_UInt   rest;
+
+
+      GXV_LIMIT_CHECK( 4 + 4 + 4 );
+      length          = FT_NEXT_ULONG( p );
+      coverage        = FT_NEXT_ULONG( p );
+      subFeatureFlags = FT_NEXT_ULONG( p );
+
+      GXV_TRACE(( "validating chain subtable %d/%d (%d bytes)\n",
+                  i + 1, nSubtables, length ));
+
+      type = coverage & 0x0007;
+      rest = length - ( 4 + 4 + 4 );
+      GXV_LIMIT_CHECK( rest );
+
+      /* morx coverage consists of mort_coverage & 16bit padding */
+      gxv_mort_coverage_validate( (FT_UShort)( ( coverage >> 16 ) | coverage ),
+                                  valid );
+      if ( type > 5 )
+        FT_INVALID_FORMAT;
+
+      func = fmt_funcs_table[type];
+      if ( func == NULL )
+        GXV_TRACE(( "morx type %d is reserved\n", type ));
+
+      func( p, p + rest, valid );
+
+      p += rest;
+    }
+
+    valid->subtable_length = p - table;
+
+    GXV_EXIT;
+  }
+
+
+  static void
+  gxv_morx_chain_validate( FT_Bytes       table,
+                           FT_Bytes       limit,
+                           GXV_Validator  valid )
+  {
+    FT_Bytes  p = table;
+    FT_ULong  defaultFlags;
+    FT_ULong  chainLength;
+    FT_ULong  nFeatureFlags;
+    FT_ULong  nSubtables;
+
+
+    GXV_NAME_ENTER( "morx chain header" );
+
+    GXV_LIMIT_CHECK( 4 + 4 + 4 + 4 );
+    defaultFlags  = FT_NEXT_ULONG( p );
+    chainLength   = FT_NEXT_ULONG( p );
+    nFeatureFlags = FT_NEXT_ULONG( p );
+    nSubtables    = FT_NEXT_ULONG( p );
+
+    /* feature-array of morx is same with that of mort */
+    gxv_mort_featurearray_validate( p, limit, nFeatureFlags, valid );
+    p += valid->subtable_length;
+
+    if ( nSubtables >= 0x10000 )
+      FT_INVALID_DATA;
+
+    gxv_morx_subtables_validate( p, table + chainLength,
+                                 (FT_UShort)nSubtables, valid );
+
+    valid->subtable_length = chainLength;
+
+    GXV_EXIT;
+  }
+
+
+  FT_LOCAL_DEF( void )
+  gxv_morx_validate( FT_Bytes      table,
+                     FT_Face       face,
+                     FT_Validator  ftvalid )
+  {
+    GXV_ValidatorRec  validrec;
+    GXV_Validator     valid = &validrec;
+    FT_Bytes          p     = table;
+    FT_Bytes          limit = 0;
+    FT_ULong          version;
+    FT_ULong          nChains;
+    FT_ULong          i;
+
+
+    valid->root = ftvalid;
+    valid->face = face;
+
+    FT_TRACE3(( "validating `morx' table\n" ));
+    GXV_INIT;
+
+    GXV_LIMIT_CHECK( 4 + 4 );
+    version = FT_NEXT_ULONG( p );
+    nChains = FT_NEXT_ULONG( p );
+
+    if ( version != 0x00020000UL )
+      FT_INVALID_FORMAT;
+
+    for ( i = 0; i < nChains; i++ )
+    {
+      GXV_TRACE(( "validating chain %d/%d\n", i + 1, nChains ));
+      GXV_32BIT_ALIGNMENT_VALIDATE( p - table );
+      gxv_morx_chain_validate( p, limit, valid );
+      p += valid->subtable_length;
+    }
+
+    FT_TRACE4(( "\n" ));
+  }
+
+
+/* END */
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@@
+
+
+1.1.115.1
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@@
+
+
+1.1.115.2
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 2
+/*  Copyright 2005, 2008 by                                                */
+/*  suzuki toshiya, Masatake YAMATO, Red Hat K.K.,                         */
+d71 2
+a72 2
+      FT_ULong  type;
+      FT_ULong  rest;
+d132 1
+a132 1
+    if ( nSubtables >= 0x10000L )
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2005-2016 by                                                 */
+d45 1
+a45 1
+                               GXV_Validator  gxvalid )
+d60 2
+a68 2
+      GXV_Validate_Func  func;
+
+a70 1
+#ifdef GXV_LOAD_UNUSED_VARS
+a71 1
+#endif
+a78 1
+#ifdef GXV_LOAD_UNUSED_VARS
+a79 3
+#else
+      p += 4;
+#endif
+d90 1
+a90 1
+                                  gxvalid );
+d95 1
+a95 1
+      if ( !func )
+d98 1
+a98 1
+      func( p, p + rest, gxvalid );
+a99 1
+      /* TODO: subFeatureFlags should be unique in a table? */
+d103 1
+a103 1
+    gxvalid->subtable_length = (FT_ULong)( p - table );
+d112 1
+a112 1
+                           GXV_Validator  gxvalid )
+a114 1
+#ifdef GXV_LOAD_UNUSED_VARS
+a115 1
+#endif
+a123 1
+#ifdef GXV_LOAD_UNUSED_VARS
+a124 3
+#else
+    p += 4;
+#endif
+d130 2
+a131 2
+    gxv_mort_featurearray_validate( p, limit, nFeatureFlags, gxvalid );
+    p += gxvalid->subtable_length;
+d137 1
+a137 3
+                                 (FT_UShort)nSubtables, gxvalid );
+
+    gxvalid->subtable_length = chainLength;
+d139 1
+a139 1
+    /* TODO: defaultFlags should be compared with the flags in tables */
+d150 2
+a151 2
+    GXV_ValidatorRec  gxvalidrec;
+    GXV_Validator     gxvalid = &gxvalidrec;
+d159 2
+a160 2
+    gxvalid->root = ftvalid;
+    gxvalid->face = face;
+d176 2
+a177 2
+      gxv_morx_chain_validate( p, limit, gxvalid );
+      p += gxvalid->subtable_length;
+@
+
+

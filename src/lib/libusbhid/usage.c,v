@@ -1,0 +1,580 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_10:1.2.0.4
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2005.10.08.20.49.40;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	772d434830f52525;
+
+1.1
+date	2005.02.05.17.26.15;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.26.15;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.56.28;	author tg;	state Exp;
+branches;
+next	;
+commitid	560042e0092f571e;
+
+
+desc
+@@
+
+
+1.2
+log
+@NULL != 0, bad bad openbse
+@
+text
+@/**	$MirOS$ */
+/*	$OpenBSD: usage.c,v 1.7 2005/02/10 22:24:52 matthieu Exp $	*/
+/*	$NetBSD: usage.c,v 1.1 2001/12/28 17:45:27 augustss Exp $	*/
+
+/*
+ * Copyright (c) 1999 Lennart Augustsson <augustss@@netbsd.org>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <ctype.h>
+#include <err.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
+#include "usbhid.h"
+
+#define _PATH_HIDTABLE "/usr/share/misc/usb_hid_usages"
+
+struct usage_in_page {
+	const char *name;
+	int usage;
+};
+
+static struct usage_page {
+	const char *name;
+	int usage;
+	struct usage_in_page *page_contents;
+	int pagesize, pagesizemax;
+} *pages;
+static int npages, npagesmax;
+
+#ifdef DEBUG
+void
+dump_hid_table(void)
+{
+	int i, j;
+
+	for (i = 0; i < npages; i++) {
+		printf("%d\t%s\n", pages[i].usage, pages[i].name);
+		for (j = 0; j < pages[i].pagesize; j++) {
+			printf("\t%d\t%s\n", pages[i].page_contents[j].usage,
+			    pages[i].page_contents[j].name);
+		}
+	}
+}
+#endif
+
+void
+hid_init(const char *hidname)
+{
+	if (hid_start(hidname) == -1)
+		errx(1, "hid_init: failed");
+}
+
+int
+hid_start(const char *hidname)
+{
+	char line[100], name[100], *p, *n;
+	struct usage_page *curpage = NULL;
+	int lineno, no;
+	FILE *f;
+
+	if (hidname == NULL)
+		hidname = _PATH_HIDTABLE;
+
+	f = fopen(hidname, "r");
+	if (f == NULL)
+		return -1;
+	for (lineno = 1; ; lineno++) {
+		if (fgets(line, sizeof line, f) == NULL)
+			break;
+		if (line[0] == '#')
+			continue;
+		for (p = line; *p && isspace(*p); p++)
+			;
+		if (!*p)
+			continue;
+		if (sscanf(line, " * %99[^\n]", name) == 1)
+			no = -1;
+		else if (sscanf(line, " 0x%x %99[^\n]", &no, name) != 2 &&
+		    sscanf(line, " %d %99[^\n]", &no, name) != 2) {
+			warnx("file %s, line %d, syntax error",
+			    hidname, lineno);
+			errno = EINVAL;
+			goto fail;
+		}
+		for (p = name; *p; p++)
+			if (isspace(*p) || *p == '.')
+				*p = '_';
+		n = strdup(name);
+		if (!n)
+			goto fail;
+
+		if (isspace(line[0])) {
+			if (!curpage) {
+				warnx("file %s, line %d, syntax error",
+				    hidname, lineno);
+				free(n);
+				errno = EINVAL;
+				goto fail;
+			}
+			if (curpage->pagesize >= curpage->pagesizemax) {
+				void *new;
+				int len;
+
+				len = curpage->pagesizemax + 10;
+				new = realloc(curpage->page_contents,
+				    len * sizeof (struct usage_in_page));
+				if (!new) {
+					free(curpage->page_contents);
+					curpage->page_contents = NULL;
+					free(n);
+					goto fail;
+				}
+				curpage->pagesizemax = len;
+				curpage->page_contents = new;
+			}
+			curpage->page_contents[curpage->pagesize].name = n;
+			curpage->page_contents[curpage->pagesize].usage = no;
+			curpage->pagesize++;
+		} else {
+			if (npages >= npagesmax) {
+				int len;
+				void *new;
+
+				if (pages == NULL) {
+					len = 5;
+					pages = calloc(len,
+					    sizeof (struct usage_page));
+				} else {
+					len = npagesmax * 5;
+					new = realloc(pages,
+					    len * sizeof (struct usage_page));
+					if (!new)
+						goto fail;
+					pages = new;
+					bzero(pages + npagesmax,
+					    npagesmax - npagesmax);
+				}
+				if (!pages) {
+					free(n);
+					goto fail;
+				}
+				npagesmax = len;
+			}
+			curpage = &pages[npages++];
+			curpage->name = n;
+			curpage->usage = no;
+			curpage->pagesize = 0;
+			curpage->pagesizemax = 10;
+			curpage->page_contents = malloc(curpage->pagesizemax *
+			    sizeof (struct usage_in_page));
+			if (!curpage->page_contents)
+				goto fail;
+		}
+	}
+	fclose(f);
+#ifdef DEBUG
+	dump_hid_table();
+#endif
+	return 0;
+
+fail:
+	if (f)
+		fclose(f);
+	for (no = 0; no++; no < npages) {
+		if (pages[no].name)
+			free((char *)pages[no].name);
+		if (pages[no].page_contents)
+			free((char *)pages[no].page_contents);
+	}
+	free(pages);
+	pages = NULL;
+	npages = 0;
+	npagesmax = 0;
+	return -1;
+}
+
+const char *
+hid_usage_page(int i)
+{
+	static char b[10];
+	int k;
+
+	if (!pages)
+		return NULL;
+
+	for (k = 0; k < npages; k++)
+		if (pages[k].usage == i)
+			return pages[k].name;
+	snprintf(b, sizeof b, "0x%04x", i);
+	return b;
+}
+
+const char *
+hid_usage_in_page(unsigned int u)
+{
+	int i = HID_USAGE(u), j, k, us;
+	int page = HID_PAGE(u);
+	static char b[100];
+
+	for (k = 0; k < npages; k++)
+		if (pages[k].usage == page)
+			break;
+	if (k >= npages)
+		goto bad;
+	for (j = 0; j < pages[k].pagesize; j++) {
+		us = pages[k].page_contents[j].usage;
+		if (us == -1) {
+			snprintf(b, sizeof b, "%s %d",
+			    pages[k].page_contents[j].name, i);
+			return b;
+		}
+		if (us == i)
+			return pages[k].page_contents[j].name;
+	}
+ bad:
+	snprintf(b, sizeof b, "0x%04x", i);
+	return b;
+}
+
+int
+hid_parse_usage_page(const char *name)
+{
+	int k;
+
+	if (!pages)
+		return 0;
+
+	for (k = 0; k < npages; k++)
+		if (strcmp(pages[k].name, name) == 0)
+			return pages[k].usage;
+	return -1;
+}
+
+/* XXX handle hex */
+int
+hid_parse_usage_in_page(const char *name)
+{
+	const char *sep;
+	unsigned int l;
+	int k, j;
+
+	sep = strchr(name, ':');
+	if (sep == NULL)
+		return -1;
+	l = sep - name;
+	for (k = 0; k < npages; k++)
+		if (strncmp(pages[k].name, name, l) == 0)
+			goto found;
+	return -1;
+ found:
+	sep++;
+	for (j = 0; j < pages[k].pagesize; j++)
+		if (strcmp(pages[k].page_contents[j].name, sep) == 0)
+			return (pages[k].usage << 16) |
+			    pages[k].page_contents[j].usage;
+	return -1;
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+a2 1
+/*	$OpenBSD: usage.c,v 1.5 2003/12/20 18:33:41 matthieu Exp $	*/
+d36 1
+d65 1
+a65 1
+			       pages[i].page_contents[j].name);
+d74 10
+a84 4
+	char line[100], name[100], *p, *n;
+	int no;
+	int lineno;
+	struct usage_page *curpage = 0;
+d86 1
+a86 1
+	if (hidname == 0)
+d91 1
+a91 1
+		err(1, "%s", hidname);
+d104 6
+a109 3
+			 sscanf(line, " %d %99[^\n]", &no, name) != 2)
+			errx(1, "file %s, line %d, syntax error",
+			     hidname, lineno);
+d115 2
+a116 1
+			err(1, "strdup");
+d118 7
+a124 3
+			if (!curpage)
+				errx(1, "file %s, line %d, syntax error",
+				     hidname, lineno);
+d126 14
+a139 7
+				curpage->pagesizemax += 10;
+				curpage->page_contents =
+					realloc(curpage->page_contents,
+						curpage->pagesizemax *
+						sizeof (struct usage_in_page));
+				if (!curpage->page_contents)
+					err(1, "realloc");
+d146 7
+a152 4
+				if (pages == 0) {
+					npagesmax = 5;
+					pages = malloc(npagesmax *
+						  sizeof (struct usage_page));
+d154 8
+a161 4
+					npagesmax += 5;
+					pages = realloc(pages,
+						   npagesmax *
+						   sizeof (struct usage_page));
+d163 5
+a167 2
+				if (!pages)
+					err(1, "alloc");
+d174 2
+a175 3
+			curpage->page_contents =
+				malloc(curpage->pagesizemax *
+				       sizeof (struct usage_in_page));
+d177 1
+a177 1
+				err(1, "malloc");
+d184 16
+d209 1
+a209 1
+		errx(1, "no hid table");
+d221 1
+a222 1
+	int i = HID_USAGE(u);
+a223 1
+	int j, k, us;
+d233 1
+a233 1
+			snprintf(b, sizeof b, "%s %d", 
+d251 1
+a251 1
+		errx(1, "no hid table");
+d264 1
+a265 1
+	unsigned int l;
+d279 3
+a281 2
+			return (pages[k].usage << 16) | pages[k].page_contents[j].usage;
+	return (-1);
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: usage.c,v 1.7 2005/02/10 22:24:52 matthieu Exp $	*/
+a34 1
+#include <errno.h>
+d63 1
+a63 1
+			    pages[i].page_contents[j].name);
+d72 1
+a72 7
+	if (hid_start(hidname) == -1)
+		errx(1, "hid_init: failed");
+}
+
+int
+hid_start(const char *hidname)
+{
+d74 3
+a76 3
+	struct usage_page *curpage = NULL;
+	int lineno, no;
+	FILE *f;
+d78 1
+a78 1
+	if (hidname == NULL)
+d83 1
+a83 1
+		return -1;
+d96 3
+a98 6
+		    sscanf(line, " %d %99[^\n]", &no, name) != 2) {
+			warnx("file %s, line %d, syntax error",
+			    hidname, lineno);
+			errno = EINVAL;
+			goto fail;
+		}
+d104 1
+a104 2
+			goto fail;
+
+d106 3
+a108 7
+			if (!curpage) {
+				warnx("file %s, line %d, syntax error",
+				    hidname, lineno);
+				free(n);
+				errno = EINVAL;
+				goto fail;
+			}
+d110 7
+a116 14
+				void *new;
+				int len;
+
+				len = curpage->pagesizemax + 10;
+				new = realloc(curpage->page_contents,
+				    len * sizeof (struct usage_in_page));
+				if (!new) {
+					free(curpage->page_contents);
+					curpage->page_contents = NULL;
+					free(n);
+					goto fail;
+				}
+				curpage->pagesizemax = len;
+				curpage->page_contents = new;
+d123 4
+a126 7
+				int len;
+				void *new;
+
+				if (pages == NULL) {
+					len = 5;
+					pages = calloc(len,
+					    sizeof (struct usage_page));
+d128 4
+a131 8
+					len = npagesmax * 5;
+					new = realloc(pages,
+					    len * sizeof (struct usage_page));
+					if (!new)
+						goto fail;
+					pages = new;
+					bzero(pages + npagesmax,
+					    npagesmax - npagesmax);
+d133 2
+a134 5
+				if (!pages) {
+					free(n);
+					goto fail;
+				}
+				npagesmax = len;
+d141 3
+a143 2
+			curpage->page_contents = malloc(curpage->pagesizemax *
+			    sizeof (struct usage_in_page));
+d145 1
+a145 1
+				goto fail;
+a151 16
+	return 0;
+
+fail:
+	if (f)
+		fclose(f);
+	for (no = 0; no++; no < npages) {
+		if (pages[no].name)
+			free((char *)pages[no].name);
+		if (pages[no].page_contents)
+			free((char *)pages[no].page_contents);
+	}
+	free(pages);
+	pages = NULL;
+	npages = 0;
+	npagesmax = 0;
+	return -1;
+d161 1
+a161 1
+		return NULL;
+a172 1
+	int i = HID_USAGE(u), j, k, us;
+d174 1
+d176 1
+d186 1
+a186 1
+			snprintf(b, sizeof b, "%s %d",
+d204 1
+a204 1
+		return NULL;
+d217 1
+a218 1
+	int k, j;
+d232 2
+a233 3
+			return (pages[k].usage << 16) |
+			    pages[k].page_contents[j].usage;
+	return -1;
+@
+

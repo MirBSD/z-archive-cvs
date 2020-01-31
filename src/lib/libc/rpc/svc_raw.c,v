@@ -1,0 +1,294 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	MIRBSD_10:1.1.1.3.0.4
+	MIRBSD_10_BASE:1.1.1.3
+	MIRBSD_9_BASE:1.1.1.3
+	MIRBSD_8:1.1.1.3.0.2
+	MIRBSD_8_BASE:1.1.1.3
+	cvs-200509212000:1.1.1.3
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.02.05.17.24.51;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.51;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.52.53;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2005.09.21.20.34.25;	author tg;	state Exp;
+branches;
+next	;
+commitid	20cd4331c3c732a2;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
+ * unrestricted use provided that this legend is included on all tape
+ * media and as a part of the software program in whole or part.  Users
+ * may copy or modify Sun RPC without charge, but are not authorized
+ * to license or distribute it to anyone else except as part of a product or
+ * program developed by the user.
+ * 
+ * SUN RPC IS PROVIDED AS IS WITH NO WARRANTIES OF ANY KIND INCLUDING THE
+ * WARRANTIES OF DESIGN, MERCHANTIBILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE, OR ARISING FROM A COURSE OF DEALING, USAGE OR TRADE PRACTICE.
+ * 
+ * Sun RPC is provided with no support and without any obligation on the
+ * part of Sun Microsystems, Inc. to assist in its use, correction,
+ * modification or enhancement.
+ * 
+ * SUN MICROSYSTEMS, INC. SHALL HAVE NO LIABILITY WITH RESPECT TO THE
+ * INFRINGEMENT OF COPYRIGHTS, TRADE SECRETS OR ANY PATENTS BY SUN RPC
+ * OR ANY PART THEREOF.
+ * 
+ * In no event will Sun Microsystems, Inc. be liable for any lost revenue
+ * or profits or other special, indirect and consequential damages, even if
+ * Sun has been advised of the possibility of such damages.
+ * 
+ * Sun Microsystems, Inc.
+ * 2550 Garcia Avenue
+ * Mountain View, California  94043
+ */
+
+#if defined(LIBC_SCCS) && !defined(lint)
+static char *rcsid = "$OpenBSD: svc_raw.c,v 1.6 2001/09/15 13:51:01 deraadt Exp $";
+#endif /* LIBC_SCCS and not lint */
+
+/*
+ * svc_raw.c,   This a toy for simple testing and timing.
+ * Interface to create an rpc client and server in the same UNIX process.
+ * This lets us similate rpc and get rpc (round trip) overhead, without
+ * any interference from the kernal.
+ *
+ * Copyright (C) 1984, Sun Microsystems, Inc.
+ */
+
+#include <stdlib.h>
+#include <rpc/rpc.h>
+
+
+/*
+ * This is the "network" that we will be moving data over
+ */
+static struct svcraw_private {
+	char	_raw_buf[UDPMSGSIZE];
+	SVCXPRT	server;
+	XDR	xdr_stream;
+	char	verf_body[MAX_AUTH_BYTES];
+} *svcraw_private;
+
+static bool_t		svcraw_recv();
+static enum xprt_stat 	svcraw_stat();
+static bool_t		svcraw_getargs();
+static bool_t		svcraw_reply();
+static bool_t		svcraw_freeargs();
+static void		svcraw_destroy();
+
+static struct xp_ops server_ops = {
+	svcraw_recv,
+	svcraw_stat,
+	svcraw_getargs,
+	svcraw_reply,
+	svcraw_freeargs,
+	svcraw_destroy
+};
+
+SVCXPRT *
+svcraw_create()
+{
+	struct svcraw_private *srp = svcraw_private;
+
+	if (srp == NULL) {
+		srp = (struct svcraw_private *)calloc(1, sizeof (*srp));
+		if (srp == NULL)
+			return (NULL);
+	}
+	srp->server.xp_sock = 0;
+	srp->server.xp_port = 0;
+	srp->server.xp_ops = &server_ops;
+	srp->server.xp_verf.oa_base = srp->verf_body;
+	xdrmem_create(&srp->xdr_stream, srp->_raw_buf, UDPMSGSIZE, XDR_FREE);
+	return (&srp->server);
+}
+
+static enum xprt_stat
+svcraw_stat()
+{
+
+	return (XPRT_IDLE);
+}
+
+/* ARGSUSED */
+static bool_t
+svcraw_recv(xprt, msg)
+	SVCXPRT *xprt;
+	struct rpc_msg *msg;
+{
+	struct svcraw_private *srp = svcraw_private;
+	XDR *xdrs;
+
+	if (srp == NULL)
+		return (0);
+	xdrs = &srp->xdr_stream;
+	xdrs->x_op = XDR_DECODE;
+	XDR_SETPOS(xdrs, 0);
+	if (! xdr_callmsg(xdrs, msg))
+	       return (FALSE);
+	return (TRUE);
+}
+
+/* ARGSUSED */
+static bool_t
+svcraw_reply(xprt, msg)
+	SVCXPRT *xprt;
+	struct rpc_msg *msg;
+{
+	struct svcraw_private *srp = svcraw_private;
+	XDR *xdrs;
+
+	if (srp == NULL)
+		return (FALSE);
+	xdrs = &srp->xdr_stream;
+	xdrs->x_op = XDR_ENCODE;
+	XDR_SETPOS(xdrs, 0);
+	if (! xdr_replymsg(xdrs, msg))
+	       return (FALSE);
+	(void)XDR_GETPOS(xdrs);  /* called just for overhead */
+	return (TRUE);
+}
+
+/* ARGSUSED */
+static bool_t
+svcraw_getargs(xprt, xdr_args, args_ptr)
+	SVCXPRT *xprt;
+	xdrproc_t xdr_args;
+	caddr_t args_ptr;
+{
+	struct svcraw_private *srp = svcraw_private;
+
+	if (srp == NULL)
+		return (FALSE);
+	return ((*xdr_args)(&srp->xdr_stream, args_ptr));
+}
+
+/* ARGSUSED */
+static bool_t
+svcraw_freeargs(xprt, xdr_args, args_ptr)
+	SVCXPRT *xprt;
+	xdrproc_t xdr_args;
+	caddr_t args_ptr;
+{ 
+	struct svcraw_private *srp = svcraw_private;
+	XDR *xdrs;
+
+	if (srp == NULL)
+		return (FALSE);
+	xdrs = &srp->xdr_stream;
+	xdrs->x_op = XDR_FREE;
+	return ((*xdr_args)(xdrs, args_ptr));
+} 
+
+static void
+svcraw_destroy()
+{
+}
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d31 1
+a31 1
+static char *rcsid = "$OpenBSD: svc_raw.c,v 1.7 2005/04/01 07:44:04 otto Exp $";
+d57 6
+a62 8
+static bool_t		svcraw_recv(SVCXPRT *xprt, struct rpc_msg *msg);
+static enum xprt_stat 	svcraw_stat(SVCXPRT *xprt);
+static bool_t		svcraw_getargs(SVCXPRT *xprt, xdrproc_t xdr_args,
+			    caddr_t args_ptr);
+static bool_t		svcraw_reply(SVCXPRT *xprt, struct rpc_msg *msg);
+static bool_t		svcraw_freeargs(SVCXPRT *xprt, xdrproc_t xdr_args,
+			    caddr_t args_ptr);
+static void		svcraw_destroy(SVCXPRT *xprt);
+d74 1
+a74 1
+svcraw_create(void)
+a90 1
+/* ARGSUSED */
+d92 1
+a92 1
+svcraw_stat(SVCXPRT *xprt)
+d100 3
+a102 1
+svcraw_recv(SVCXPRT *xprt, struct rpc_msg *msg)
+d119 3
+a121 1
+svcraw_reply(SVCXPRT *xprt, struct rpc_msg *msg)
+d139 4
+a142 1
+svcraw_getargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
+d153 4
+a156 1
+svcraw_freeargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
+a167 1
+/* ARGSUSED */
+d169 1
+a169 1
+svcraw_destroy(SVCXPRT *xprt)
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD's libc as of today, minus some of the locale stuff,
+and with brk malloc instead of mmap malloc
+@
+text
+@a0 1
+/*	$OpenBSD: svc_raw.c,v 1.9 2005/08/08 08:05:35 espie Exp $ */
+d30 4
+d38 1
+a38 1
+ * any interference from the kernel.
+@
+
+

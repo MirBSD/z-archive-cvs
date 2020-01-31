@@ -1,0 +1,496 @@
+head	1.11;
+access;
+symbols
+	joe-3_1jupp38:1.11
+	joe-3_1jupp37:1.11
+	joe-3_1jupp36:1.11
+	joe-3_1jupp35:1.11
+	joe-3_1jupp34:1.11
+	joe-3_1jupp33:1.11
+	joe-3_1jupp32:1.11
+	joe-3_1jupp31:1.7
+	joe-3_1jupp30:1.7
+	joe-3_1jupp29:1.7
+	joe-3_1jupp28:1.7
+	joe-3_1jupp27:1.7
+	joe-3_1jupp26:1.6
+	joe-3_1jupp25:1.6
+	joe-3_1jupp24:1.6
+	joe-3_1jupp23:1.6
+	joe-3_1jupp22:1.5
+	joe-3_1jupp21:1.5
+	joe-3_1jupp20:1.5
+	joe-3_1jupp19:1.5
+	joe-3_1jupp18:1.5
+	joe-3_1jupp17:1.5
+	joe-3_1jupp16:1.5
+	joe-3_1jupp15:1.5
+	joe-3_1jupp14:1.5
+	joe-3_1jupp12:1.4
+	joe-3_1jupp11:1.2
+	joe-3_1jupp10:1.2
+	joe-3_1jupp9:1.2
+	joe-3_1jupp8:1.1.201.1
+	joe-3_1jupp7:1.1.201.1
+	joe-3_1jupp6:1.1.201.1
+	joe-3_1jupp5:1.1.201.1
+	joe-3_1jupp4:1.1.201.1
+	joe-3_1:1.1.201.1
+	tg:1.1.201;
+locks; strict;
+comment	@ * @;
+
+
+1.11
+date	2017.12.06.23.02.05;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1005A2876FC4FFE7EF5;
+
+1.10
+date	2017.12.04.21.46.21;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1005A25C24467DA873B;
+
+1.9
+date	2017.12.04.21.42.57;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1005A25C17A68900142;
+
+1.8
+date	2017.12.02.02.07.31;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1005A220AD65C90E687;
+
+1.7
+date	2014.06.26.18.15.17;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10053AC63477EECD548;
+
+1.6
+date	2012.11.10.16.22.20;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100509E7F54463BB427;
+
+1.5
+date	2010.04.08.17.54.19;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004BBE184A709C3F5C;
+
+1.4
+date	2009.10.18.13.13.53;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004ADB14A0676179D0;
+
+1.3
+date	2009.10.06.10.18.03;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004ACB196976E3E916;
+
+1.2
+date	2008.05.13.13.08.25;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100482992BC01EE89A1;
+
+1.1
+date	2005.02.05.00.37.28;	author tg;	state Exp;
+branches
+	1.1.201.1;
+next	;
+
+1.1.201.1
+date	2005.02.05.00.37.28;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.11
+log
+@lots of fixes related to prototyping
+@
+text
+@#include "config.h"
+
+__RCSID("$MirOS: contrib/code/jupp/selinux.c,v 1.10 2017/12/04 21:46:21 tg Exp $");
+
+#if defined(HAVE_SELINUX_CONTEXT_H) && defined(HAVE_SELINUX_SELINUX_H) && \
+    defined(HAVE_SELINUX_FUN)
+#define WITH_SELINUX
+#else
+#undef WITH_SELINUX
+#endif
+
+#include "utils.h"
+
+#ifdef WITH_SELINUX
+#include <selinux/selinux.h>
+static int selinux_enabled = -1;
+#include <err.h>
+#include <errno.h>
+#include <string.h>
+#endif
+
+int
+copy_security_context(const char *from_file, const char *to_file)
+{
+	int status = 0;
+#ifdef WITH_SELINUX
+	security_context_t from_context;
+	security_context_t to_context;
+
+	if (selinux_enabled == -1)
+		selinux_enabled = (is_selinux_enabled() > 0);
+
+	if (!selinux_enabled)
+		return 0;
+
+	if (getfilecon(from_file, &from_context) < 0) {
+		/*
+		 * If the filesystem doesn't support extended
+		 * attributes, the original had no special security
+		 * context and the target cannot have one either.
+		 */
+		if (errno == EOPNOTSUPP)
+			return 0;
+
+		warn("Could not get security context for %s",
+		      from_file);
+		return 1;
+	}
+
+	if (getfilecon(to_file, &to_context) < 0) {
+		warn("Could not get security context for %s",
+		    to_file);
+		freecon(from_context);
+		return 1;
+	}
+
+	if (strcmp(from_context, to_context) != 0) {
+		if (setfilecon(to_file, from_context) < 0) {
+			warn(
+			      "Could not set security context for %s",
+			      to_file);
+			status = 1;
+		}
+	}
+
+	freecon(to_context);
+	freecon(from_context);
+#endif
+	return status;
+}
+@
+
+
+1.10
+log
+@add --disable-selinux, for wbx
+@
+text
+@d3 1
+a3 1
+__RCSID("$MirOS: contrib/code/jupp/selinux.c,v 1.8 2017/12/02 02:07:31 tg Exp $");
+d12 2
+a13 4
+/*
+ * Example code to show how to copy the security context from one file to
+ * another.
+ */
+a70 89
+
+int
+match_default_security_context(const char *from_file)
+{
+#ifdef WITH_SELINUX
+	security_context_t scontext;
+
+	if (selinux_enabled == -1)
+		selinux_enabled = (is_selinux_enabled() > 0);
+
+	if (!selinux_enabled)
+		return 0;
+
+	if (getfilecon(from_file, &scontext) < 0) {
+		/*
+		 * If the filesystem doesn't support extended
+		 * attributes, the original had no special security
+		 * context and the target cannot have one either.
+		 */
+		if (errno == EOPNOTSUPP)
+			return 0;
+
+		warn("Could not get security context for %s",
+		      from_file);
+		return 1;
+	}
+
+	if (setfscreatecon(scontext) < 0) {
+		warn(
+		      "Could not set default security context for %s",
+		      from_file);
+		freecon(scontext);
+		return 1;
+	}
+	freecon(scontext);
+#endif
+	return 0;
+}
+
+
+int
+reset_default_security_context(void)
+{
+#ifdef WITH_SELINUX
+	if (selinux_enabled == -1)
+		selinux_enabled = (is_selinux_enabled() > 0);
+
+	if (!selinux_enabled)
+		return 0;
+
+	if (setfscreatecon(0) < 0) {
+		warn("Could not reset default security context");
+		return 1;
+	}
+#endif
+	return 0;
+}
+
+
+int
+output_security_context(char *from_file)
+{
+#ifdef WITH_SELINUX
+	security_context_t scontext;
+
+	if (selinux_enabled == -1)
+		selinux_enabled = (is_selinux_enabled() > 0);
+	if (!selinux_enabled)
+		return 0;
+
+	if (getfilecon(from_file, &scontext) < 0) {
+		/*
+		 * If the filesystem doesn't support extended
+		 * attributes, the original had no special security
+		 * context and the target cannot have one either.
+		 */
+		if (errno == EOPNOTSUPP)
+			return 0;
+
+		warn("Could not get security context for %s",
+		      from_file);
+		return 1;
+	}
+
+	fprintf(stderr, "%s Security Context %s", from_file, scontext);
+	freecon(scontext);
+#endif
+	return 0;
+}
+@
+
+
+1.9
+log
+@WTF?
+@
+text
+@d5 2
+a6 1
+#if defined(HAVE_SELINUX_HDR) && defined(HAVE_SELINUX_FUN)
+@
+
+
+1.8
+log
+@overhaul the way includes work; give jupp proper RCS IDs
+
+(after all, empty source files are UB; win32.c is likely)
+@
+text
+@d3 1
+a3 1
+__RCSID("$MirOS$");
+a51 5
+#ifdef _
+		MSG_PUTS(_("\nCould not get security context for "));
+		msg_outtrans(to_file);
+		msg_putchar('\n');
+#else
+a53 1
+#endif
+@
+
+
+1.7
+log
+@make everything with a main() compile, too
+@
+text
+@d1 3
+a3 1
+/* $MirOS: contrib/code/jupp/selinux.c,v 1.6 2012/11/10 16:22:20 tg Exp $ */
+a4 1
+#include "config.h"
+@
+
+
+1.6
+log
+@bionic has -lselinux but not glibc error()
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/jupp/selinux.c,v 1.5 2010/04/08 17:54:19 tg Exp $ */
+d155 1
+a155 1
+		
+a165 31
+
+#if 0
+
+/*
+  Test program compile using the following command
+  cc -o t t.c -DWITH_SELINUX -DTEST -lselinux
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+main(int argc, char **argv)
+{
+
+	printf("%d: %s\n", argc, argv[1]);
+	if (argc == 3) {
+		copy_security_context(argv[1], argv[2]);
+		output_security_context(argv[2]);
+	}
+	if (argc == 2) {
+		FILE *fd;
+		char *temp;
+		match_default_security_context(argv[1]);
+		mkstemp(temp);
+		printf("temp=%s", temp);
+		fd = fopen(temp, "w");
+		fclose(fd);
+		output_security_context(temp);
+		reset_default_security_context();
+	}
+}
+#endif
+@
+
+
+1.5
+log
+@pass __CRAZY=Yes except -Wno-missing-field-initializers -Wno-cast-qual
+ -Wno-strict-prototypes -Wno-missing-prototypes -Wno-missing-declarations
+ -Wno-unused
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/jupp/selinux.c,v 1.4 2009/10/18 13:13:53 tg Exp $ */
+d17 1
+a18 1
+#include <error.h>
+d45 1
+a45 1
+		error(0, errno, "Could not get security context for %s",
+d56 1
+a56 1
+		error(0, errno, "Could not get security context for %s",
+d65 1
+a65 1
+			error(0, errno,
+d99 1
+a99 1
+		error(0, errno, "Could not get security context for %s",
+d105 1
+a105 1
+		error(0, errno,
+d128 1
+a128 1
+		error(0, errno, "Could not reset default security context");
+d156 1
+a156 1
+		error(0, errno, "Could not get security context for %s",
+d161 1
+a161 1
+	error(0, 0, "%s Security Context %s", from_file, scontext);
+@
+
+
+1.4
+log
+@fix on non-SELinux systems
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/jupp/selinux.c,v 1.3 2009/10/06 10:18:03 tg Exp $ */
+d118 1
+a118 1
+reset_default_security_context()
+@
+
+
+1.3
+log
+@tentatively fix SELinux support
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/jupp/selinux.c,v 1.2 2008/05/13 13:08:25 tg Exp $ */
+a16 1
+#endif
+d20 1
+@
+
+
+1.2
+log
+@prepare for joe-3.1jupp9:
+* sync NEWS
+* bump vsn in configure.ac
+* tag all files with RCS ID
+* sync licence template
+@
+text
+@d1 9
+a9 1
+/* $MirOS$ */
+d19 2
+d51 1
+d55 4
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+@
+
+
+1.1.201.1
+log
+@JOE's Own Editor 3.1
+@
+text
+@@

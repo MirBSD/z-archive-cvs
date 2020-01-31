@@ -1,0 +1,624 @@
+head	1.9;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.9
+date	2017.07.27.12.52.03;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1005979E1F241E96342;
+
+1.8
+date	2017.06.08.14.53.58;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1005939651C4D751F4B;
+
+1.7
+date	2016.06.06.23.40.06;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100575609EC6043CB4F;
+
+1.6
+date	2016.06.06.14.17.40;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100575585366AA6F58C;
+
+1.5
+date	2013.02.18.10.16.34;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005121FF931843333A;
+
+1.4
+date	2013.01.14.15.08.40;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10050F41F6B4715AB81;
+
+1.3
+date	2013.01.14.14.32.54;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10050F4170F4FCC36C0;
+
+1.2
+date	2012.10.05.22.55.09;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100506F6564304035A2;
+
+1.1
+date	2012.10.05.22.21.36;	author tg;	state Exp;
+branches;
+next	;
+commitid	100506F5D880F583C38;
+
+
+desc
+@@
+
+
+1.9
+log
+@• em dash is 2014 surrounded by 200A (not 2009)
+• deprecation notice for mailfrom.php, replaced by hello-php-world
+@
+text
+@<?php
+/*-
+ * $MirOS: contrib/hosted/tg/mailfrom.php,v 1.8 2017/06/08 14:53:58 tg Exp $
+ *-
+ * Copyright © 2012, 2013, 2016, 2017
+ *	mirabilos <t.glaser@@tarent.de>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un‐
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person’s immediate fault when using the work as intended.
+ *-
+ * The correct way to send eMail from PHP. Do not bug the poor people
+ * in #sendmail on Freenode IRC if you’re doing it wrong.
+ *
+ * Usage example:
+ *	$res = util_sendmail('noreply@@example.com',
+ *	    array('user@@example.com', 'ceo@@example.com'),
+ *	    array(
+ *		'From' => 'Webserver <noreply@@example.com>',
+ *		'To' => 'Random L. User <user@@example.com>',
+ *		'Cc' => 'PHB <ceo@@example.com>',
+ *		'Subject' => 'Testmail äöüß € ☺',
+ *		'MIME-Version' => '1.0',
+ *		'Content-Type' => 'text/plain; charset=UTF-8',
+ *		'Content-Transfer-Encoding' => '8bit',
+ *	    ), array(
+ *		'Hello!',
+ *		'',
+ *		'This is a test äöüß € ☺ mail.',
+ *	    ));
+ *
+ *	echo $res[0] ? "Success\n" : ("Failure\n" . print_r($res, true));
+ *
+ * The body could have been passed as a string (with lines separated
+ * by \n, \r\n or even \r) instead of as an array of lines, as well.
+ * This is probably most useful when the text gets passed from other
+ * code. For headers, this is not supported due to the mandatory en‐
+ * coding of them this function performs, by the standards.
+ *
+ * Suggested further reading:
+ * ‣ http://me.veekun.com/blog/2012/04/09/php-a-fractal-of-bad-design/
+ * ‣ http://gynvael.coldwind.pl/?id=492
+ * ‣ https://en.wikiquote.org/wiki/Rasmus_Lerdorf
+ * ‣ http://www.rfc-editor.org/rfc/rfc822.txt and its successors
+ * ‣ http://www.cs.tut.fi/~jkorpela/rfc/822addr.html
+ *
+ * This is now superseded by common utilities in hello-php-world:
+ * ‣ https://evolvis.org/plugins/scmgit/cgi-bin/gitweb.cgi?p=shellsnippets/hello-php-world.git;a=blob;f=common/util.php;hb=HEAD
+ */
+
+/**
+ * util_sendmail_encode_hdr() - Encode an eMail header
+ *
+ * This function wraps the PHP mb_encode_mimeheader function,
+ * permitting short headers (like Content-Type usually is) to
+ * pass through unencoded (because if Content-Type is encoded
+ * at least Postfix does not handle the eMail correctly).
+ *
+ * This is still not correct; see RFC2047 §5 for where these
+ * are actually allowed, but it suffices for now, especially
+ * as we currently have no way to line-fold non-MIME headers.
+ * This should eventually be improved.
+ *
+ * @@param	string	$fname
+ *		The name of the eMail header to use, which
+ *		must not preg_match /[^!-9;-~]/ (not checked)
+ * @@param	string	$ftext
+ *		The unstructured field text to encode
+ * @@result	string
+ *		The encoded header field, without trailing CRLF
+ */
+function util_sendmail_encode_hdr($fname, $ftext) {
+	$old_encoding = mb_internal_encoding();
+	mb_internal_encoding('UTF-8');
+	$rv = util_sendmail_encode_hdr_int($fname, $ftext);
+	mb_internal_encoding($old_encoding);
+	return $rv;
+}
+function util_sendmail_encode_hdr_int($fname, $ftext) {
+	$field = $fname . ': ' . $ftext;
+	if (strlen($field) > 78 || preg_match('/[^ -~]/', $field) !== 0) {
+		$field = mb_encode_mimeheader($field, 'UTF-8', 'Q', "\015\012");
+	}
+	return $field;
+}
+
+/**
+ * util_sendmail_valid() - Check an eMail address for validity
+ *
+ * Check address syntax. For the localpart, we only
+ * permit a dot-atom, not a quoted-string or any of
+ * the obsolete forms, here, and the domain is mat‐
+ * ched using the modern standard, allowing numeric
+ * labels as per most zones including the root zone
+ * but otherwise per DNS/DARPA. Domain literals and
+ * whitespace are not permitted. The domain part is
+ * expected to be an FQDN resolving to an MX, AAAA,
+ * or A RR — the caller can verify that itself once
+ * validity is established by a truthy return value
+ * from this function.
+ *
+ * Eventually, we likely will want for a full RFC-compliant
+ * address parser. Actually, a full header and message parser
+ * and generator will be necessary to implement all details.
+ *
+ * @@param	string	$adr
+ *		The eMail address to check for validity
+ * @@result	1 if the address is a valid RFC822 addr-spec
+ *		and RFC5321 Mailbox, 0 if not, or false
+ *		if an error occurred (same as preg_match)
+ */
+function util_sendmail_valid($adr) {
+	/*
+	 * note for regex reuse: to check a domain, take the part
+	 * after the ‘@@’ but prepend: _^(?=.{1,255}\$)
+	 */
+	return preg_match(
+	    "_^(?=.{1,254}\$)(?=.{1,64}@@)[-!#-'*+/-9=?A-Z^-~]+(\.[-!#-'*+/-9=?A-Z^-~]+)*@@[0-9A-Za-z]([-0-9A-Za-z]{0,61}[0-9A-Za-z])?(\.[0-9A-Za-z]([-0-9A-Za-z]{0,61}[0-9A-Za-z])?)*\$_",
+	    $adr);
+}
+
+/**
+ * util_sendmail() - Send an eMail
+ *
+ * This function should be used in place of the PHP mail() function.
+ *
+ * Note: the header handling here permits only one instance of each
+ * header and does not guarantee retaining ordering. This suffices
+ * for (simple) creation of new messages but is not enough to process
+ * existing eMails due to e.g. the Received header trace requirement.
+ * Note further that, in PHP, the order is retained in an array.
+ *
+ * @@param	string	$sender
+ *		The eMail address to use as envelope sender
+ * @@param	string|array(string+)	$recip
+ *		The eMail address(es) of the recipient(s),
+ *		that is, To: Cc: and Bcc:
+ * @@param	array(string=>string*)	$hdrs
+ *		The headers, unencoded, as UTF-8 key/value pairs
+ * @@param	string|array(string*)	$body
+ *		The eMail body. If an array, line by line.
+ * @@result	array(bool, int, string)
+ *		On success, the first element is true, otherwise
+ *		false, and the second element contains an error
+ *		code (from the operating system, usually 0‥255,
+ *		or PHP, usually -1) or false, then the third
+ *		element contains a hint what went wrong.
+ */
+function util_sendmail($sender, $recip, $hdrs, $body) {
+	$old_encoding = mb_internal_encoding();
+	if (!mb_internal_encoding('UTF-8')) {
+		mb_internal_encoding($old_encoding);
+		return array(false, false,
+		    'mb_internal_encoding("UTF-8") failed');
+	}
+
+	/* check eMail addresses and shellescape them */
+
+	$adrs = array();
+	if (!is_array($recip)) {
+		$recip = array($recip);
+	}
+	/* the first address only */
+	$what = 'Sender';
+	array_unshift($recip, $sender);
+	foreach ($recip as $i => $adr) {
+		if (!is_string($adr)) {
+			mb_internal_encoding($old_encoding);
+			return array(false, false,
+			    $what . ' not a string');
+		}
+		$adr = trim($adr);
+		/* check addr-spec syntax */
+		if (!util_sendmail_valid($adr)) {
+			mb_internal_encoding($old_encoding);
+			return array(false, false,
+			    $what . ' not a valid address: ' . $adr);
+		}
+		$recip[$i] = $adr;
+		/* quote for shell */
+		$adrs[] = "'" . str_replace("'", "'\\''", $adr) . "'";
+		/* all but the first address */
+		$what = 'Recipient';
+	}
+
+	/* handle the mail header */
+
+	$msg = array();
+	$hdr_seen = array();
+	foreach ($hdrs as $k => $v) {
+		/* do some checks */
+		if (strlen(($k = strval($k))) < 1) {
+			mb_internal_encoding($old_encoding);
+			return array(false, false,
+			    'Empty header found');
+		}
+		if (preg_match('/[^!-9;-~]/', $k) !== 0) {
+			mb_internal_encoding($old_encoding);
+			return array(false, false,
+			    'Illegal char in header: ' . $k);
+		}
+		/* lowercase, independent on the locale */
+		$kf = strtr($k,
+		    'QWERTYUIOPASDFGHJKLZXCVBNM',
+		    'qwertyuiopasdfghjklzxcvbnm');
+		if (isset($hdr_seen[$kf])) {
+			mb_internal_encoding($old_encoding);
+			return array(false, false,
+			    'Duplicate header: ' . $kf);
+		}
+		$hdr_seen[$kf] = true;
+		/* append to message */
+		$msg[] = util_sendmail_encode_hdr_int($k, $v);
+	}
+
+	/* handle mandatory header fields */
+
+	if (!isset($hdr_seen['date'])) {
+		/* date() is locale-independent and thus correct here */
+		$msg[] = util_sendmail_encode_hdr_int('Date', date('r'));
+	}
+	if (!isset($hdr_seen['from'])) {
+		$msg[] = util_sendmail_encode_hdr_int('From', $recip[0]);
+	}
+
+	$msg[] = '';
+
+	/* take care of the body */
+
+	if (!is_array($body)) {
+		/*
+		 * First, convert all ASCII CR-LF pairs into ASCII LF, so we
+		 * then have either Unix (one LF) or Macintosh (one CR) line
+		 * endings; any extra CR characters are retained (payload).
+		 */
+		$body = str_replace("\015\012", "\012", strval($body));
+		/*
+		 * Now, detect which of the two line ending conventions are
+		 * actually used after the above, with preference on Unix (or
+		 * converted ASCII) over Macintosh: split by ASCII LF if one
+		 * exists, otherwise split by CR; in either case, ignore the
+		 * other completely (i.e. either CR or LF may be contained in
+		 * the result array’s string members except if $mop is set
+		 * (default) which removes them for consistency and security).
+		 */
+		$macintosh = strpos($body, "\012") === false;
+		if (!$macintosh)
+			$body = str_replace("\015", '', $body);
+		$nlstr = $macintosh ? "\015" : "\012";
+		/* remove trailing newline */
+		if (($trailing = $body[strlen($body) - 1] === $nlstr))
+			$body = substr($body, 0, -1);
+		$body = explode($nlstr, $body);
+	}
+
+	foreach ($body as $v) {
+		$v = strval($v);
+		if (strlen($v) > 998) {
+			mb_internal_encoding($old_encoding);
+			return array(false, false,
+			    'Line too long: ' . $v);
+		}
+		$msg[] = $v;
+	}
+
+	/* generate a mail message from that */
+
+	$body = implode("\015\012", $msg) . "\015\012";
+
+	/* this is only safe because $adrs is shell-escaped */
+	$adrs[0] = '/usr/sbin/sendmail -f' . $adrs[0] . ' -i --';
+	$cmd = implode(' ', $adrs);
+
+	if (($p = popen($cmd, 'wb')) === false) {
+		mb_internal_encoding($old_encoding);
+		return array(false, false,
+		    "Could not popen($cmd, 'wb');");
+	}
+	if (!($i = fwrite($p, $body)) || $i != strlen($body)) {
+		mb_internal_encoding($old_encoding);
+		return array(false, false,
+		    "Could not fwrite: $i");
+	}
+	mb_internal_encoding($old_encoding);
+	if (($i = pclose($p)) == -1 ||
+	    (function_exists('pcntl_wifexited') && !pcntl_wifexited($i))) {
+		return array(false, -1);
+	}
+	if (!function_exists('pcntl_wexitstatus')) {
+		return array(true, -1);
+	}
+	$i = pcntl_wexitstatus($i);
+	return array(!$i, $i);
+}
+@
+
+
+1.8
+log
+@update from hello-php-world
+@
+text
+@d3 1
+a3 1
+ * $MirOS: contrib/hosted/tg/mailfrom.php,v 1.5 2013/02/18 10:16:34 tg Exp $
+d57 3
+d109 1
+a109 1
+ * or A RR — the caller can verify that itself once
+@
+
+
+1.7
+log
+@more limits on size
+@
+text
+@d5 1
+a5 1
+ * Copyright © 2012, 2013, 2016
+d67 5
+d106 1
+a106 1
+ * or A RR – the caller can verify that itself once
+d110 4
+d135 6
+d240 3
+a242 2
+		 * First, convert all CR-LF pairs into LF, so we
+		 * then have either Unix or Macintosh line endings
+d246 7
+a252 3
+		 * Now, detect which of these two, and convert them
+		 * to array lines. Preference on Unix (or converted
+		 * ASCII) over Macintosh: if an LF is found, use it.
+d254 8
+a261 2
+		$body = explode(strpos($body, "\012") === false ?
+		    "\015" : "\012", $body);
+@
+
+
+1.6
+log
+@• optimise: use single quotes for strings whenever possible
+• factor out into util_sendmail_valid() the eMail address validation code
+• document it correctly as validating an addr-spec (including a new link
+  for reference) sans DNS check
+• implement RFC822 “domain” (host part) length limitation,
+  with credits to Natureshadow <d.george@@tarent.de>
+• encode From header, when added, correctly
+• document correctness of date() call and $cmd construction
+• don’t open-code implode() for $cmd construction
+
+This commit sponsored by tarent solutions GmbH sbe znxvat zr fhssre
+@
+text
+@d106 3
+a108 2
+ *		The eMail address (RFC822 addr-spec) to check
+ * @@result	1 if the addr-spec is valid, 0 if not, false
+d112 4
+d117 1
+a117 1
+	    "_^[-!#-'*+/-9=?A-Z^-~]+(\.[-!#-'*+/-9=?A-Z^-~]+)*@@(?=.{1,255}\$)[0-9A-Za-z]([-0-9A-Za-z]{0,61}[0-9A-Za-z])?(\.[0-9A-Za-z]([-0-9A-Za-z]{0,61}[0-9A-Za-z])?)*\$_",
+@
+
+
+1.5
+log
+@make util_sendmail_encode_hdr reusable in other projects
+@
+text
+@d3 1
+a3 1
+ * $MirOS: contrib/hosted/tg/mailfrom.php,v 1.4 2013/01/14 15:08:40 tg Exp $
+d5 2
+a6 2
+ * Copyright © 2012, 2013
+ *	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+d56 1
+d77 1
+a77 1
+	mb_internal_encoding("UTF-8");
+d83 1
+a83 1
+	$field = $fname . ": " . $ftext;
+d85 1
+a85 1
+		$field = mb_encode_mimeheader($field, "UTF-8", "Q", "\015\012");
+d91 26
+d139 1
+a139 1
+	if (!mb_internal_encoding("UTF-8")) {
+d152 1
+a152 1
+	$what = "Sender";
+d154 1
+a154 1
+	foreach ($recip as $adr) {
+d158 1
+a158 1
+			    $what . " not a string");
+d160 3
+a162 12
+		/*
+		 * Check address syntax. For the localpart, we only
+		 * permit a dot-atom, not a quoted-string or any of
+		 * the obsolete forms, here, and the domain is mat‐
+		 * ched using the modern standard, allowing numeric
+		 * labels as per most zones including the root zone
+		 * but otherwise per DNS/DARPA. Domain literals and
+		 * whitespace are not permitted.
+		 */
+		if (!preg_match(
+		    "_^[-!#-'*+/-9=?A-Z^-~]+(\.[-!#-'*+/-9=?A-Z^-~]+)*@@[0-9A-Za-z]([-0-9A-Za-z]{0,61}[0-9A-Za-z])?(\.[0-9A-Za-z]([-0-9A-Za-z]{0,61}[0-9A-Za-z])?)*\$_",
+		    $adr)) {
+d165 1
+a165 1
+			    $what . " not a valid address: " . $adr);
+d167 1
+d171 1
+a171 1
+		$what = "Recipient";
+d183 1
+a183 1
+			    "Empty header found");
+d188 1
+a188 1
+			    "Illegal char in header: " . $k);
+d192 2
+a193 2
+		    "QWERTYUIOPASDFGHJKLZXCVBNM",
+		    "qwertyuiopasdfghjklzxcvbnm");
+d197 1
+a197 1
+			    "Duplicate header: " . $kf);
+d207 2
+a208 1
+		$msg[] = util_sendmail_encode_hdr_int("Date", date("r"));
+d211 1
+a211 1
+		$msg[] = util_sendmail_encode_hdr_int("From", $adrs[0]);
+d214 1
+a214 1
+	$msg[] = "";
+d238 1
+a238 1
+			    "Line too long: " . $v);
+d247 3
+a249 5
+	$cmd = "/usr/sbin/sendmail -f" . $adrs[0] . " -i --";
+	array_shift($adrs);
+	foreach ($adrs as $adr) {
+		$cmd .= " " . $adr;
+	}
+d251 1
+a251 1
+	if (($p = popen($cmd, "wb")) === false) {
+d263 1
+a263 1
+	    (function_exists("pcntl_wifexited") && !pcntl_wifexited($i))) {
+d266 1
+a266 1
+	if (!function_exists("pcntl_wexitstatus")) {
+@
+
+
+1.4
+log
+@Postfix breaks when Content-Type is encoded (=?UTF-8?Q?charset=3DUTF-=38?=)
+@
+text
+@d3 1
+a3 1
+ * $MirOS: contrib/hosted/tg/mailfrom.php,v 1.2 2012/10/05 22:55:09 tg Exp $
+d75 7
+d182 1
+a182 1
+		$msg[] = util_sendmail_encode_hdr($k, $v);
+d188 1
+a188 1
+		$msg[] = util_sendmail_encode_hdr("Date", date("r"));
+d191 1
+a191 1
+		$msg[] = util_sendmail_encode_hdr("From", $adrs[0]);
+@
+
+
+1.3
+log
+@• link to Gynvael Coldwind’s article on PHP, too
+• add RFC5322-mandated fields, if not there yet
+@
+text
+@d59 24
+d175 1
+a175 2
+		$msg[] = mb_encode_mimeheader($k . ": " . $v,
+		    "UTF-8", "Q", "\015\012");
+d181 1
+a181 1
+		$msg[] = "Date: " . date("r");
+d184 1
+a184 2
+		$msg[] = mb_encode_mimeheader("From: " . $adrs[0],
+		    "UTF-8", "Q", "\015\012");
+@
+
+
+1.2
+log
+@add examples and suggested reading links
+
+(the best way to not annoy people in #sendmail on Freenode IRC
+is probably to stay away from PHP, and, unless you know what
+you are doing, eMail in general)
+@
+text
+@d3 1
+a3 1
+ * $MirOS: contrib/hosted/tg/mailfrom.php,v 1.1 2012/10/05 22:21:36 tg Exp $
+d5 1
+a5 1
+ * Copyright © 2012
+d53 1
+d155 10
+@
+
+
+1.1
+log
+@The One True Way to not annoy people in #sendmail^W^W^W^W^Wsend eMail from PHP (tested with “PHP 5.0.5 with Hardening-Patch 0.4.8” on MirBSD and “PHP 5.4.4-7” on Debian)
+@
+text
+@d3 1
+a3 1
+ * $MirOS$
+d25 30
+@
+

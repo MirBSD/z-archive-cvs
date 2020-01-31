@@ -1,0 +1,705 @@
+head	1.6;
+access;
+symbols
+	MIRBSD_10:1.5.0.4
+	MIRBSD_10_BASE:1.5
+	MIRBSD_9_BASE:1.5
+	MIRBSD_8:1.5.0.2
+	MIRBSD_8_BASE:1.5
+	binutils-20050707:1.1.101.4
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2009.02.24.20.00.59;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10049A452070D530FC6;
+
+1.5
+date	2005.07.07.16.23.07;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	689b42cd56cee80e;
+
+1.4
+date	2005.06.05.21.24.35;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	3cf942a36d3e2dcb;
+
+1.3
+date	2005.03.28.21.25.10;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.03.13.16.06.59;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.00.18.52;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.02.05.00.18.52;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.03.28.15.40.34;	author tg;	state Exp;
+branches;
+next	1.1.101.3;
+
+1.1.101.3
+date	2005.05.14.16.49.33;	author tg;	state Exp;
+branches;
+next	1.1.101.4;
+commitid	3a6242862a097542;
+
+1.1.101.4
+date	2005.07.07.15.31.40;	author tg;	state Exp;
+branches;
+next	;
+commitid	598542cd4ac1fb58;
+
+
+desc
+@@
+
+
+1.6
+log
+@remove gcc 2.95 support code left over from ocvs
+@
+text
+@/* $MirOS: src/gnu/usr.bin/binutils/include/hashtab.h,v 1.5 2005/07/07 16:23:07 tg Exp $ */
+
+/* An expandable hash tables datatype.  
+   Copyright (C) 1999, 2000, 2002, 2003, 2004 Free Software Foundation, Inc.
+   Contributed by Vladimir Makarov (vmakarov@@cygnus.com).
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.  */
+
+/* This package implements basic hash table functionality.  It is possible
+   to search for an entry, create an entry and destroy an entry.
+
+   Elements in the table are generic pointers.
+
+   The size of the table is not fixed; if the occupancy of the table
+   grows too high the hash table will be expanded.
+
+   The abstract data implementation is based on generalized Algorithm D
+   from Knuth's book "The art of computer programming".  Hash table is
+   expanded by creation of new hash table and transferring elements from
+   the old table to the new table.  */
+
+#ifndef __HASHTAB_H__
+#define __HASHTAB_H__
+
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
+
+#include "ansidecl.h"
+
+#ifndef GTY
+#define GTY(X)
+#endif
+
+/* The type for a hash code.  */
+typedef unsigned int hashval_t;
+
+/* Callback function pointer types.  */
+
+/* Calculate hash of a table entry.  */
+typedef hashval_t (*htab_hash) (const void *);
+
+/* Compare a table entry with a possible entry.  The entry already in
+   the table always comes first, so the second element can be of a
+   different type (but in this case htab_find and htab_find_slot
+   cannot be used; instead the variants that accept a hash value
+   must be used).  */
+typedef int (*htab_eq) (const void *, const void *);
+
+/* Cleanup function called whenever a live element is removed from
+   the hash table.  */
+typedef void (*htab_del) (void *);
+  
+/* Function called by htab_traverse for each live element.  The first
+   arg is the slot of the element (which can be passed to htab_clear_slot
+   if desired), the second arg is the auxiliary pointer handed to
+   htab_traverse.  Return 1 to continue scan, 0 to stop.  */
+typedef int (*htab_trav) (void **, void *);
+
+/* Memory-allocation function, with the same functionality as calloc().
+   Iff it returns NULL, the hash table implementation will pass an error
+   code back to the user, so if your code doesn't handle errors,
+   best if you use xcalloc instead.  */
+typedef void *(*htab_alloc) (size_t, size_t);
+
+/* We also need a free() routine.  */
+typedef void (*htab_free) (void *);
+
+/* Memory allocation and deallocation; variants which take an extra
+   argument.  */
+typedef void *(*htab_alloc_with_arg) (void *, size_t, size_t);
+typedef void (*htab_free_with_arg) (void *, void *);
+
+/* This macro defines reserved value for empty table entry.  */
+
+#define HTAB_EMPTY_ENTRY    ((PTR) 0)
+
+/* This macro defines reserved value for table entry which contained
+   a deleted element. */
+
+#define HTAB_DELETED_ENTRY  ((PTR) 1)
+
+/* Hash tables are of the following type.  The structure
+   (implementation) of this type is not needed for using the hash
+   tables.  All work with hash table should be executed only through
+   functions mentioned below.  The size of this structure is subject to
+   change.  */
+
+struct htab GTY(())
+{
+  /* Pointer to hash function.  */
+  htab_hash hash_f;
+
+  /* Pointer to comparison function.  */
+  htab_eq eq_f;
+
+  /* Pointer to cleanup function.  */
+  htab_del del_f;
+
+  /* Table itself.  */
+  void ** GTY ((use_param (""), length ("%h.size"))) entries;
+
+  /* Current size (in entries) of the hash table.  */
+  size_t size;
+
+  /* Current number of elements including also deleted elements.  */
+  size_t n_elements;
+
+  /* Current number of deleted elements in the table.  */
+  size_t n_deleted;
+
+  /* The following member is used for debugging. Its value is number
+     of all calls of `htab_find_slot' for the hash table. */
+  unsigned int searches;
+
+  /* The following member is used for debugging.  Its value is number
+     of collisions fixed for time of work with the hash table. */
+  unsigned int collisions;
+
+  /* Pointers to allocate/free functions.  */
+  htab_alloc alloc_f;
+  htab_free free_f;
+
+  /* Alternate allocate/free functions, which take an extra argument.  */
+  void * GTY((skip (""))) alloc_arg;
+  htab_alloc_with_arg alloc_with_arg_f;
+  htab_free_with_arg free_with_arg_f;
+
+  /* Current size (in entries) of the hash table, as an index into the
+     table of primes.  */
+  unsigned int size_prime_index;
+};
+
+typedef struct htab *htab_t;
+
+/* An enum saying whether we insert into the hash table or not.  */
+enum insert_option {NO_INSERT, INSERT};
+
+/* The prototypes of the package functions. */
+
+extern htab_t	htab_create_alloc  (size_t, htab_hash,
+                                    htab_eq, htab_del,
+                                    htab_alloc, htab_free);
+
+extern htab_t	htab_create_alloc_ex (size_t, htab_hash,
+                                      htab_eq, htab_del,
+                                      void *, htab_alloc_with_arg,
+                                      htab_free_with_arg);
+
+/* Backward-compatibility functions.  */
+extern htab_t htab_create (size_t, htab_hash, htab_eq, htab_del);
+extern htab_t htab_try_create (size_t, htab_hash, htab_eq, htab_del);
+
+extern void	htab_set_functions_ex (htab_t, htab_hash,
+                                       htab_eq, htab_del,
+                                       void *, htab_alloc_with_arg,
+                                       htab_free_with_arg);
+
+extern void	htab_delete (htab_t);
+extern void	htab_empty (htab_t);
+
+extern void *	htab_find (htab_t, const void *);
+extern void **	htab_find_slot (htab_t, const void *, enum insert_option);
+extern void *	htab_find_with_hash (htab_t, const void *, hashval_t);
+extern void **	htab_find_slot_with_hash (htab_t, const void *,
+					  hashval_t, enum insert_option);
+extern void	htab_clear_slot	(htab_t, void **);
+extern void	htab_remove_elt	(htab_t, void *);
+extern void	htab_remove_elt_with_hash (htab_t, void *, hashval_t);
+
+extern void	htab_traverse (htab_t, htab_trav, void *);
+extern void	htab_traverse_noresize (htab_t, htab_trav, void *);
+
+extern size_t	htab_size (htab_t);
+extern size_t	htab_elements (htab_t);
+extern double	htab_collisions	(htab_t);
+
+/* A hash function for pointers.  */
+extern htab_hash htab_hash_pointer;
+
+/* An equality function for pointers.  */
+extern htab_eq htab_eq_pointer;
+
+/* A hash function for null-terminated strings.  */
+extern hashval_t htab_hash_string (const void *);
+
+/* An iterative hash function for arbitrary data.  */
+extern hashval_t iterative_hash (const void *, size_t, hashval_t);
+/* Shorthand for hashing something with an intrinsic size.  */
+#define iterative_hash_object(OB,INIT) iterative_hash (&OB, sizeof (OB), INIT)
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+
+#endif /* __HASHTAB_H */
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/gnu/usr.bin/binutils/include/hashtab.h,v 1.4 2005/06/05 21:24:35 tg Exp $ */
+d3 2
+a4 3
+/* An expandable hash tables datatype.
+   Copyright (C) 1999, 2000, 2002, 2003, 2004, 2005
+   Free Software Foundation, Inc.
+d65 1
+a65 1
+
+a203 62
+#ifdef	__OLD_HASHTAB
+/* Old hash table functions, kept for compatibility.  */
+
+/* The hash table element is represented by the following type.  */
+
+typedef const void *hash_table_entry_t;
+
+/* Hash tables are of the following type.  The structure
+   (implementation) of this type is not needed for using the hash
+   tables.  All work with hash table should be executed only through
+   functions mentioned below.  */
+
+typedef struct
+{
+  /* Current size (in entries) of the hash table */
+  size_t size;
+  /* Current number of elements including also deleted elements */
+  size_t number_of_elements;
+  /* Current number of deleted elements in the table */
+  size_t number_of_deleted_elements;
+  /* The following member is used for debugging. Its value is number
+     of all calls of `find_hash_table_entry' for the hash table. */
+  int searches;
+  /* The following member is used for debugging.  Its value is number
+     of collisions fixed for time of work with the hash table. */
+  int collisions;
+  /* Pointer to function for evaluation of hash value (any unsigned value).
+     This function has one parameter of type hash_table_entry_t. */
+  unsigned (*hash_function) PARAMS ((hash_table_entry_t));
+  /* Pointer to function for test on equality of hash table elements (two
+     parameter of type hash_table_entry_t. */
+  int (*eq_function) PARAMS ((hash_table_entry_t, hash_table_entry_t));
+  /* Table itself */
+  hash_table_entry_t *entries;
+} *hash_table_t;
+
+
+/* The prototypes of the package functions.  */
+
+extern hash_table_t create_hash_table
+  PARAMS ((size_t, unsigned (*) (hash_table_entry_t),
+	   int (*) (hash_table_entry_t, hash_table_entry_t)));
+
+extern void delete_hash_table PARAMS ((hash_table_t));
+
+extern void empty_hash_table PARAMS ((hash_table_t));
+
+extern hash_table_entry_t *find_hash_table_entry
+  PARAMS ((hash_table_t, hash_table_entry_t, int));
+
+extern void remove_element_from_hash_table_entry PARAMS ((hash_table_t,
+							  hash_table_entry_t));
+
+extern size_t hash_table_size PARAMS ((hash_table_t));
+
+extern size_t hash_table_elements_number PARAMS ((hash_table_t));
+
+extern int hash_table_collisions PARAMS ((hash_table_t));
+
+extern int all_hash_table_collisions PARAMS ((void));
+#endif	/* __OLD_HASHTAB */
+
+@
+
+
+1.4
+log
+@first attempt to merge binutils and gdb of today (minus generated files)
+XXX elf.sc yields equivalent results for MirOS; double-check against
+XXX other platforms. this merger took as much time as ALL the other files!
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/gnu/usr.bin/binutils/include/hashtab.h,v 1.3 2005/03/28 21:25:10 tg Exp $ */
+d87 9
+@
+
+
+1.3
+log
+@merge include and libiberty
+new minor; 0 tests failed
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/gnu/usr.bin/binutils/include/hashtab.h,v 1.2 2005/03/13 16:06:59 tg Exp $ */
+d3 1
+a3 1
+/* An expandable hash tables datatype.  
+d20 1
+a20 1
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+d66 1
+a66 1
+  
+d77 1
+a77 1
+typedef PTR (*htab_alloc) (size_t, size_t);
+d80 1
+a80 1
+typedef void (*htab_free) (PTR);
+d84 1
+a84 1
+typedef PTR (*htab_alloc_with_arg) (void *, size_t, size_t);
+d105 1
+a105 1
+  PTR * GTY ((use_param (""), length ("%h.size"))) entries;
+d129 1
+a129 1
+  PTR GTY((skip (""))) alloc_arg;
+d151 1
+a151 1
+                                      PTR, htab_alloc_with_arg,
+d160 1
+a160 1
+                                       PTR, htab_alloc_with_arg,
+d166 5
+a170 6
+extern PTR	htab_find (htab_t, const void *);
+extern PTR     *htab_find_slot (htab_t, const void *, enum insert_option);
+extern PTR	htab_find_with_hash (htab_t, const void *, hashval_t);
+extern PTR     *htab_find_slot_with_hash (htab_t, const void *,
+                                          hashval_t,
+                                          enum insert_option);
+d189 1
+a189 1
+extern hashval_t htab_hash_string (const PTR);
+d192 1
+a192 1
+extern hashval_t iterative_hash (const PTR, size_t, hashval_t);
+@
+
+
+1.2
+log
+@merge binutils, minus generated files, plus generated+hacked files
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d54 1
+a54 1
+typedef hashval_t (*htab_hash) PARAMS ((const void *));
+d61 1
+a61 1
+typedef int (*htab_eq) PARAMS ((const void *, const void *));
+d65 1
+a65 1
+typedef void (*htab_del) PARAMS ((void *));
+d71 1
+a71 1
+typedef int (*htab_trav) PARAMS ((void **, void *));
+d77 1
+a77 1
+typedef PTR (*htab_alloc) PARAMS ((size_t, size_t));
+d80 1
+a80 1
+typedef void (*htab_free) PARAMS ((PTR));
+d84 2
+a85 2
+typedef PTR (*htab_alloc_with_arg) PARAMS ((void *, size_t, size_t));
+typedef void (*htab_free_with_arg) PARAMS ((void *, void *));
+d145 8
+a152 8
+extern htab_t	htab_create_alloc	PARAMS ((size_t, htab_hash,
+						 htab_eq, htab_del,
+						 htab_alloc, htab_free));
+
+extern htab_t	htab_create_alloc_ex	PARAMS ((size_t, htab_hash,
+						    htab_eq, htab_del,
+						    PTR, htab_alloc_with_arg,
+						    htab_free_with_arg));
+d155 2
+a156 2
+extern htab_t htab_create PARAMS ((size_t, htab_hash, htab_eq, htab_del));
+extern htab_t htab_try_create PARAMS ((size_t, htab_hash, htab_eq, htab_del));
+d158 24
+a181 26
+extern void	htab_set_functions_ex	PARAMS ((htab_t, htab_hash,
+						 htab_eq, htab_del,
+						 PTR, htab_alloc_with_arg,
+						 htab_free_with_arg));
+
+extern void	htab_delete	PARAMS ((htab_t));
+extern void	htab_empty	PARAMS ((htab_t));
+
+extern PTR	htab_find	PARAMS ((htab_t, const void *));
+extern PTR     *htab_find_slot	PARAMS ((htab_t, const void *,
+					 enum insert_option));
+extern PTR	htab_find_with_hash	  PARAMS ((htab_t, const void *,
+						   hashval_t));
+extern PTR     *htab_find_slot_with_hash  PARAMS ((htab_t, const void *,
+						   hashval_t,
+						   enum insert_option));
+extern void	htab_clear_slot	PARAMS ((htab_t, void **));
+extern void	htab_remove_elt	PARAMS ((htab_t, void *));
+extern void	htab_remove_elt_with_hash PARAMS ((htab_t, void *, hashval_t));
+
+extern void	htab_traverse	PARAMS ((htab_t, htab_trav, void *));
+extern void	htab_traverse_noresize	PARAMS ((htab_t, htab_trav, void *));
+
+extern size_t	htab_size	PARAMS ((htab_t));
+extern size_t	htab_elements	PARAMS ((htab_t));
+extern double	htab_collisions	PARAMS ((htab_t));
+d190 1
+a190 1
+extern hashval_t htab_hash_string PARAMS ((const PTR));
+d193 1
+a193 1
+extern hashval_t iterative_hash PARAMS ((const PTR, size_t, hashval_t));
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+d4 2
+a5 1
+   Copyright (C) 1999, 2000, 2002, 2003, 2004 Free Software Foundation, Inc.
+d105 1
+a105 1
+  PTR * GTY ((use_param, length ("%h.size"))) entries;
+d129 1
+a129 1
+  PTR GTY((skip)) alloc_arg;
+d199 62
+@
+
+
+1.1.101.1
+log
+@GNU binutils (CVS snapshot)
+@
+text
+@@
+
+
+1.1.101.2
+log
+@GNU binutils (CVS snapshot), without
+* top-level files
+* bfd/po
+* binutils/po
+* binutils/testsuite
+* gas/po
+* gas/testsuite
+* gprof
+* intl
+* ld/po
+* ld/testsuite
+* libiberty/config
+* opcodes/po
+* texinfo
+(same procedure as usual)
+@
+text
+@d51 1
+a51 1
+typedef hashval_t (*htab_hash) (const void *);
+d58 1
+a58 1
+typedef int (*htab_eq) (const void *, const void *);
+d62 1
+a62 1
+typedef void (*htab_del) (void *);
+d68 1
+a68 1
+typedef int (*htab_trav) (void **, void *);
+d74 1
+a74 1
+typedef PTR (*htab_alloc) (size_t, size_t);
+d77 1
+a77 1
+typedef void (*htab_free) (PTR);
+d81 2
+a82 2
+typedef PTR (*htab_alloc_with_arg) (void *, size_t, size_t);
+typedef void (*htab_free_with_arg) (void *, void *);
+d142 8
+a149 8
+extern htab_t	htab_create_alloc  (size_t, htab_hash,
+                                    htab_eq, htab_del,
+                                    htab_alloc, htab_free);
+
+extern htab_t	htab_create_alloc_ex (size_t, htab_hash,
+                                      htab_eq, htab_del,
+                                      PTR, htab_alloc_with_arg,
+                                      htab_free_with_arg);
+d152 2
+a153 2
+extern htab_t htab_create (size_t, htab_hash, htab_eq, htab_del);
+extern htab_t htab_try_create (size_t, htab_hash, htab_eq, htab_del);
+d155 26
+a180 24
+extern void	htab_set_functions_ex (htab_t, htab_hash,
+                                       htab_eq, htab_del,
+                                       PTR, htab_alloc_with_arg,
+                                       htab_free_with_arg);
+
+extern void	htab_delete (htab_t);
+extern void	htab_empty (htab_t);
+
+extern PTR	htab_find (htab_t, const void *);
+extern PTR     *htab_find_slot (htab_t, const void *, enum insert_option);
+extern PTR	htab_find_with_hash (htab_t, const void *, hashval_t);
+extern PTR     *htab_find_slot_with_hash (htab_t, const void *,
+                                          hashval_t,
+                                          enum insert_option);
+extern void	htab_clear_slot	(htab_t, void **);
+extern void	htab_remove_elt	(htab_t, void *);
+extern void	htab_remove_elt_with_hash (htab_t, void *, hashval_t);
+
+extern void	htab_traverse (htab_t, htab_trav, void *);
+extern void	htab_traverse_noresize (htab_t, htab_trav, void *);
+
+extern size_t	htab_size (htab_t);
+extern size_t	htab_elements (htab_t);
+extern double	htab_collisions	(htab_t);
+d189 1
+a189 1
+extern hashval_t htab_hash_string (const PTR);
+d192 1
+a192 1
+extern hashval_t iterative_hash (const PTR, size_t, hashval_t);
+@
+
+
+1.1.101.3
+log
+@GNU binutils, -current (mainline) snapshot as of today,
+with the usual bunch of files removed
+@
+text
+@d17 1
+a17 1
+Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.  */
+d74 1
+a74 1
+typedef void *(*htab_alloc) (size_t, size_t);
+d77 1
+a77 1
+typedef void (*htab_free) (void *);
+d81 1
+a81 1
+typedef void *(*htab_alloc_with_arg) (void *, size_t, size_t);
+d102 1
+a102 1
+  void ** GTY ((use_param, length ("%h.size"))) entries;
+d126 1
+a126 1
+  void * GTY((skip)) alloc_arg;
+d148 1
+a148 1
+                                      void *, htab_alloc_with_arg,
+d157 1
+a157 1
+                                       void *, htab_alloc_with_arg,
+d163 6
+a168 5
+extern void *	htab_find (htab_t, const void *);
+extern void **	htab_find_slot (htab_t, const void *, enum insert_option);
+extern void *	htab_find_with_hash (htab_t, const void *, hashval_t);
+extern void **	htab_find_slot_with_hash (htab_t, const void *,
+					  hashval_t, enum insert_option);
+d187 1
+a187 1
+extern hashval_t htab_hash_string (const void *);
+d190 1
+a190 1
+extern hashval_t iterative_hash (const void *, size_t, hashval_t);
+@
+
+
+1.1.101.4
+log
+@GNU binutils and debugger as of today
+@
+text
+@a83 9
+/* This macro defines reserved value for empty table entry.  */
+
+#define HTAB_EMPTY_ENTRY    ((PTR) 0)
+
+/* This macro defines reserved value for table entry which contained
+   a deleted element. */
+
+#define HTAB_DELETED_ENTRY  ((PTR) 1)
+
+@
+
+

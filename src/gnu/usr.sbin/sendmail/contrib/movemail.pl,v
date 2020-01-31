@@ -1,0 +1,190 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.1
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.1
+	cvs-20101220:1.1.1.1
+	mbsd-20101220:1.1.1.1.0.6
+	cvs-201012191730:1.1.1.1
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.1
+	cvs-200805071200:1.1.1.1
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	cvs-200803022030:1.1.1.1
+	cvs-200707152000:1.1.1.1
+	cvs-200704292000:1.1.1.1
+	cvs-200702051700:1.1.1.1
+	cvs-200609121900:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200606151800:1.1.1.1
+	cvs-200603231300:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2005.02.05.17.24.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.19;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.127.1
+date	2010.12.19.14.45.52;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004D0E1A94384778FD;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#!/usr/bin/perl -w
+#
+# Move old mail messages between queues by calling re-mqueue.pl.
+#
+# movemail.pl [config-script]
+#
+# Default config script is /usr/local/etc/movemail.conf.
+#
+# Graeme Hewson <graeme.hewson@@oracle.com>, June 2000
+#
+
+use strict;
+
+# Load external program as subroutine to avoid
+# compilation overhead on each call
+
+sub loadsub {
+    my $fn = shift
+    	or die "Filename not specified";
+    my $len = (stat($fn))[7]
+    	or die "Can't stat $fn: $!";
+    open PROG, "< $fn"
+    	or die "Can't open $fn: $!";
+    my $prog;
+    read PROG, $prog, $len
+    	or die "Can't read $fn: $!";
+    close PROG;
+    eval join "",
+	'return sub { my @@ARGV = @@_; $0 = $fn; no strict;',
+    	"$prog",
+	'};';
+}
+
+my $progname = $0;
+my $lastage = -1;
+my $LOCK_EX = 2;
+my $LOCK_NB = 4;
+
+# Load and eval config script
+
+my $conffile = shift || "/usr/local/etc/movemail.conf";
+my $len = (stat($conffile))[7]
+    or die "Can't stat $conffile: $!";
+open CONF, "< $conffile"
+    or die "Can't open $conffile: $!";
+my $conf;
+read CONF, $conf, $len
+    or die "Can't read $conffile: $!";
+close CONF;
+use vars qw(@@queues $subqbase @@ages $remqueue $lockfile);
+eval $conf;
+
+if ($#queues < 1) {
+    print "$progname: there must be at least two queues\n";
+    exit 1;
+}
+
+if ($#ages != ($#queues - 1)) {
+    print "$progname: wrong number of ages (should be one less than number of queues)\n";
+    exit 1;
+}
+
+# Get lock or exit quietly.  Useful when running from cron.
+
+if ($lockfile) {
+    open LOCK, ">>$lockfile"
+	or die "Can't open lock file: $!";
+    unless (flock LOCK, $LOCK_EX|$LOCK_NB) {
+	close LOCK;
+	exit 0;
+    }
+}
+
+my $remsub = loadsub($remqueue);
+
+# Go through directories in reverse order so as to check spool files only once
+
+for (my $n = $#queues - 1; $n >= 0; $n--) {
+    unless ($ages[$n] =~ /^\d+$/) {
+	print "$progname: invalid number $ages[$n] in ages array\n";
+	exit 1;
+    }
+    unless ($lastage < 0 || $ages[$n] < $lastage) {
+	print "$progname: age $lastage is not > previous value $ages[$n]\n";
+	exit 1;
+    }
+    $lastage = $ages[$n];
+    if ($subqbase) {
+	my $subdir;
+	opendir(DIR, $queues[$n])
+	    or die "Can't open $queues[$n]: $!";
+	foreach $subdir ( grep { /^$subqbase/ } readdir DIR) {
+	    &$remsub("$queues[$n]/$subdir", "$queues[$n+1]/$subdir",
+		$ages[$n]);
+	}
+	closedir(DIR);
+    } else {
+	# Not using subdirectories
+	&$remsub($queues[$n], $queues[$n+1], $ages[$n]);
+    }
+}
+
+if ($lockfile) {
+    unlink $lockfile;
+    close LOCK;
+}
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

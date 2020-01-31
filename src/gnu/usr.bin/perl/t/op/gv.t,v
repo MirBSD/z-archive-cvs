@@ -1,0 +1,472 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	OPENBSD_4_4:1.1.1.2
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200606302200:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200601311430:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2005.02.05.17.24.01;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.01;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.06.30.22.46.47;	author tg;	state Exp;
+branches;
+next	;
+commitid	10044A5A6F7276AA324;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#!./perl
+
+#
+# various typeglob tests
+#
+
+BEGIN {
+    chdir 't' if -d 't';
+    @@INC = '../lib';
+}   
+
+use warnings;
+
+print "1..48\n";
+
+# type coersion on assignment
+$foo = 'foo';
+$bar = *main::foo;
+$bar = $foo;
+print ref(\$bar) eq 'SCALAR' ? "ok 1\n" : "not ok 1\n";
+$foo = *main::bar;
+
+# type coersion (not) on misc ops
+
+if ($foo) {
+  print ref(\$foo) eq 'GLOB' ? "ok 2\n" : "not ok 2\n";
+}
+
+unless ($foo =~ /abcd/) {
+  print ref(\$foo) eq 'GLOB' ? "ok 3\n" : "not ok 3\n";
+}
+
+if ($foo eq '*main::bar') {
+  print ref(\$foo) eq 'GLOB' ? "ok 4\n" : "not ok 4\n";
+}
+
+# type coersion on substitutions that match
+$a = *main::foo;
+$b = $a;
+$a =~ s/^X//;
+print ref(\$a) eq 'GLOB' ? "ok 5\n" : "not ok 5\n";
+$a =~ s/^\*//;
+print $a eq 'main::foo' ? "ok 6\n" : "not ok 6\n";
+print ref(\$b) eq 'GLOB' ? "ok 7\n" : "not ok 7\n";
+
+# typeglobs as lvalues
+substr($foo, 0, 1) = "XXX";
+print ref(\$foo) eq 'SCALAR' ? "ok 8\n" : "not ok 8\n";
+print $foo eq 'XXXmain::bar' ? "ok 9\n" : "not ok 9\n";
+
+# returning glob values
+sub foo {
+  local($bar) = *main::foo;
+  $foo = *main::bar;
+  return ($foo, $bar);
+}
+
+($fuu, $baa) = foo();
+if (defined $fuu) {
+  print ref(\$fuu) eq 'GLOB' ? "ok 10\n" : "not ok 10\n";
+}
+
+if (defined $baa) {
+  print ref(\$baa) eq 'GLOB' ? "ok 11\n" : "not ok 11\n";
+}
+
+# nested package globs
+# NOTE:  It's probably OK if these semantics change, because the
+#        fact that %X::Y:: is stored in %X:: isn't documented.
+#        (I hope.)
+
+{ package Foo::Bar; no warnings 'once'; $test=1; }
+print exists $Foo::{'Bar::'} ? "ok 12\n" : "not ok 12\n";
+print $Foo::{'Bar::'} eq '*Foo::Bar::' ? "ok 13\n" : "not ok 13\n";
+
+# test undef operator clearing out entire glob
+$foo = 'stuff';
+@@foo = qw(more stuff);
+%foo = qw(even more random stuff);
+undef *foo;
+print +($foo || @@foo || %foo) ? "not ok" : "ok", " 14\n";
+
+# test warnings from assignment of undef to glob
+{
+    my $msg;
+    local $SIG{__WARN__} = sub { $msg = $_[0] };
+    use warnings;
+    *foo = 'bar';
+    print $msg ? "not ok" : "ok", " 15\n";
+    *foo = undef;
+    print $msg ? "ok" : "not ok", " 16\n";
+}
+
+# test *glob{THING} syntax
+$x = "ok 17\n";
+@@x = ("ok 18\n");
+%x = ("ok 19" => "\n");
+sub x { "ok 20\n" }
+print ${*x{SCALAR}}, @@{*x{ARRAY}}, %{*x{HASH}}, &{*x{CODE}};
+format x =
+ok 21
+.
+print ref *x{FORMAT} eq "FORMAT" ? "ok 21\n" : "not ok 21\n";
+*x = *STDOUT;
+print *{*x{GLOB}} eq "*main::STDOUT" ? "ok 22\n" : "not ok 22\n";
+print {*x{IO}} "ok 23\n";
+
+{
+	my $warn;
+	local $SIG{__WARN__} = sub {
+		$warn .= $_[0];
+	};
+	my $val = *x{FILEHANDLE};
+	print {*x{IO}} ($warn =~ /is deprecated/ ? "ok 24\n" : "not ok 24\n");
+	
+}
+
+# test if defined() doesn't create any new symbols
+
+{
+    my $test = 24;
+
+    my $a = "SYM000";
+    print "not " if defined *{$a};
+    ++$test; print "ok $test\n";
+
+    print "not " if defined @@{$a} or defined *{$a};
+    ++$test; print "ok $test\n";
+
+    print "not " if defined %{$a} or defined *{$a};
+    ++$test; print "ok $test\n";
+
+    print "not " if defined ${$a} or defined *{$a};
+    ++$test; print "ok $test\n";
+
+    print "not " if defined &{$a} or defined *{$a};
+    ++$test; print "ok $test\n";
+
+    *{$a} = sub { print "ok $test\n" };
+    print "not " unless defined &{$a} and defined *{$a};
+    ++$test; &{$a};
+}
+
+# although it *should* if you're talking about magicals
+
+{
+    my $test = 30;
+
+    my $a = "]";
+    print "not " unless defined ${$a};
+    ++$test; print "ok $test\n";
+    print "not " unless defined *{$a};
+    ++$test; print "ok $test\n";
+
+    $a = "1";
+    "o" =~ /(o)/;
+    print "not " unless ${$a};
+    ++$test; print "ok $test\n";
+    print "not " unless defined *{$a};
+    ++$test; print "ok $test\n";
+    $a = "2";
+    print "not " if ${$a};
+    ++$test; print "ok $test\n";
+    print "not " unless defined *{$a};
+    ++$test; print "ok $test\n";
+    $a = "1x";
+    print "not " if defined ${$a};
+    ++$test; print "ok $test\n";
+    print "not " if defined *{$a};
+    ++$test; print "ok $test\n";
+    $a = "11";
+    "o" =~ /(((((((((((o)))))))))))/;
+    print "not " unless ${$a};
+    ++$test; print "ok $test\n";
+    print "not " unless defined *{$a};
+    ++$test; print "ok $test\n";
+}
+
+
+# [ID 20010526.001] localized glob loses value when assigned to
+
+$j=1; %j=(a=>1); @@j=(1); local *j=*j; *j = sub{};
+
+print $j    == 1 ? "ok 41\n"  : "not ok 41\n";
+print $j{a} == 1 ? "ok 42\n"  : "not ok 42\n";
+print $j[0] == 1 ? "ok 43\n" : "not ok 43\n";
+
+# does pp_readline() handle glob-ness correctly?
+
+{
+    my $g = *foo;
+    $g = <DATA>;
+    print $g;
+}
+
+{
+    my $w = '';
+    $SIG{__WARN__} = sub { $w = $_[0] };
+    sub abc1 ();
+    local *abc1 = sub { };
+    print $w eq '' ? "ok 45\n" : "not ok 45\n# $w";
+    sub abc2 ();
+    local *abc2;
+    *abc2 = sub { };
+    print $w eq '' ? "ok 46\n" : "not ok 46\n# $w";
+    sub abc3 ();
+    *abc3 = sub { };
+    print $w =~ /Prototype mismatch/ ? "ok 47\n" : "not ok 47\n# $w";
+}
+
+{
+    # [17375] rcatline to formerly-defined undef was broken. Fixed in
+    # do_readline by checking SvOK. AMS, 20020918
+    my $x = "not ";
+    $x  = undef;
+    $x .= <DATA>;
+    print $x;
+}
+
+__END__
+ok 44
+ok 48
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import Perl 5.8.8 from OpenLSD
+@
+text
+@d10 1
+a10 1
+}
+d14 1
+a14 2
+require './test.pl';
+plan( tests => 61 );
+d20 1
+a20 1
+is(ref(\$bar), 'SCALAR');
+d25 3
+a27 2
+ok($foo);
+is(ref(\$foo), 'GLOB');
+d29 3
+a31 2
+unlike ($foo, qr/abcd/);
+is(ref(\$foo), 'GLOB');
+d33 3
+a35 2
+is($foo, '*main::bar');
+is(ref(\$foo), 'GLOB');
+d41 1
+a41 1
+is(ref(\$a), 'GLOB');
+d43 2
+a44 2
+is($a, 'main::foo');
+is(ref(\$b), 'GLOB');
+d48 2
+a49 2
+is(ref(\$foo), 'SCALAR');
+is($foo, 'XXXmain::bar');
+d59 3
+a61 2
+ok(defined $fuu);
+is(ref(\$fuu), 'GLOB');
+d63 3
+a65 3
+
+ok(defined $baa);
+is(ref(\$baa), 'GLOB');
+d73 2
+a74 3
+ok(exists $Foo::{'Bar::'});
+is($Foo::{'Bar::'}, '*Foo::Bar::');
+
+d81 1
+a81 3
+is ($foo, undef);
+is (scalar @@foo, 0);
+is (scalar %foo, 0);
+d83 1
+d85 1
+a85 2
+    # test warnings from assignment of undef to glob
+    my $msg = '';
+d89 1
+a89 1
+    is($msg, '');
+d91 1
+a91 1
+    like($msg, qr/Undefined value assigned to typeglob/);
+a93 1
+my $test = curr_test();
+d95 4
+a98 7
+$x = "ok $test\n";
+++$test;
+@@x = ("ok $test\n");
+++$test;
+%x = ("ok $test" => "\n");
+++$test;
+sub x { "ok $test\n" }
+a99 3
+# This needs to go here, after the print, as sub x will return the current
+# value of test
+++$test;
+d101 1
+a101 1
+XXX This text isn't used. Should it be?
+d103 1
+a103 3
+curr_test($test);
+
+is (ref *x{FORMAT}, "FORMAT");
+d105 2
+a106 1
+is (*{*x{GLOB}}, "*main::STDOUT");
+d109 7
+a115 13
+    my $test = curr_test();
+
+    print {*x{IO}} "ok $test\n";
+    ++$test;
+
+    my $warn;
+    local $SIG{__WARN__} = sub {
+	$warn .= $_[0];
+    };
+    my $val = *x{FILEHANDLE};
+    print {*x{IO}} ($warn =~ /is deprecated/
+		    ? "ok $test\n" : "not ok $test\n");
+    curr_test(++$test);
+d118 1
+d121 1
+a121 1
+    # test if defined() doesn't create any new symbols
+d124 2
+a125 1
+    ok(!defined *{$a});
+d127 2
+a128 2
+    ok(!defined @@{$a});
+    ok(!defined *{$a});
+d130 2
+a131 2
+    ok(!defined %{$a});
+    ok(!defined *{$a});
+d133 2
+a134 2
+    ok(!defined ${$a});
+    ok(!defined *{$a});
+d136 2
+a137 2
+    ok(!defined &{$a});
+    ok(!defined *{$a});
+d139 3
+a141 6
+    my $state = "not";
+    *{$a} = sub { $state = "ok" };
+    ok(defined &{$a});
+    ok(defined *{$a});
+    &{$a};
+    is ($state, 'ok');
+d144 2
+d147 1
+a147 1
+    # although it *should* if you're talking about magicals
+d150 4
+a153 2
+    ok(defined ${$a});
+    ok(defined *{$a});
+d157 4
+a160 2
+    ok(${$a});
+    ok(defined *{$a});
+d162 4
+a165 2
+    ok(!${$a});
+    ok(defined *{$a});
+d167 4
+a170 2
+    ok(!defined ${$a});
+    ok(!defined *{$a});
+d173 4
+a176 2
+    ok(${$a});
+    ok(defined *{$a});
+d179 1
+d184 5
+a188 3
+is($j, 1);
+is($j{a}, 1);
+is($j[0], 1);
+a190 1
+    # does pp_readline() handle glob-ness correctly?
+d193 1
+a193 1
+    is ($g, "Perl\n");
+d201 1
+a201 1
+    is ($w, '');
+d205 1
+a205 1
+    is ($w, '');
+d208 1
+a208 1
+    like ($w, qr/Prototype mismatch/);
+d217 1
+a217 1
+    is ($x, "Rules\n");
+d221 2
+a222 2
+Perl
+Rules
+@
+

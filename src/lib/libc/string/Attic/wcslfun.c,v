@@ -1,0 +1,573 @@
+head	1.10;
+access;
+symbols
+	MIRBSD_10:1.8.0.2
+	MIRBSD_10_BASE:1.8
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2;
+locks; strict;
+comment	@ * @;
+
+
+1.10
+date	2008.08.01.16.35.24;	author tg;	state dead;
+branches;
+next	1.9;
+commitid	10048933B5E5B20CA97;
+
+1.9
+date	2008.07.07.12.59.52;	author tg;	state Stab;
+branches;
+next	1.8;
+commitid	1004872135010DD33E5;
+
+1.8
+date	2006.11.21.01.38.58;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004562588D119AC47C;
+
+1.7
+date	2006.11.09.14.31.12;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10045533BB5599D1B17;
+
+1.6
+date	2006.11.08.23.22.07;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100455266B60E180D46;
+
+1.5
+date	2006.11.08.23.02.30;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004552621C2D0ACF91;
+
+1.4
+date	2006.11.08.22.54.55;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004552605579765A8F;
+
+1.3
+date	2006.08.01.13.42.10;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10044CF5A4968152471;
+
+1.2
+date	2005.09.22.21.10.59;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	786043331df8114e;
+
+1.1
+date	2005.09.21.20.47.20;	author tg;	state Exp;
+branches;
+next	;
+commitid	4c7a4331c6e5d6a2;
+
+
+desc
+@@
+
+
+1.10
+log
+@migrate strlcat/strlcpy/strxfrm and wcs* equivalents
+@
+text
+@/*-
+ * Copyright (c) 2006, 2008
+ *	Thorsten Glaser <tg@@mirbsd.org>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ *-
+ * The original implementations of strlcpy(3) and strlcat(3) are from
+ * Todd C. Miller; the licence is reproduced below. However, this ap-
+ * plies only to the strlcpy(3) portion of the code, as Thorsten Gla-
+ * ser write the following strlcat(3) implementation according to the
+ * spec. Both functions below have been optimised according to sugge-
+ * stions from Bodo Eggert. Thorsten Glaser also has merged this code
+ * with strxfrm(3) for ISO-10646-only systems and wrote the wide char
+ * variants wcslcat(3), wcslcpy(3), and wcsxfrm(3) (see wcslfun.c).
+ */
+
+#ifdef WCSXFRM
+#undef HAVE_WCSLCPY
+#undef HAVE_WCSLCAT
+#define HAVE_WCSLCPY	0
+#define HAVE_WCSLCAT	1
+#define wcslcpy		wcsxfrm
+#endif
+
+#include <sys/types.h>
+#include <wchar.h>
+
+#ifndef __RCSID
+#undef __IDSTRING
+#undef __IDSTRING_CONCAT
+#undef __IDSTRING_EXPAND
+#define __IDSTRING_CONCAT(l,p)		__LINTED__ ## l ## _ ## p
+#define __IDSTRING_EXPAND(l,p)		__IDSTRING_CONCAT(l,p)
+#define __IDSTRING(prefix, string)				\
+	static const char __IDSTRING_EXPAND(__LINE__,prefix) []	\
+	    __attribute__((used)) = "@@(""#)" #prefix ": " string
+#define __RCSID(x)			__IDSTRING(rcsid,x)
+#endif
+
+#ifndef __predict_true
+#define __predict_true(exp)	((exp) != 0)
+#endif
+#ifndef __predict_false
+#define __predict_false(exp)	((exp) != 0)
+#endif
+
+#if !defined(_KERNEL) && !defined(_STANDALONE)
+__RCSID("$MirOS: src/lib/libc/string/wcslfun.c,v 1.9 2008/07/07 12:59:52 tg Stab $");
+__RCSID("$miros: src/lib/libc/string/strlfun.c,v 1.16 2008/07/07 12:59:51 tg Stab $");
+#endif
+
+/* wide character string functions */
+#undef NUL
+#undef char_t
+#define NUL		L'\0'
+#define char_t		wchar_t
+#define strlen		wcslen
+#define strlcat		wcslcat
+#define strlcpy		wcslcpy
+
+#if !defined(HAVE_WCSLCAT) || (HAVE_WCSLCAT == 0)
+/*
+ * Appends src to wide string dst of size dlen (unlike wcsncat, dlen is the
+ * full size of dst, not space left).  At most dlen-1 wide characters
+ * will be copied.  Always NUL terminates (unless dlen <= wcslen(dst)).
+ * Returns wcslen(src) + MIN(dlen, wcslen(initial dst)), without the
+ * trailing wide NUL counted.  If retval >= dlen, truncation occurred.
+ */
+size_t
+strlcat(char_t *dst, const char_t *src, size_t dlen)
+{
+	size_t n = 0, slen;
+
+	slen = strlen(src);
+	while (__predict_true(n + 1 < dlen && dst[n] != NUL))
+		++n;
+	if (__predict_false(dlen == 0 || dst[n] != NUL))
+		return (dlen + slen);
+	while (__predict_true((slen > 0) && (n < (dlen - 1)))) {
+		dst[n++] = *src++;
+		--slen;
+	}
+	dst[n] = NUL;
+	return (n + slen);
+}
+#endif /* !HAVE_WCSLCAT */
+
+#if !defined(HAVE_WCSLCPY) || (HAVE_WCSLCPY == 0)
+/* $OpenBSD: strlcpy.c,v 1.11 2006/05/05 15:27:38 millert Exp $ */
+
+/*-
+ * Copyright (c) 1998 Todd C. Miller <Todd.Miller@@courtesan.com>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+/*
+ * Copy src to wide string dst of size siz.  At most siz-1 wide characters
+ * will be copied.  Always NUL terminates (unless siz == 0).
+ * Returns wcslen(src); if retval >= siz, truncation occurred.
+ */
+size_t
+strlcpy(char_t *dst, const char_t *src, size_t siz)
+{
+	const char_t *s = src;
+
+	if (__predict_false(siz == 0))
+		goto traverse_src;
+
+	/* copy as many wide chars as will fit */
+	while (--siz && (*dst++ = *s++))
+		;
+
+	/* not enough room in dst */
+	if (__predict_false(siz == 0)) {
+		/* safe to NUL-terminate dst since we copied <= siz-1 wchars */
+		*dst = NUL;
+ traverse_src:
+		/* traverse rest of src */
+		while (*s++)
+			;
+	}
+
+	/* count does not include NUL */
+	return (s - src - 1);
+}
+#endif /* !HAVE_WCSLCPY */
+@
+
+
+1.9
+log
+@libc strlfun.c:
+• fix file description, history, etc.
+• require <stddef.h> for portable size_t declaration (if ! kernel, bootloader)
+• mention why we do _not_ include <string.h> (for building on obsd/mbsd)
+• sync RCSID definition with that of mksh (more portable)
+• fix strlcat description
+• sync strlcpy obsd rcsid and licence header with obsd-current
+  (their code change 1.10→1.11 was something we already did)
+• use “does not”, not “doesn’t”
+• make it easier to produce wcslfun.c
+
+libc wcslfun.c:
+• sync with strlfun.c (much easier now)
+
+mksh strlcpy.c:
+• sync with strlfun.c (in comments, mostly)
+
+no binary changes
+@
+text
+@d61 1
+a61 1
+__RCSID("$MirOS: src/lib/libc/string/strlfun.c,v 1.16 2008/07/07 12:59:51 tg Stab $");
+@
+
+
+1.8
+log
+@strxfrm and wcsxfrm just copy, because we have only ASCII and UTF-8 (CESU-8),
+all three of whose collating order is just the natural octet order; they can,
+thusly, be implemented as pure copies of strlcpy/wcslcpy (cf previous commit)
+@
+text
+@a0 3
+/* $MirOS: src/lib/libc/string/wcslfun.c,v 1.7 2006/11/09 14:31:12 tg Exp $ */
+/* _MirOS: src/lib/libc/string/strlfun.c,v 1.11 2006/11/21 01:33:47 tg Exp $ */
+
+d2 2
+a3 2
+ * Copyright (c) 2006
+ *	Thorsten Glaser <tg@@mirbsd.de>
+d5 5
+a9 6
+ * Licensee is hereby permitted to deal in this work without restric-
+ * tion, including unlimited rights to use, publicly perform, modify,
+ * merge, distribute, sell, give away or sublicence, provided all co-
+ * pyright notices above, these terms and the disclaimer are retained
+ * in all redistributions or reproduced in accompanying documentation
+ * or other materials provided with binary redistributions.
+d11 8
+a18 8
+ * Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+ * express, or implied, to the maximum extent permitted by applicable
+ * law, without malicious intent or gross negligence; in no event may
+ * licensor, an author or contributor be held liable for any indirect
+ * or other damage, or direct damage except proven a consequence of a
+ * direct error of said person and intended use of this work, loss or
+ * other issues arising in any way out of its use, even if advised of
+ * the possibility of such damage or existence of a defect.
+d20 8
+a27 4
+ * The strlcat() code below has been written by Thorsten Glaser. Bodo
+ * Eggert suggested optimising the strlcpy() code, originally written
+ * by Todd C. Miller (see below), which was carried out by Th. Glaser
+ * as well as writing wcslcat() and wcslcpy() equivalents.
+a29 5
+#include <sys/types.h>
+#include <wchar.h>
+
+__RCSID("$MirOS: src/lib/libc/string/wcslfun.c,v 1.7 2006/11/09 14:31:12 tg Exp $");
+
+d38 36
+d76 5
+a80 5
+ * Appends src to wide string dst of size siz (unlike wcsncat, siz is the
+ * full size of dst, not space left).  At most siz-1 wide characters
+ * will be copied.  Always NUL terminates (unless siz <= wcslen(dst)).
+ * Returns wcslen(src) + MIN(siz, wcslen(initial dst)).
+ * If retval >= siz, truncation occurred.
+d83 1
+a83 1
+wcslcat(wchar_t *dst, const wchar_t *src, size_t dlen)
+d87 2
+a88 2
+	slen = wcslen(src);
+	while (__predict_true(n + 1 < dlen && dst[n] != L'\0'))
+d90 1
+a90 1
+	if (__predict_false(dlen == 0 || dst[n] != L'\0'))
+d96 1
+a96 1
+	dst[n] = L'\0';
+d99 1
+a99 1
+#endif
+d101 2
+a102 1
+/* $OpenBSD: strlcpy.c,v 1.10 2005/08/08 08:05:37 espie Exp $ */
+d110 8
+a119 1
+#if !defined(HAVE_WCSLCPY) || (HAVE_WCSLCPY == 0)
+d126 1
+a126 1
+wcslcpy(wchar_t *dst, const wchar_t *src, size_t siz)
+d128 1
+a128 1
+	const wchar_t *s = src;
+d139 2
+a140 2
+		/* safe to NUL-terminate dst since we copied <= siz-1 chars */
+		*dst = L'\0';
+d147 1
+a147 1
+	/* count doesn't include NUL */
+d150 1
+a150 1
+#endif
+@
+
+
+1.7
+log
+@build {str,wcs}l{cpy,cat} into different .o files to save space in statics
+@
+text
+@d1 2
+a2 2
+/* $MirOS: src/lib/libc/string/wcslfun.c,v 1.6 2006/11/08 23:22:07 tg Exp $ */
+/* _MirOS: src/lib/libc/string/strlfun.c,v 1.10 2006/11/08 23:18:04 tg Exp $ */
+d33 9
+a41 1
+__RCSID("$MirOS: src/lib/libc/string/wcslfun.c,v 1.6 2006/11/08 23:22:07 tg Exp $");
+@
+
+
+1.6
+log
+@sync (ya I know, it annoys)
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/libc/string/wcslfun.c,v 1.5 2006/11/08 23:02:30 tg Exp $ */
+d33 1
+a33 1
+__RCSID("$MirOS: src/lib/libc/string/wcslfun.c,v 1.5 2006/11/08 23:02:30 tg Exp $");
+d35 1
+d60 1
+d72 1
+d103 1
+@
+
+
+1.5
+log
+@sync
+@
+text
+@d1 2
+a2 2
+/* $MirOS: src/lib/libc/string/wcslfun.c,v 1.4 2006/11/08 22:54:55 tg Exp $ */
+/* _MirOS: src/lib/libc/string/strlfun.c,v 1.9 2006/11/08 23:01:50 tg Exp $ */
+d33 1
+a33 1
+__RCSID("$MirOS: src/lib/libc/string/wcslfun.c,v 1.4 2006/11/08 22:54:55 tg Exp $");
+@
+
+
+1.4
+log
+@sync with lib/libc/string/strlfun.c
+@
+text
+@d1 2
+a2 2
+/* $MirOS: src/lib/libc/string/strlfun.c,v 1.8 2006/11/08 22:48:59 tg Exp $ */
+/* _MirOS: src/lib/libc/string/strlfun.c,v 1.8 2006/11/08 22:48:59 tg Exp $ */
+d33 1
+a33 1
+__RCSID("$MirOS: src/lib/libc/string/strlfun.c,v 1.8 2006/11/08 22:48:59 tg Exp $");
+@
+
+
+1.3
+log
+@sync
+@
+text
+@d1 59
+a59 2
+/* $MirOS: src/lib/libc/string/wcslfun.c,v 1.2 2005/09/22 21:10:59 tg Exp $ */
+/* _MirOS: src/lib/libc/string/strlfun.c,v 1.7 2006/08/01 13:41:49 tg Exp $ */
+a60 1
+/* $OpenBSD: strlcat.c,v 1.13 2005/08/08 08:05:37 espie Exp $ */
+a62 2
+ * Copyright (c) 2004, 2005, 2006 Thorsten Glaser <tg@@mirbsd.de>
+ * Thanks to Bodo Eggert for optimisation hints
+a67 8
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+a69 5
+#include <sys/types.h>
+#include <wchar.h>
+
+__RCSID("$MirOS: src/lib/libc/string/strlfun.c,v 1.6 2006/08/01 13:36:15 tg Exp $");
+
+d80 1
+a80 1
+	if (__predict_false(!siz))
+d83 2
+a84 2
+	/* copy as many chars as will fit */
+	for (; --siz && (*dst++ = *s++); )
+d88 2
+a89 2
+	if (__predict_false(!siz)) {
+		/* safe to NUL-terminate dst since copied <= siz-1 chars */
+a99 34
+
+/*
+ * Appends src to wide string dst of size siz (unlike wcsncat, siz is the
+ * full size of dst, not space left).  At most siz-1 wide characters
+ * will be copied.  Always NUL terminates (unless siz <= wcslen(dst)).
+ * Returns wcslen(src) + MIN(siz, wcslen(initial dst)).
+ * If retval >= siz, truncation occurred.
+ */
+size_t
+wcslcat(wchar_t *dst, const wchar_t *src, size_t siz)
+{
+	wchar_t *d = dst;
+	size_t dl, n = siz;
+	const size_t sl = wcslen(src);
+
+	while (n-- && (*d++ != L'\0'))
+		;
+	if (!++n && (*d != L'\0'))
+		return (wcslen(src));
+
+	dl = --d - dst;		/* original wcslen(dst), max. siz-1 */
+	n = siz - dl;
+	dl += sl;
+
+	if (__predict_false(!n--))
+		return (dl);
+
+	if (__predict_false(n > sl))
+		n = sl;		/* number of chars to copy */
+	for (; n-- && (*d++ = *src++); )
+		;
+	*d = L'\0';		/* NUL-terminate dst */
+	return (dl);
+}
+@
+
+
+1.2
+log
+@oops
+@
+text
+@d1 2
+a2 1
+/* $MirOS: src/lib/libc/string/wcslfun.c,v 1.1 2005/09/21 20:47:20 tg Exp $ */
+d7 1
+a7 1
+ * Copyright (c) 2004, 2005 Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+d27 1
+a27 1
+__RCSID("$MirOS: src/lib/libc/string/wcslfun.c,v 1.1 2005/09/21 20:47:20 tg Exp $");
+d30 1
+a30 1
+ * Copy src to string dst of size siz.  At most siz-1 characters
+d39 2
+a40 1
+	if (!siz) goto traverse_src;
+d42 2
+a43 2
+	/* Copy as many bytes as will fit */
+	for (; --siz && (*dst++ = *s++); /* nothing */)
+d46 6
+a51 5
+	/* Not enough room in dst, add NUL and traverse rest of src */
+	if (!siz) {
+		/* Save, since we've copied at max. (siz-1) characters */
+		*dst = L'\0';	/* NUL-terminate dst */
+traverse_src:
+d56 2
+a57 1
+	return (s - src - 1);	/* count does not include NUL */
+d61 2
+a62 2
+ * Appends src to string dst of size siz (unlike wcsncat, siz is the
+ * full size of dst, not space left).  At most siz-1 characters
+d77 1
+a77 1
+		return wcslen(src);
+d79 1
+a79 1
+	dl = --d - dst;		/* original strlen(dst), max. siz-1 */
+d83 2
+a84 2
+	if (!n--)
+		return dl;
+d86 3
+a88 3
+	if (n > sl)
+		n = sl;		/* number of octets to copy */
+	for (; n-- && (*d++ = *src++); /* nothing */)
+d91 1
+a91 1
+	return dl;
+@
+
+
+1.1
+log
+@write wcslfun.c the same manner as strlfun.c
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/libc/string/strlfun.c,v 1.5 2005/09/19 19:01:11 tg Exp $ */
+d26 1
+a26 1
+__RCSID("$MirOS: src/lib/libc/string/strlfun.c,v 1.5 2005/09/19 19:01:11 tg Exp $");
+d34 1
+a34 1
+strlcpy(wchar_t *dst, const wchar_t *src, size_t siz)
+@
+

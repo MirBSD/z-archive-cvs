@@ -1,0 +1,548 @@
+head	1.3;
+access;
+symbols
+	freetype-2_7_1:1.1.115.2
+	freetype-2_3_12:1.1.115.1
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.1.1.1
+	freetype-2_3_5:1.1.1.1
+	freetype:1.1.115;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2017.04.15.19.21.18;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10058F2723111C7BEE2;
+
+1.2
+date	2013.08.06.19.47.35;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100520152445E05B912;
+
+1.1
+date	2008.02.26.19.52.54;	author bsiegert;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.1
+date	2008.02.26.19.52.54;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.38.14;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.115.1
+date	2013.08.06.19.12.26;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.2
+date	2017.04.15.15.42.02;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.3
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  afindic.c                                                              */
+/*                                                                         */
+/*    Auto-fitter hinting routines for Indic writing system (body).        */
+/*                                                                         */
+/*  Copyright 2007-2016 by                                                 */
+/*  Rahul Bhalerao <rahul.bhalerao@@redhat.com>, <b.rahul.pm@@gmail.com>.    */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include "aftypes.h"
+#include "aflatin.h"
+
+
+#ifdef AF_CONFIG_OPTION_INDIC
+
+#include "afindic.h"
+#include "aferrors.h"
+#include "afcjk.h"
+
+
+#ifdef AF_CONFIG_OPTION_USE_WARPER
+#include "afwarp.h"
+#endif
+
+
+  static FT_Error
+  af_indic_metrics_init( AF_CJKMetrics  metrics,
+                         FT_Face        face )
+  {
+    /* skip blue zone init in CJK routines */
+    FT_CharMap  oldmap = face->charmap;
+
+
+    metrics->units_per_em = face->units_per_EM;
+
+    if ( FT_Select_Charmap( face, FT_ENCODING_UNICODE ) )
+      face->charmap = NULL;
+    else
+    {
+      af_cjk_metrics_init_widths( metrics, face );
+#if 0
+      /* either need indic specific blue_chars[] or just skip blue zones */
+      af_cjk_metrics_init_blues( metrics, face, af_cjk_blue_chars );
+#endif
+      af_cjk_metrics_check_digits( metrics, face );
+    }
+
+    FT_Set_Charmap( face, oldmap );
+
+    return FT_Err_Ok;
+  }
+
+
+  static void
+  af_indic_metrics_scale( AF_CJKMetrics  metrics,
+                          AF_Scaler      scaler )
+  {
+    /* use CJK routines */
+    af_cjk_metrics_scale( metrics, scaler );
+  }
+
+
+  static FT_Error
+  af_indic_hints_init( AF_GlyphHints  hints,
+                       AF_CJKMetrics  metrics )
+  {
+    /* use CJK routines */
+    return af_cjk_hints_init( hints, metrics );
+  }
+
+
+  static FT_Error
+  af_indic_hints_apply( FT_UInt        glyph_index,
+                        AF_GlyphHints  hints,
+                        FT_Outline*    outline,
+                        AF_CJKMetrics  metrics )
+  {
+    /* use CJK routines */
+    return af_cjk_hints_apply( glyph_index, hints, outline, metrics );
+  }
+
+
+  /* Extract standard_width from writing system/script specific */
+  /* metrics class.                                             */
+
+  static void
+  af_indic_get_standard_widths( AF_CJKMetrics  metrics,
+                                FT_Pos*        stdHW,
+                                FT_Pos*        stdVW )
+  {
+    if ( stdHW )
+      *stdHW = metrics->axis[AF_DIMENSION_VERT].standard_width;
+
+    if ( stdVW )
+      *stdVW = metrics->axis[AF_DIMENSION_HORZ].standard_width;
+  }
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                I N D I C   S C R I P T   C L A S S            *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  AF_DEFINE_WRITING_SYSTEM_CLASS(
+    af_indic_writing_system_class,
+
+    AF_WRITING_SYSTEM_INDIC,
+
+    sizeof ( AF_CJKMetricsRec ),
+
+    (AF_WritingSystem_InitMetricsFunc) af_indic_metrics_init,        /* style_metrics_init    */
+    (AF_WritingSystem_ScaleMetricsFunc)af_indic_metrics_scale,       /* style_metrics_scale   */
+    (AF_WritingSystem_DoneMetricsFunc) NULL,                         /* style_metrics_done    */
+    (AF_WritingSystem_GetStdWidthsFunc)af_indic_get_standard_widths, /* style_metrics_getstdw */
+
+    (AF_WritingSystem_InitHintsFunc)   af_indic_hints_init,          /* style_hints_init      */
+    (AF_WritingSystem_ApplyHintsFunc)  af_indic_hints_apply          /* style_hints_apply     */
+  )
+
+
+#else /* !AF_CONFIG_OPTION_INDIC */
+
+
+  AF_DEFINE_WRITING_SYSTEM_CLASS(
+    af_indic_writing_system_class,
+
+    AF_WRITING_SYSTEM_INDIC,
+
+    sizeof ( AF_CJKMetricsRec ),
+
+    (AF_WritingSystem_InitMetricsFunc) NULL, /* style_metrics_init    */
+    (AF_WritingSystem_ScaleMetricsFunc)NULL, /* style_metrics_scale   */
+    (AF_WritingSystem_DoneMetricsFunc) NULL, /* style_metrics_done    */
+    (AF_WritingSystem_GetStdWidthsFunc)NULL, /* style_metrics_getstdw */
+
+    (AF_WritingSystem_InitHintsFunc)   NULL, /* style_hints_init      */
+    (AF_WritingSystem_ApplyHintsFunc)  NULL  /* style_hints_apply     */
+  )
+
+
+#endif /* !AF_CONFIG_OPTION_INDIC */
+
+
+/* END */
+@
+
+
+1.2
+log
+@fastmerge
+@
+text
+@d5 1
+a5 1
+/*    Auto-fitter hinting routines for Indic scripts (body).               */
+d7 1
+a7 1
+/*  Copyright 2007 by                                                      */
+d30 1
+a30 1
+#ifdef AF_USE_WARPER
+d36 2
+a37 2
+  af_indic_metrics_init( AF_LatinMetrics  metrics,
+                         FT_Face          face )
+d39 21
+a59 2
+    /* use CJK routines */
+    return af_cjk_metrics_init( metrics, face );
+d64 2
+a65 2
+  af_indic_metrics_scale( AF_LatinMetrics  metrics,
+                          AF_Scaler        scaler )
+d73 2
+a74 2
+  af_indic_hints_init( AF_GlyphHints    hints,
+                       AF_LatinMetrics  metrics )
+d82 4
+a85 3
+  af_indic_hints_apply( AF_GlyphHints    hints,
+                        FT_Outline*      outline,
+                        AF_LatinMetrics  metrics)
+d88 17
+a104 1
+    return af_cjk_hints_apply( hints, outline, metrics );
+d117 2
+a118 8
+  static const AF_Script_UniRangeRec  af_indic_uniranges[] =
+  {
+#if 0
+    AF_UNIRANGE_REC( 0x0100UL, 0xFFFFUL ),  /* why this? */
+#endif
+    AF_UNIRANGE_REC( 0x0900UL, 0x0DFFUL),    /* Indic Range */
+    AF_UNIRANGE_REC(      0UL,      0UL)
+  };
+d120 1
+d122 1
+a122 3
+  AF_DEFINE_SCRIPT_CLASS(af_indic_script_class,
+    AF_SCRIPT_INDIC,
+    af_indic_uniranges,
+d124 4
+a127 1
+    sizeof( AF_LatinMetricsRec ),
+d129 3
+a131 3
+    (AF_Script_InitMetricsFunc) af_indic_metrics_init,
+    (AF_Script_ScaleMetricsFunc)af_indic_metrics_scale,
+    (AF_Script_DoneMetricsFunc) NULL,
+a132 3
+    (AF_Script_InitHintsFunc)   af_indic_hints_init,
+    (AF_Script_ApplyHintsFunc)  af_indic_hints_apply
+  )
+a135 4
+  static const AF_Script_UniRangeRec  af_indic_uniranges[] =
+  {
+    { 0, 0 }
+  };
+d137 2
+d140 1
+a140 3
+  AF_DEFINE_SCRIPT_CLASS(af_indic_script_class,
+    AF_SCRIPT_INDIC,
+    af_indic_uniranges,
+d142 1
+a142 1
+    sizeof( AF_LatinMetricsRec ),
+d144 4
+a147 3
+    (AF_Script_InitMetricsFunc) NULL,
+    (AF_Script_ScaleMetricsFunc)NULL,
+    (AF_Script_DoneMetricsFunc) NULL,
+d149 2
+a150 2
+    (AF_Script_InitHintsFunc)   NULL,
+    (AF_Script_ApplyHintsFunc)  NULL
+d153 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d46 1
+a46 1
+			  AF_Scaler        scaler )
+d55 1
+a55 1
+		       AF_LatinMetrics  metrics )
+d64 2
+a65 2
+			FT_Outline*      outline,
+			AF_LatinMetrics  metrics)
+d84 1
+a84 1
+    { 0x0100,  0xFFFF },  /* why this? */
+d86 2
+a87 2
+    { 0x0900, 0x0DFF},    /* Indic Range */
+    { 0,       0 }
+d91 1
+a91 3
+  FT_CALLBACK_TABLE_DEF const AF_ScriptClassRec
+  af_indic_script_class =
+  {
+d103 1
+a103 1
+  };
+d113 1
+a113 3
+  FT_CALLBACK_TABLE_DEF const AF_ScriptClassRec
+  af_indic_script_class =
+  {
+d125 1
+a125 1
+  };
+@
+
+
+1.1.115.1
+log
+@we need newer freetype for advance calculation
+@
+text
+@d46 1
+a46 1
+                          AF_Scaler        scaler )
+d55 1
+a55 1
+                       AF_LatinMetrics  metrics )
+d64 2
+a65 2
+                        FT_Outline*      outline,
+                        AF_LatinMetrics  metrics)
+d84 1
+a84 1
+    AF_UNIRANGE_REC( 0x0100UL, 0xFFFFUL ),  /* why this? */
+d86 2
+a87 2
+    AF_UNIRANGE_REC( 0x0900UL, 0x0DFFUL),    /* Indic Range */
+    AF_UNIRANGE_REC(      0UL,      0UL)
+d91 3
+a93 1
+  AF_DEFINE_SCRIPT_CLASS(af_indic_script_class,
+d105 1
+a105 1
+  )
+d115 3
+a117 1
+  AF_DEFINE_SCRIPT_CLASS(af_indic_script_class,
+d129 1
+a129 1
+  )
+@
+
+
+1.1.115.2
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d5 1
+a5 1
+/*    Auto-fitter hinting routines for Indic writing system (body).        */
+d7 1
+a7 1
+/*  Copyright 2007-2016 by                                                 */
+d30 1
+a30 1
+#ifdef AF_CONFIG_OPTION_USE_WARPER
+d36 2
+a37 2
+  af_indic_metrics_init( AF_CJKMetrics  metrics,
+                         FT_Face        face )
+d39 2
+a40 21
+    /* skip blue zone init in CJK routines */
+    FT_CharMap  oldmap = face->charmap;
+
+
+    metrics->units_per_em = face->units_per_EM;
+
+    if ( FT_Select_Charmap( face, FT_ENCODING_UNICODE ) )
+      face->charmap = NULL;
+    else
+    {
+      af_cjk_metrics_init_widths( metrics, face );
+#if 0
+      /* either need indic specific blue_chars[] or just skip blue zones */
+      af_cjk_metrics_init_blues( metrics, face, af_cjk_blue_chars );
+#endif
+      af_cjk_metrics_check_digits( metrics, face );
+    }
+
+    FT_Set_Charmap( face, oldmap );
+
+    return FT_Err_Ok;
+d45 2
+a46 2
+  af_indic_metrics_scale( AF_CJKMetrics  metrics,
+                          AF_Scaler      scaler )
+d54 2
+a55 2
+  af_indic_hints_init( AF_GlyphHints  hints,
+                       AF_CJKMetrics  metrics )
+d63 3
+a65 4
+  af_indic_hints_apply( FT_UInt        glyph_index,
+                        AF_GlyphHints  hints,
+                        FT_Outline*    outline,
+                        AF_CJKMetrics  metrics )
+d68 1
+a68 17
+    return af_cjk_hints_apply( glyph_index, hints, outline, metrics );
+  }
+
+
+  /* Extract standard_width from writing system/script specific */
+  /* metrics class.                                             */
+
+  static void
+  af_indic_get_standard_widths( AF_CJKMetrics  metrics,
+                                FT_Pos*        stdHW,
+                                FT_Pos*        stdVW )
+  {
+    if ( stdHW )
+      *stdHW = metrics->axis[AF_DIMENSION_VERT].standard_width;
+
+    if ( stdVW )
+      *stdVW = metrics->axis[AF_DIMENSION_HORZ].standard_width;
+d81 9
+a89 2
+  AF_DEFINE_WRITING_SYSTEM_CLASS(
+    af_indic_writing_system_class,
+d91 3
+a93 1
+    AF_WRITING_SYSTEM_INDIC,
+d95 1
+a95 1
+    sizeof ( AF_CJKMetricsRec ),
+d97 3
+a99 4
+    (AF_WritingSystem_InitMetricsFunc) af_indic_metrics_init,        /* style_metrics_init    */
+    (AF_WritingSystem_ScaleMetricsFunc)af_indic_metrics_scale,       /* style_metrics_scale   */
+    (AF_WritingSystem_DoneMetricsFunc) NULL,                         /* style_metrics_done    */
+    (AF_WritingSystem_GetStdWidthsFunc)af_indic_get_standard_widths, /* style_metrics_getstdw */
+d101 2
+a102 2
+    (AF_WritingSystem_InitHintsFunc)   af_indic_hints_init,          /* style_hints_init      */
+    (AF_WritingSystem_ApplyHintsFunc)  af_indic_hints_apply          /* style_hints_apply     */
+a104 1
+
+d107 4
+a111 2
+  AF_DEFINE_WRITING_SYSTEM_CLASS(
+    af_indic_writing_system_class,
+d113 3
+a115 1
+    AF_WRITING_SYSTEM_INDIC,
+d117 1
+a117 1
+    sizeof ( AF_CJKMetricsRec ),
+d119 3
+a121 4
+    (AF_WritingSystem_InitMetricsFunc) NULL, /* style_metrics_init    */
+    (AF_WritingSystem_ScaleMetricsFunc)NULL, /* style_metrics_scale   */
+    (AF_WritingSystem_DoneMetricsFunc) NULL, /* style_metrics_done    */
+    (AF_WritingSystem_GetStdWidthsFunc)NULL, /* style_metrics_getstdw */
+d123 2
+a124 2
+    (AF_WritingSystem_InitHintsFunc)   NULL, /* style_hints_init      */
+    (AF_WritingSystem_ApplyHintsFunc)  NULL  /* style_hints_apply     */
+a126 1
+
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d46 1
+a46 1
+                          AF_Scaler        scaler )
+d55 1
+a55 1
+                       AF_LatinMetrics  metrics )
+d64 2
+a65 2
+                        FT_Outline*      outline,
+                        AF_LatinMetrics  metrics)
+@
+

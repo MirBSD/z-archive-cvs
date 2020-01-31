@@ -1,0 +1,292 @@
+head	1.7;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.7
+date	2015.07.19.18.48.53;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10055ABF11C1F495374;
+
+1.6
+date	2010.09.21.21.23.56;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004C992261692DCA0F;
+
+1.5
+date	2006.08.18.18.05.50;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10044E6018100C580D3;
+
+1.4
+date	2006.02.21.19.48.16;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10043FB6DF81E8040F6;
+
+1.3
+date	2005.12.15.13.07.22;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10043A16A7849B907A3;
+
+1.2
+date	2005.11.04.20.38.44;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1df9436bc6dfcf7e;
+
+1.1
+date	2005.03.18.15.48.42;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.48.42;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.7
+log
+@new OpenVPN; modulo HMAC errors thrown on server side…
+@
+text
+@$MirOS: ports/net/openvpn/patches/patch-configure_ac,v 1.6 2010/09/21 21:23:56 tg Exp $
+--- configure.ac.orig	Tue Jun  2 08:00:59 2015
++++ configure.ac	Sun Jul 19 13:52:47 2015
+@@@@ -36,20 +36,7 @@@@ AC_CONFIG_HEADERS([config.h])
+ AC_CONFIG_SRCDIR([src/openvpn/syshead.h])
+ AC_CONFIG_MACRO_DIR([m4])
+ 
+-dnl Initialize automake.  automake < 1.12 didn't have serial-tests and
+-dnl gives an error if it sees this, but for automake >= 1.13
+-dnl serial-tests is required so we have to include it.  Solution is to
+-dnl test for the version of automake (by running an external command)
+-dnl and provide it if necessary.  Note we have to do this entirely using
+-dnl m4 macros since automake queries this macro by running
+-dnl 'autoconf --trace ...'.
+-m4_define([serial_tests], [
+-    m4_esyscmd([automake --version |
+-                head -1 |
+-                awk '{split ($NF,a,"."); if (a[1] == 1 && a[2] >= 12) { print "serial-tests" }}'
+-    ])
+-])
+-AM_INIT_AUTOMAKE(foreign serial_tests) dnl NB: Do not [quote] this parameter.
++AM_INIT_AUTOMAKE([foreign])
+ AC_CANONICAL_HOST
+ AC_USE_SYSTEM_EXTENSIONS
+ 
+@@@@ -213,7 +200,7 @@@@ AC_ARG_ENABLE(
+ 	,
+ 	[
+ 		case "$host" in
+-			*-*-openbsd*) enable_plugin_auth_pam="no";;
++			*-*-openbsd*|*-*-mirbsd*) enable_plugin_auth_pam="no";;
+ 			*-mingw*) enable_plugin_auth_pam="no";;
+ 			*) enable_plugin_auth_pam="yes";;
+ 		esac
+@@@@ -322,8 +309,8 @@@@ case "$host" in
+ 		AC_DEFINE([TARGET_SOLARIS], [1], [Are we running on Solaris?])
+ 		AC_DEFINE_UNQUOTED([TARGET_PREFIX], ["S"], [Target prefix])
+ 		;;
+-	*-*-openbsd*)
+-		AC_DEFINE([TARGET_OPENBSD], [1], [Are we running on OpenBSD?])
++	*-*-openbsd*|*-*-mirbsd*)
++		AC_DEFINE([TARGET_OPENBSD], [1], [Are we running on MirBSD or OpenBSD?])
+ 		AC_DEFINE_UNQUOTED([TARGET_PREFIX], ["O"], [Target prefix])
+ 		;;
+ 	*-*-freebsd*)
+@@@@ -387,18 +374,9 @@@@ AC_DEFINE_UNQUOTED([SYSTEMD_ASK_PASSWORD
+ #
+ # Libtool
+ #
+-ifdef(
+-	[LT_INIT],
+-	[
+-		LT_INIT([win32-dll])
+-		LT_LANG([Windows Resource])
+-	],
+-	[
+ 		AC_LIBTOOL_WIN32_DLL
+ 		AC_LIBTOOL_RC
+ 		AC_PROG_LIBTOOL
+-	]
+-)
+ 
+ AC_C_CONST
+ AC_C_INLINE
+@@@@ -588,6 +566,7 @@@@ AC_CHECK_FUNCS([ \
+ 	setsid chdir putenv getpeername unlink \
+ 	chsize ftruncate execve getpeereid umask basename dirname access \
+ 	epoll_create \
++	arc4random_pushb_fast RSA_generate_key_ex \
+ ])
+ 
+ AC_CHECK_LIB(
+@
+
+
+1.6
+log
+@use arc4random() a bit more efficiently
+@
+text
+@d1 6
+a6 22
+$MirOS: ports/net/openvpn/patches/patch-configure_ac,v 1.5 2006/08/18 18:05:50 tg Exp $
+--- configure.ac.orig	Sun Oct  1 12:17:52 2006
++++ configure.ac	Tue Sep 21 18:47:29 2010
+@@@@ -216,8 +216,8 @@@@ case "$target" in
+ *solaris*)
+ 	AC_DEFINE(TARGET_SOLARIS, 1, [Are we running on Solaris?])
+ 	;;
+-*openbsd*)
+-	AC_DEFINE(TARGET_OPENBSD, 1, [Are we running on OpenBSD?])
++*mirbsd*|*openbsd*)
++	AC_DEFINE(TARGET_OPENBSD, 1, [Are we running on MirOS BSD or OpenBSD?])
+ 	;;
+ *freebsd*)
+ 	AC_DEFINE(TARGET_FREEBSD, 1, [Are we running on FreeBSD?])
+@@@@ -361,7 +361,8 @@@@ AC_CHECK_FUNCS(daemon chroot getpwnam se
+ 	       getpass strerror syslog openlog mlockall getgrnam setgid dnl
+ 	       setgroups stat flock readv writev setsockopt getsockopt dnl
+ 	       setsid chdir gettimeofday putenv getpeername unlink dnl
+-               poll chsize ftruncate)
++	       poll chsize ftruncate arc4random arc4random_push dnl
++	       arc4random_pushb_fast)
+ AC_CACHE_SAVE
+d8 36
+a43 9
+ dnl Required library functions
+@@@@ -408,8 +409,7 @@@@ if test "$PTHREAD" = "yes"; then
+   ACX_PTHREAD(
+         [
+ 	    case "$target" in
+-	    *openbsd*)
+-		AC_MSG_RESULT([WARNING: pthread support on OpenBSD is unstable!])
++	    *mirbsd*|*openbsd*)
+ 		CFLAGS="$CFLAGS -pthread"
+d45 28
+a72 1
+ 	    esac
+@
+
+
+1.5
+log
+@simplify and speed up by using arc4random_pushb and update a comment
+@
+text
+@d1 3
+a3 3
+$MirOS: ports/net/openvpn/patches/patch-configure_ac,v 1.4 2006/02/21 19:48:16 tg Exp $
+--- configure.ac.orig	Thu Nov  3 06:39:31 2005
++++ configure.ac	Tue Feb 21 18:11:10 2006
+d15 1
+a15 1
+@@@@ -361,7 +361,7 @@@@ AC_CHECK_FUNCS(daemon chroot getpwnam se
+d20 2
+a21 1
++               poll chsize ftruncate arc4random arc4random_push arc4random_pushb)
+d25 1
+a25 1
+@@@@ -408,8 +408,7 @@@@ if test "$PTHREAD" = "yes"; then
+@
+
+
+1.4
+log
+@* patch-configure_ac: check for arc4random(3), arc4random_push(3)
+* patch-crypto_{c,h}: use arc4random(3) if available, for PRNG
+* patch-ssl_c: if arc4random_push(3) MirOS extension is available,
+  mimic recent ssh(1)/sshd(8) patches and push back randomness
+  gained by kex with the peer (tls, both methods) - sadly cannot
+  use pings, neither does preshared keys help
+* patch-tun_c: reduce diffs while here
+* Makefile: bump
+
+checked to run against thorvpn (not patched)
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/openvpn/patches/patch-configure_ac,v 1.3 2005/12/15 13:07:22 tg Exp $
+d20 1
+a20 1
++               poll chsize ftruncate arc4random arc4random_push)
+@
+
+
+1.3
+log
+@* Depend on LZO 2.x, bump patchlevel
+* Remove ekkoBSD (we don't support it in all places any more anyway)
+* Sort: Open/MirBSD -> MirOS/OpenBSD
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/openvpn/patches/patch-configure_ac,v 1.2 2005/11/04 20:38:44 tg Exp $
+d3 1
+a3 1
++++ configure.ac	Thu Dec 15 13:04:57 2005
+d15 9
+@
+
+
+1.2
+log
+@* update to 2.0.5
+* add 'static' flavour
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/openvpn/patches/patch-configure_ac,v 1.1.7.1 2005/03/18 15:48:42 tg Exp $
+d3 1
+a3 1
++++ configure.ac	Fri Nov  4 20:32:13 2005
+d10 2
+a11 2
++*openbsd*|*mirbsd*|*ekkobsd*)
++	AC_DEFINE(TARGET_OPENBSD, 1, [Are we running on OpenBSD or a fork?])
+d21 1
+a21 1
++	    *openbsd*|*mirbsd*|*ekkobsd*)
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 4
+a4 4
+$MirOS$
+--- configure.ac.orig	Mon Dec 20 14:07:43 2004
++++ configure.ac	Thu Jan 13 18:46:28 2005
+@@@@ -210,8 +210,8 @@@@ case "$target" in
+d15 1
+a15 1
+@@@@ -398,8 +398,7 @@@@ if test "$PTHREAD" = "yes"; then
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

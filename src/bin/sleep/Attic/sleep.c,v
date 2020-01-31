@@ -1,0 +1,289 @@
+head	1.3;
+access;
+symbols
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2011.02.11.01.18.25;	author tg;	state dead;
+branches;
+next	1.2;
+commitid	1004D548C4E66D17A12;
+
+1.2
+date	2007.07.05.23.09.33;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100468D7A224CDB6D5A;
+
+1.1
+date	2005.02.05.17.22.06;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.22.06;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.45.29;	author tg;	state Exp;
+branches;
+next	;
+commitid	560042e0092f571e;
+
+
+desc
+@@
+
+
+1.3
+log
+@• more comment and int→bool cleanup, add and improve some comments
+• in interactive mode, always look up {LC_{ALL,CTYPE},LANG} environment
+  variables if setlocale/nl_langinfo(CODESET) doesn’t suffice
+• add the ability to call any builtin (some don't make sense or wouldn't
+  work) directly by analysing argv[0]
+• for direct builtin calls, the {LC_{ALL,CTYPE},LANG} environment
+  variables determine utf8-mode, even if MKSH_ASSUME_UTF8 was set
+• when called as builtin, echo behaves POSIXish
+• add domainname as alias for true on MirBSD only, to be able to link it
+• sync mksh Makefiles with Build.sh output
+• adjust manpage wrt release plans
+• link some things to mksh now that we have callable builtins:
+  bin/echo bin/kill bin/pwd bin/sleep (exact matches)
+  bin/test bin/[ (were scripts before)
+  bin/domainname=usr/bin/true usr/bin/false (move to /bin/ now)
+• drop linked utilities and, except for echo and kill, their manpages
+• adjust instbin and link a few more there as well
+@
+text
+@/*	$OpenBSD: sleep.c,v 1.17 2004/09/16 08:35:49 deraadt Exp $	*/
+/*	$NetBSD: sleep.c,v 1.8 1995/03/21 09:11:11 cgd Exp $	*/
+
+/*
+ * Copyright (c) 1988, 1993, 1994
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/cdefs.h>
+__COPYRIGHT("@@(#) Copyright (c) 1988, 1993, 1994\n\
+	The Regents of the University of California.  All rights reserved.\n");
+__SCCSID("@@(#)sleep.c	8.3 (Berkeley) 4/2/94");
+__RCSID("$MirOS: src/bin/sleep/sleep.c,v 1.2 2007/07/05 23:09:33 tg Exp $");
+
+#include <ctype.h>
+#include <errno.h>
+#include <locale.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
+
+extern char *__progname;
+
+void usage(void);
+void alarmh(int);
+
+int
+main(int argc, char *argv[])
+{
+	int ch;
+	time_t secs = 0, t;
+	char *cp;
+	long nsecs = 0;
+	struct timespec rqtp;
+	int i;
+
+#ifndef __MirBSD__
+	setlocale(LC_ALL, "");
+#endif
+
+	signal(SIGALRM, alarmh);
+
+	while ((ch = getopt(argc, argv, "")) != -1)
+		switch(ch) {
+		default:
+			usage();
+		}
+	argc -= optind;
+	argv += optind;
+
+	if (argc != 1)
+		usage();
+
+	cp = *argv;
+	while ((*cp != '\0') && (*cp != '.')) {
+		if (!isdigit(*cp))
+			usage();
+		t = (secs * 10) + (*cp++ - '0');
+		if (t / 10 != secs)	/* oflow */
+			return (EINVAL);
+		secs = t;
+	}
+
+	/* Handle fractions of a second */
+	if (*cp == '.') {
+		*cp++ = '\0';
+		for (i = 100000000; i > 0; i /= 10) {
+			if (*cp == '\0')
+				break;
+			if (!isdigit(*cp))
+				usage();
+			nsecs += (*cp++ - '0') * i;
+		}
+
+		/*
+		 * We parse all the way down to nanoseconds
+		 * in the above for loop. Be pedantic about
+		 * checking the rest of the argument.
+		 */
+		while (*cp != '\0') {
+			if (!isdigit(*cp++))
+				usage();
+		}
+	}
+
+	rqtp.tv_sec = secs;
+	rqtp.tv_nsec = nsecs;
+
+	if ((secs > 0) || (nsecs > 0))
+		if (nanosleep(&rqtp, NULL))
+			return (errno);
+	return (0);
+}
+
+void
+usage(void)
+{
+	(void)fprintf(stderr, "usage: %s seconds\n", __progname);
+	exit(1);
+}
+
+/*
+ * POSIX 1003.2 says sleep should exit with 0 return code on reception
+ * of SIGALRM.
+ */
+/* ARGSUSED */
+void
+alarmh(int signo)
+{
+	/*
+	 * exit() flushes stdio buffers, which is not legal in a signal
+	 * handler. Use _exit().
+	 */
+	_exit(0);
+}
+@
+
+
+1.2
+log
+@• #ifdef __MirBSD__
+  do not use setlocale() and nl_langinfo(), hardcode it
+  #endif
+• rcs ids
+
+should greatly reduce space usage of ramdisc
+@
+text
+@d37 1
+a37 1
+__RCSID("$MirOS$");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: sleep.c,v 1.16 2003/06/02 23:32:09 millert Exp $	*/
+d33 5
+a37 13
+#ifndef lint
+static char copyright[] =
+"@@(#) Copyright (c) 1988, 1993, 1994\n\
+	The Regents of the University of California.  All rights reserved.\n";
+#endif /* not lint */
+
+#ifndef lint
+#if 0
+static char sccsid[] = "@@(#)sleep.c	8.3 (Berkeley) 4/2/94";
+#else
+static char rcsid[] = "$OpenBSD: sleep.c,v 1.16 2003/06/02 23:32:09 millert Exp $";
+#endif
+#endif /* not lint */
+d63 1
+d65 1
+d132 1
+d134 1
+a134 1
+alarmh(int sigraised)
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: sleep.c,v 1.17 2004/09/16 08:35:49 deraadt Exp $	*/
+d43 1
+a43 1
+static char rcsid[] = "$OpenBSD: sleep.c,v 1.17 2004/09/16 08:35:49 deraadt Exp $";
+a137 1
+/* ARGSUSED */
+d139 1
+a139 1
+alarmh(int signo)
+@
+

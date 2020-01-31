@@ -1,0 +1,383 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2010.09.21.21.23.52;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004C992261692DCA0F;
+
+1.4
+date	2008.05.17.23.29.31;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100482F6A6C6AACC09D;
+
+1.3
+date	2008.05.16.22.14.19;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100482E074539FBFB0B;
+
+1.2
+date	2006.09.04.18.57.27;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044FC770129E2B9DC;
+
+1.1
+date	2005.03.18.15.43.03;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.43.03;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.5
+log
+@use arc4random() a bit more efficiently
+@
+text
+@$MirOS: ports/audio/mpg123/patches/patch-mpg123_c,v 1.4 2008/05/17 23:29:31 tg Exp $
+$OpenBSD: patch-mpg123.c,v 1.2 2001/04/24 00:48:12 naddy Exp $
+--- mpg123.c.orig	Tue Jun 15 20:21:14 1999
++++ mpg123.c	Tue Sep 21 20:50:03 2010
+@@@@ -17,11 +17,13 @@@@
+ #include <errno.h>
+ #include <string.h>
+ #include <fcntl.h>
++#include <locale.h>
+ 
+ #if 0
+ #define SET_RT 
+ #endif
+ 
++#define	INCLUDE_RCSID
+ 
+ #ifdef SET_RT
+ #include <sched.h>
+@@@@ -34,6 +36,8 @@@@
+ 
+ #include "version.h"
+ 
++__RCSID("$MirOS: ports/audio/mpg123/patches/patch-mpg123_c,v 1.4 2008/05/17 23:29:31 tg Exp $");
++
+ static void usage(char *dummy);
+ static void long_usage(char *);
+ static void print_title(void);
+@@@@ -177,6 +181,9 @@@@ void init_output(void)
+         _exit(0);
+       default: /* parent */
+         xfermem_init_writer (buffermem);
++	if (xfermem_block(XF_WRITER, buffermem) == XF_CMD_TERMINATE) {
++	    intflag = TRUE;
++	}
+         param.outmode = DECODE_BUFFER;
+     }
+   }
+@@@@ -222,7 +229,6 @@@@ void shuffle_files(int numfiles)
+ {
+     int loop, rannum;
+ 
+-    srand(time(NULL));
+     if(shuffleord)
+       free(shuffleord);
+     shuffleord = (int *) malloc((numfiles + 1) * sizeof(int));
+@@@@ -238,8 +244,14 @@@@ void shuffle_files(int numfiles)
+     /* now shuffle them */
+     if(numfiles >= 2) {
+       for (loop = 0; loop < numfiles; loop++) {
+-	rannum = (rand() % (numfiles * 4 - 4)) / 4;
++#ifdef arc4random_uniform
++	do {
++		rannum = arc4random_uniform(numfiles);
++	} while (rannum == loop);
++#else
++	rannum = (arc4random() % (numfiles * 4 - 4)) / 4;
+         rannum += (rannum >= loop);
++#endif
+ 	shuffleord[loop] ^= shuffleord[rannum];
+ 	shuffleord[rannum] ^= shuffleord[loop];
+ 	shuffleord[loop] ^= shuffleord[rannum];
+@@@@ -306,9 +318,9 @@@@ char *find_next_file (int argc, char *ar
+                 if (line[0]=='\0' || line[0]=='#')
+                     continue;
+ 		if ((listnamedir) && (line[0]!='/') && (line[0]!='\\')){
+-                    strcpy (linetmp, listnamedir);
+-                    strcat (linetmp, line);
+-		    strcpy (line, linetmp);
++                    strlcpy (linetmp, listnamedir, 1024);
++                    strlcat (linetmp, line, 1024);
++		    strlcpy (line, linetmp, 1024);
+                 }
+                 return (line);
+             }
+@@@@ -329,6 +341,7 @@@@ void init_input (int argc, char *argv[])
+ {
+     int mallocsize = 0;
+     char *tempstr;
++    size_t s;
+ 
+     shuffle_listsize = 0;
+ 
+@@@@ -344,11 +357,11 @@@@ void init_input (int argc, char *argv[])
+ 		exit(1);
+ 	    }
+ 	}
+-	if (!(shufflist[shuffle_listsize] = (char *) malloc(strlen(tempstr) + 1))) {
++	if (!(shufflist[shuffle_listsize] = (char *) malloc(s = (strlen(tempstr) + 1)))) {
+ 	    perror("malloc");
+ 	    exit(1);
+ 	}
+-	strcpy(shufflist[shuffle_listsize], tempstr);
++	strlcpy(shufflist[shuffle_listsize], tempstr, s);
+ 	shuffle_listsize++;
+     }
+     if (shuffle_listsize) {
+@@@@ -380,7 +393,11 @@@@ char *get_next_file(int argc, char **arg
+         curfile++;
+     }
+     else {
+-       newfile = shufflist[ rand() % shuffle_listsize ];
++#ifdef arc4random_uniform
++	newfile = shufflist[arc4random_uniform(shuffle_listsize)];
++#else
++	newfile = shufflist[arc4random() % shuffle_listsize];
++#endif
+     }
+ 
+     return newfile;
+@@@@ -477,7 +494,7 @@@@ topt opts[] = {
+     {'t', "test",        0,                  0, &param.outmode, DECODE_TEST},
+     {'s', "stdout",      0,       SetOutStdout, &param.outmode, DECODE_FILE},
+     {'S', "STDOUT",      0,       SetOutStdout1, &param.outmode, DECODE_AUDIOFILE},
+-    {'O', "outfile",     GLO_ARG | GLO_CHAR, SetOutFile, NULL, NULL},
++    {'O', "outfile",     GLO_ARG | GLO_CHAR, SetOutFile, NULL, 0},
+     {'c', "check",       0,                  0, &param.checkrange, TRUE},
+     {'v', "verbose",     0,        set_verbose, 0,           0},
+     {'q', "quiet",       0,                  0, &param.quiet,      TRUE},
+@@@@ -776,6 +793,10 @@@@ int main(int argc, char *argv[])
+ #endif	
+ 	int init;
+ 
++	/* Initialise early */
++	(void)arc4random();
++	(void)setlocale(LC_ALL, "");
++
+ #ifdef OS2
+         _wildcard(&argc,&argv);
+ #endif
+@@@@ -913,18 +934,6 @@@@ int main(int argc, char *argv[])
+ 				&dirname, &filename))
+ 				fprintf(stderr, "\nDirectory: %s", dirname);
+ 			fprintf(stderr, "\nPlaying MPEG stream from %s ...\n", filename);
+-
+-#if !defined(GENERIC)
+-{
+-     const char *term_type;
+-         term_type = getenv("TERM");
+-         if (!strcmp(term_type,"xterm"))
+-         {
+-           fprintf(stderr, "\033]0;%s\007", filename);
+-         }
+-}
+-#endif
+-
+ 		}
+ 
+ #if !defined(WIN32) && !defined(GENERIC)
+@
+
+
+1.4
+log
+@• convert to MirMake (now it should be *much* easier to add other OSes)
+• use wide character string output for ICY meta information from cp1252
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/audio/mpg123/patches/patch-mpg123_c,v 1.3 2008/05/16 22:14:19 tg Exp $
+d4 1
+a4 1
++++ mpg123.c	Sat May 17 23:16:09 2008
+d23 1
+a23 1
++__RCSID("$MirOS: ports/audio/mpg123/patches/patch-mpg123_c,v 1.3 2008/05/16 22:14:19 tg Exp $");
+d46 1
+a46 1
+@@@@ -238,7 +244,7 @@@@ void shuffle_files(int numfiles)
+d51 5
+d58 1
+d61 2
+a62 1
+@@@@ -306,9 +312,9 @@@@ char *find_next_file (int argc, char *ar
+d75 1
+a75 1
+@@@@ -329,6 +335,7 @@@@ void init_input (int argc, char *argv[])
+d83 1
+a83 1
+@@@@ -344,11 +351,11 @@@@ void init_input (int argc, char *argv[])
+d97 1
+a97 1
+@@@@ -380,7 +387,7 @@@@ char *get_next_file(int argc, char **arg
+d102 5
+a106 1
++       newfile = shufflist[ arc4random() % shuffle_listsize ];
+d110 1
+a110 1
+@@@@ -477,7 +484,7 @@@@ topt opts[] = {
+d119 1
+a119 1
+@@@@ -776,6 +783,10 @@@@ int main(int argc, char *argv[])
+d130 1
+a130 1
+@@@@ -913,18 +924,6 @@@@ int main(int argc, char *argv[])
+@
+
+
+1.3
+log
+@add support for shoutcast metadata \o/
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/audio/mpg123/patches/patch-mpg123_c,v 1.2 2006/09/04 18:57:27 tg Exp $
+d4 8
+a11 2
++++ mpg123.c	Fri May 16 22:05:45 2008
+@@@@ -22,6 +22,7 @@@@
+d19 1
+a19 1
+@@@@ -34,6 +35,8 @@@@
+d23 1
+a23 1
++__RCSID("$MirOS: ports/audio/mpg123/patches/patch-mpg123_c,v 1.2 2006/09/04 18:57:27 tg Exp $");
+d28 1
+a28 1
+@@@@ -177,6 +180,9 @@@@ void init_output(void)
+d38 1
+a38 1
+@@@@ -222,7 +228,6 @@@@ void shuffle_files(int numfiles)
+d46 1
+a46 1
+@@@@ -238,7 +243,7 @@@@ void shuffle_files(int numfiles)
+d55 1
+a55 1
+@@@@ -306,9 +311,9 @@@@ char *find_next_file (int argc, char *ar
+d68 1
+a68 1
+@@@@ -329,6 +334,7 @@@@ void init_input (int argc, char *argv[])
+d76 1
+a76 1
+@@@@ -344,11 +350,11 @@@@ void init_input (int argc, char *argv[])
+d90 1
+a90 1
+@@@@ -380,7 +386,7 @@@@ char *get_next_file(int argc, char **arg
+d99 1
+a99 1
+@@@@ -477,7 +483,7 @@@@ topt opts[] = {
+d108 1
+a108 1
+@@@@ -776,6 +782,9 @@@@ int main(int argc, char *argv[])
+d114 1
+d119 1
+a119 1
+@@@@ -913,18 +922,6 @@@@ int main(int argc, char *argv[])
+@
+
+
+1.2
+log
+@* style
+* mark as open/mirbsd only
+* much simplify build while adding the benefit of honouring copts better
+* use arc4random(3)
+* bump patchlevel
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/audio/mpg123/patches/patch-mpg123_c,v 1.1.7.1 2005/03/18 15:43:03 tg Exp $
+d4 4
+a7 4
++++ mpg123.c	Mon Sep  4 18:41:22 2006
+@@@@ -32,8 +32,11 @@@@
+ #include "buffer.h"
+ #include "term.h"
+d10 5
+d17 1
+a17 1
++__RCSID("$MirOS$");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 3
+a5 3
+--- mpg123.c.orig	1999-06-15 20:21:14.000000000 +0000
++++ mpg123.c	2004-05-12 19:31:47.000000000 +0000
+@@@@ -32,6 +32,7 @@@@
+d12 2
+d15 3
+a17 1
+@@@@ -177,6 +178,9 @@@@ void init_output(void)
+d27 18
+a44 1
+@@@@ -306,9 +310,9 @@@@ char *find_next_file (int argc, char *ar
+d57 1
+a57 1
+@@@@ -329,6 +333,7 @@@@ void init_input (int argc, char *argv[])
+d65 1
+a65 1
+@@@@ -344,11 +349,11 @@@@ void init_input (int argc, char *argv[])
+d79 10
+a88 1
+@@@@ -477,7 +482,7 @@@@ topt opts[] = {
+d97 11
+a107 1
+@@@@ -913,18 +918,6 @@@@ int main(int argc, char *argv[])
+a125 14
+@@@@ -1101,6 +1094,7 @@@@ static void print_title(void)
+ {
+     fprintf(stderr,"High Performance MPEG 1.0/2.0/2.5 Audio Player for Layer 1, 2 and 3.\n");
+     fprintf(stderr,"Version %s (%s). Written and copyrights by Michael Hipp.\n", prgVersion, prgDate);
++    fprintf(stderr,"Patchlevel %s\n", RCSid);
+     fprintf(stderr,"Uses code from various people. See 'README' for more!\n");
+     fprintf(stderr,"THIS SOFTWARE COMES WITH ABSOLUTELY NO WARRANTY! USE AT YOUR OWN RISK!\n");
+ }
+@@@@ -1198,5 +1192,3 @@@@ static void long_usage(char *d)
+   fprintf(o,"\nSee the manpage %s(1) for more information.\n", prgName);
+   exit(0);
+ }
+-
+-
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

@@ -1,0 +1,279 @@
+head	1.2;
+access;
+symbols
+	cvs-201110182115:1.1.3.1
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	cvs-200611031400:1.1.3.1
+	netbsd:1.1.3
+	OPENBSD_4_0:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2006.11.03.18.10.52;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100454B862956081199;
+
+1.1
+date	2005.02.05.17.25.18;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.3.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.18;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.11.03.01.33.22;	author tg;	state Exp;
+branches;
+next	;
+commitid	100454A9C75705F73D8;
+
+1.1.3.1
+date	2006.11.03.14.20.58;	author tg;	state Exp;
+branches;
+next	;
+commitid	100454B505850533E95;
+
+
+desc
+@@
+
+
+1.2
+log
+@Switch to NetBSD libm
+@
+text
+@/* @@(#)e_atan2.c 5.1 93/09/24 */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+
+#include <sys/cdefs.h>
+#if defined(LIBM_SCCS) && !defined(lint)
+__RCSID("$NetBSD: e_atan2.c,v 1.12 2002/05/26 22:01:48 wiz Exp $");
+#endif
+
+/* __ieee754_atan2(y,x)
+ * Method :
+ *	1. Reduce y to positive by atan2(y,x)=-atan2(-y,x).
+ *	2. Reduce x to positive by (if x and y are unexceptional):
+ *		ARG (x+iy) = arctan(y/x)   	   ... if x > 0,
+ *		ARG (x+iy) = pi - arctan[y/(-x)]   ... if x < 0,
+ *
+ * Special cases:
+ *
+ *	ATAN2((anything), NaN ) is NaN;
+ *	ATAN2(NAN , (anything) ) is NaN;
+ *	ATAN2(+-0, +(anything but NaN)) is +-0  ;
+ *	ATAN2(+-0, -(anything but NaN)) is +-pi ;
+ *	ATAN2(+-(anything but 0 and NaN), 0) is +-pi/2;
+ *	ATAN2(+-(anything but INF and NaN), +INF) is +-0 ;
+ *	ATAN2(+-(anything but INF and NaN), -INF) is +-pi;
+ *	ATAN2(+-INF,+INF ) is +-pi/4 ;
+ *	ATAN2(+-INF,-INF ) is +-3pi/4;
+ *	ATAN2(+-INF, (anything but,0,NaN, and INF)) is +-pi/2;
+ *
+ * Constants:
+ * The hexadecimal values are the intended ones for the following
+ * constants. The decimal values may be used, provided that the
+ * compiler will convert from decimal to binary accurately enough
+ * to produce the hexadecimal values shown.
+ */
+
+#include "math.h"
+#include "math_private.h"
+
+static const double
+tiny  = 1.0e-300,
+zero  = 0.0,
+pi_o_4  = 7.8539816339744827900E-01, /* 0x3FE921FB, 0x54442D18 */
+pi_o_2  = 1.5707963267948965580E+00, /* 0x3FF921FB, 0x54442D18 */
+pi      = 3.1415926535897931160E+00, /* 0x400921FB, 0x54442D18 */
+pi_lo   = 1.2246467991473531772E-16; /* 0x3CA1A626, 0x33145C07 */
+
+double
+__ieee754_atan2(double y, double x)
+{
+	double z;
+	int32_t k,m,hx,hy,ix,iy;
+	u_int32_t lx,ly;
+
+	EXTRACT_WORDS(hx,lx,x);
+	ix = hx&0x7fffffff;
+	EXTRACT_WORDS(hy,ly,y);
+	iy = hy&0x7fffffff;
+	if(((ix|((lx|-lx)>>31))>0x7ff00000)||
+	   ((iy|((ly|-ly)>>31))>0x7ff00000))	/* x or y is NaN */
+	   return x+y;
+	if(((hx-0x3ff00000)|lx)==0) return atan(y);   /* x=1.0 */
+	m = ((hy>>31)&1)|((hx>>30)&2);	/* 2*sign(x)+sign(y) */
+
+    /* when y = 0 */
+	if((iy|ly)==0) {
+	    switch(m) {
+		case 0:
+		case 1: return y; 	/* atan(+-0,+anything)=+-0 */
+		case 2: return  pi+tiny;/* atan(+0,-anything) = pi */
+		case 3: return -pi-tiny;/* atan(-0,-anything) =-pi */
+	    }
+	}
+    /* when x = 0 */
+	if((ix|lx)==0) return (hy<0)?  -pi_o_2-tiny: pi_o_2+tiny;
+
+    /* when x is INF */
+	if(ix==0x7ff00000) {
+	    if(iy==0x7ff00000) {
+		switch(m) {
+		    case 0: return  pi_o_4+tiny;/* atan(+INF,+INF) */
+		    case 1: return -pi_o_4-tiny;/* atan(-INF,+INF) */
+		    case 2: return  3.0*pi_o_4+tiny;/*atan(+INF,-INF)*/
+		    case 3: return -3.0*pi_o_4-tiny;/*atan(-INF,-INF)*/
+		}
+	    } else {
+		switch(m) {
+		    case 0: return  zero  ;	/* atan(+...,+INF) */
+		    case 1: return -zero  ;	/* atan(-...,+INF) */
+		    case 2: return  pi+tiny  ;	/* atan(+...,-INF) */
+		    case 3: return -pi-tiny  ;	/* atan(-...,-INF) */
+		}
+	    }
+	}
+    /* when y is INF */
+	if(iy==0x7ff00000) return (hy<0)? -pi_o_2-tiny: pi_o_2+tiny;
+
+    /* compute y/x */
+	k = (iy-ix)>>20;
+	if(k > 60) z=pi_o_2+0.5*pi_lo; 	/* |y/x| >  2**60 */
+	else if(hx<0&&k<-60) z=0.0; 	/* |y|/x < -2**60 */
+	else z=atan(fabs(y/x));		/* safe to do y/x */
+	switch (m) {
+	    case 0: return       z  ;	/* atan(+,+) */
+	    case 1: {
+	    	      u_int32_t zh;
+		      GET_HIGH_WORD(zh,z);
+		      SET_HIGH_WORD(z,zh ^ 0x80000000);
+		    }
+		    return       z  ;	/* atan(-,+) */
+	    case 2: return  pi-(z-pi_lo);/* atan(+,-) */
+	    default: /* case 3 */
+	    	    return  (z-pi_lo)-pi;/* atan(-,-) */
+	}
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d8 1
+a8 1
+ * software is freely granted, provided that this notice 
+d13 1
+d15 1
+a15 1
+static char rcsid[] = "$NetBSD: e_atan2.c,v 1.8 1995/05/10 20:44:51 jtc Exp $";
+d21 1
+a21 1
+ *	2. Reduce x to positive by (if x and y are unexceptional): 
+d39 3
+a41 3
+ * The hexadecimal values are the intended ones for the following 
+ * constants. The decimal values may be used, provided that the 
+ * compiler will convert from decimal to binary accurately enough 
+d48 1
+a48 1
+static const double 
+d58 1
+a58 1
+{  
+d70 1
+a70 1
+	if((hx-0x3ff00000|lx)==0) return atan(y);   /* x=1.0 */
+d76 1
+a76 1
+		case 0: 
+d84 1
+a84 1
+	    
+@
+
+
+1.1.3.1
+log
+@Laugh at OpenBSD's libm and import NetBSD's
+@
+text
+@d8 1
+a8 1
+ * software is freely granted, provided that this notice
+a12 1
+#include <sys/cdefs.h>
+d14 1
+a14 1
+__RCSID("$NetBSD: e_atan2.c,v 1.12 2002/05/26 22:01:48 wiz Exp $");
+d20 1
+a20 1
+ *	2. Reduce x to positive by (if x and y are unexceptional):
+d38 3
+a40 3
+ * The hexadecimal values are the intended ones for the following
+ * constants. The decimal values may be used, provided that the
+ * compiler will convert from decimal to binary accurately enough
+d47 1
+a47 1
+static const double
+d57 1
+a57 1
+{
+d69 1
+a69 1
+	if(((hx-0x3ff00000)|lx)==0) return atan(y);   /* x=1.0 */
+d75 1
+a75 1
+		case 0:
+d83 1
+a83 1
+
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import OpenBSD 4.0's libm
+@
+text
+@d69 1
+a69 1
+	if(((hx-0x3ff00000)|lx)==0) return atan(y);   /* x=1.0 */
+@
+

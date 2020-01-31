@@ -1,0 +1,561 @@
+head	1.4;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2017.04.15.19.21.33;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10058F2723111C7BEE2;
+
+1.3
+date	2013.08.06.19.47.49;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100520152445E05B912;
+
+1.2
+date	2006.06.29.20.24.47;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.45;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.12;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.11;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.00;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.4
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftcimage.c                                                             */
+/*                                                                         */
+/*    FreeType Image cache (body).                                         */
+/*                                                                         */
+/*  Copyright 2000-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_CACHE_H
+#include "ftcimage.h"
+#include FT_INTERNAL_MEMORY_H
+#include FT_INTERNAL_OBJECTS_H
+
+#include "ftccback.h"
+#include "ftcerror.h"
+
+
+  /* finalize a given glyph image node */
+  FT_LOCAL_DEF( void )
+  ftc_inode_free( FTC_Node   ftcinode,
+                  FTC_Cache  cache )
+  {
+    FTC_INode  inode = (FTC_INode)ftcinode;
+    FT_Memory  memory = cache->memory;
+
+
+    if ( inode->glyph )
+    {
+      FT_Done_Glyph( inode->glyph );
+      inode->glyph = NULL;
+    }
+
+    FTC_GNode_Done( FTC_GNODE( inode ), cache );
+    FT_FREE( inode );
+  }
+
+
+  FT_LOCAL_DEF( void )
+  FTC_INode_Free( FTC_INode  inode,
+                  FTC_Cache  cache )
+  {
+    ftc_inode_free( FTC_NODE( inode ), cache );
+  }
+
+
+  /* initialize a new glyph image node */
+  FT_LOCAL_DEF( FT_Error )
+  FTC_INode_New( FTC_INode   *pinode,
+                 FTC_GQuery   gquery,
+                 FTC_Cache    cache )
+  {
+    FT_Memory  memory = cache->memory;
+    FT_Error   error;
+    FTC_INode  inode  = NULL;
+
+
+    if ( !FT_NEW( inode ) )
+    {
+      FTC_GNode         gnode  = FTC_GNODE( inode );
+      FTC_Family        family = gquery->family;
+      FT_UInt           gindex = gquery->gindex;
+      FTC_IFamilyClass  clazz  = FTC_CACHE_IFAMILY_CLASS( cache );
+
+
+      /* initialize its inner fields */
+      FTC_GNode_Init( gnode, gindex, family );
+
+      /* we will now load the glyph image */
+      error = clazz->family_load_glyph( family, gindex, cache,
+                                        &inode->glyph );
+      if ( error )
+      {
+        FTC_INode_Free( inode, cache );
+        inode = NULL;
+      }
+    }
+
+    *pinode = inode;
+    return error;
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  ftc_inode_new( FTC_Node   *ftcpinode,
+                 FT_Pointer  ftcgquery,
+                 FTC_Cache   cache )
+  {
+    FTC_INode  *pinode = (FTC_INode*)ftcpinode;
+    FTC_GQuery  gquery = (FTC_GQuery)ftcgquery;
+
+
+    return FTC_INode_New( pinode, gquery, cache );
+  }
+
+
+  FT_LOCAL_DEF( FT_Offset )
+  ftc_inode_weight( FTC_Node   ftcinode,
+                    FTC_Cache  ftccache )
+  {
+    FTC_INode  inode = (FTC_INode)ftcinode;
+    FT_Offset  size  = 0;
+    FT_Glyph   glyph = inode->glyph;
+
+    FT_UNUSED( ftccache );
+
+
+    switch ( glyph->format )
+    {
+    case FT_GLYPH_FORMAT_BITMAP:
+      {
+        FT_BitmapGlyph  bitg;
+
+
+        bitg = (FT_BitmapGlyph)glyph;
+        size = bitg->bitmap.rows * (FT_Offset)FT_ABS( bitg->bitmap.pitch ) +
+               sizeof ( *bitg );
+      }
+      break;
+
+    case FT_GLYPH_FORMAT_OUTLINE:
+      {
+        FT_OutlineGlyph  outg;
+
+
+        outg = (FT_OutlineGlyph)glyph;
+        size = (FT_Offset)outg->outline.n_points *
+                 ( sizeof ( FT_Vector ) + sizeof ( FT_Byte ) ) +
+               (FT_Offset)outg->outline.n_contours * sizeof ( FT_Short ) +
+               sizeof ( *outg );
+      }
+      break;
+
+    default:
+      ;
+    }
+
+    size += sizeof ( *inode );
+    return size;
+  }
+
+
+#if 0
+
+  FT_LOCAL_DEF( FT_Offset )
+  FTC_INode_Weight( FTC_INode  inode )
+  {
+    return ftc_inode_weight( FTC_NODE( inode ), NULL );
+  }
+
+#endif /* 0 */
+
+
+/* END */
+@
+
+
+1.3
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2003, 2004, 2006 by                               */
+d23 1
+d65 1
+a65 1
+    FTC_INode  inode;
+d73 1
+a73 1
+      FTC_IFamilyClass  clazz  = FTC_CACHE__IFAMILY_CLASS( cache );
+d126 1
+a126 1
+        size = bitg->bitmap.rows * ft_labs( bitg->bitmap.pitch ) +
+d137 1
+a137 1
+        size = outg->outline.n_points *
+d139 1
+a139 1
+               outg->outline.n_contours * sizeof ( FT_Short ) +
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d106 1
+a106 1
+  FT_LOCAL_DEF( FT_ULong )
+d111 1
+a111 1
+    FT_ULong   size  = 0;
+d154 1
+a154 1
+  FT_LOCAL_DEF( FT_ULong )
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2003, 2004 by                                     */
+d21 1
+a21 1
+#include FT_CACHE_INTERNAL_IMAGE_H
+d29 2
+a30 2
+  FT_EXPORT_DEF( void )
+  FTC_INode_Free( FTC_INode  inode,
+d33 1
+d49 1
+a49 1
+  ftc_inode_free( FTC_INode  inode,
+d52 1
+a52 1
+    FTC_INode_Free( inode, cache );
+d57 1
+a57 1
+  FT_EXPORT_DEF( FT_Error )
+d81 5
+d94 3
+a96 3
+  ftc_inode_new( FTC_INode   *pinode,
+                 FTC_GQuery   gquery,
+                 FTC_Cache    cache )
+d98 4
+d106 3
+a108 2
+  FT_EXPORT_DEF( FT_ULong )
+  FTC_INode_Weight( FTC_INode  inode )
+d110 5
+a114 2
+    FT_ULong  size  = 0;
+    FT_Glyph  glyph = inode->glyph;
+d125 1
+a125 1
+        size = bitg->bitmap.rows * labs( bitg->bitmap.pitch ) +
+d152 2
+d155 1
+a155 1
+  ftc_inode_weight( FTC_INode  inode )
+d157 1
+a157 1
+    return FTC_INode_Weight( inode );
+d160 2
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2003, 2004, 2006 by                               */
+d21 1
+a21 1
+#include "ftcimage.h"
+d29 2
+a30 2
+  FT_LOCAL_DEF( void )
+  ftc_inode_free( FTC_Node   ftcinode,
+a32 1
+    FTC_INode  inode = (FTC_INode)ftcinode;
+d48 1
+a48 1
+  FTC_INode_Free( FTC_INode  inode,
+d51 1
+a51 1
+    ftc_inode_free( FTC_NODE( inode ), cache );
+d56 1
+a56 1
+  FT_LOCAL_DEF( FT_Error )
+a79 5
+      if ( error )
+      {
+        FTC_INode_Free( inode, cache );
+        inode = NULL;
+      }
+d88 3
+a90 3
+  ftc_inode_new( FTC_Node   *ftcpinode,
+                 FT_Pointer  ftcgquery,
+                 FTC_Cache   cache )
+a91 4
+    FTC_INode  *pinode = (FTC_INode*)ftcpinode;
+    FTC_GQuery  gquery = (FTC_GQuery)ftcgquery;
+
+
+d96 2
+a97 3
+  FT_LOCAL_DEF( FT_ULong )
+  ftc_inode_weight( FTC_Node   ftcinode,
+                    FTC_Cache  ftccache )
+d99 2
+a100 5
+    FTC_INode  inode = (FTC_INode)ftcinode;
+    FT_ULong   size  = 0;
+    FT_Glyph   glyph = inode->glyph;
+
+    FT_UNUSED( ftccache );
+d111 1
+a111 1
+        size = bitg->bitmap.rows * ft_labs( bitg->bitmap.pitch ) +
+a137 2
+#if 0
+
+d139 1
+a139 1
+  FTC_INode_Weight( FTC_INode  inode )
+d141 1
+a141 1
+    return ftc_inode_weight( FTC_NODE( inode ), NULL );
+a143 2
+#endif /* 0 */
+
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2003, 2004, 2006 by                               */
+d21 1
+a21 1
+#include "ftcimage.h"
+d29 2
+a30 2
+  FT_LOCAL_DEF( void )
+  ftc_inode_free( FTC_Node   ftcinode,
+a32 1
+    FTC_INode  inode = (FTC_INode)ftcinode;
+d48 1
+a48 1
+  FTC_INode_Free( FTC_INode  inode,
+d51 1
+a51 1
+    ftc_inode_free( FTC_NODE( inode ), cache );
+d56 1
+a56 1
+  FT_LOCAL_DEF( FT_Error )
+a79 5
+      if ( error )
+      {
+        FTC_INode_Free( inode, cache );
+        inode = NULL;
+      }
+d88 3
+a90 3
+  ftc_inode_new( FTC_Node   *ftcpinode,
+                 FT_Pointer  ftcgquery,
+                 FTC_Cache   cache )
+a91 4
+    FTC_INode  *pinode = (FTC_INode*)ftcpinode;
+    FTC_GQuery  gquery = (FTC_GQuery)ftcgquery;
+
+
+d96 2
+a97 3
+  FT_LOCAL_DEF( FT_ULong )
+  ftc_inode_weight( FTC_Node   ftcinode,
+                    FTC_Cache  ftccache )
+d99 2
+a100 5
+    FTC_INode  inode = (FTC_INode)ftcinode;
+    FT_ULong   size  = 0;
+    FT_Glyph   glyph = inode->glyph;
+
+    FT_UNUSED( ftccache );
+d111 1
+a111 1
+        size = bitg->bitmap.rows * ft_labs( bitg->bitmap.pitch ) +
+a137 2
+#if 0
+
+d139 1
+a139 1
+  FTC_INode_Weight( FTC_INode  inode )
+d141 1
+a141 1
+    return ftc_inode_weight( FTC_NODE( inode ), NULL );
+a143 2
+#endif /* 0 */
+
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d106 1
+a106 1
+  FT_LOCAL_DEF( FT_Offset )
+d111 1
+a111 1
+    FT_Offset  size  = 0;
+d154 1
+a154 1
+  FT_LOCAL_DEF( FT_Offset )
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2016 by                                                 */
+a22 1
+#include FT_INTERNAL_OBJECTS_H
+d64 1
+a64 1
+    FTC_INode  inode  = NULL;
+d72 1
+a72 1
+      FTC_IFamilyClass  clazz  = FTC_CACHE_IFAMILY_CLASS( cache );
+d125 1
+a125 1
+        size = bitg->bitmap.rows * (FT_Offset)FT_ABS( bitg->bitmap.pitch ) +
+d136 1
+a136 1
+        size = (FT_Offset)outg->outline.n_points *
+d138 1
+a138 1
+               (FT_Offset)outg->outline.n_contours * sizeof ( FT_Short ) +
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

@@ -1,0 +1,822 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype:1.1.115;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.22.10;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.48.27;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.06.12.20.54.49;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10048518C1E44F62885;
+
+1.2
+date	2008.02.26.20.05.08;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	10047C470A72A1E13CE;
+
+1.1
+date	2006.06.29.18.37.18;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10044A41DBD6368BED5;
+
+1.1.1.1
+date	2008.02.26.19.53.38;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.39.22;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.115.1
+date	2006.06.29.18.37.18;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.2
+date	2013.08.06.19.12.22;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.3
+date	2017.04.15.15.42.13;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/*
+ * This little program is used to parse the FreeType headers and
+ * find the declaration of all public APIs.  This is easy, because
+ * they all look like the following:
+ *
+ *   FT_EXPORT( return_type )
+ *   function_name( function arguments );
+ *
+ * You must pass the list of header files as arguments.  Wildcards are
+ * accepted if you are using GCC for compilation (and probably by
+ * other compilers too).
+ *
+ * Author: David Turner, 2005, 2006, 2008-2013, 2015
+ *
+ * This code is explicitly placed into the public domain.
+ *
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+#define  PROGRAM_NAME     "apinames"
+#define  PROGRAM_VERSION  "0.2"
+
+#define  LINEBUFF_SIZE  1024
+
+typedef enum  OutputFormat_
+{
+  OUTPUT_LIST = 0,      /* output the list of names, one per line             */
+  OUTPUT_WINDOWS_DEF,   /* output a Windows .DEF file for Visual C++ or Mingw */
+  OUTPUT_BORLAND_DEF,   /* output a Windows .DEF file for Borland C++         */
+  OUTPUT_WATCOM_LBC,    /* output a Watcom Linker Command File                */
+  OUTPUT_NETWARE_IMP    /* output a NetWare ImportFile                        */
+
+} OutputFormat;
+
+
+static void
+panic( const char*  message )
+{
+  fprintf( stderr, "PANIC: %s\n", message );
+  exit(2);
+}
+
+
+typedef struct  NameRec_
+{
+  char*         name;
+  unsigned int  hash;
+
+} NameRec, *Name;
+
+static Name  the_names;
+static int   num_names;
+static int   max_names;
+
+static void
+names_add( const char*  name,
+           const char*  end )
+{
+  unsigned int  h;
+  int           nn, len;
+  Name          nm;
+
+  if ( end <= name )
+    return;
+
+  /* compute hash value */
+  len = (int)(end - name);
+  h   = 0;
+  for ( nn = 0; nn < len; nn++ )
+    h = h*33 + name[nn];
+
+  /* check for an pre-existing name */
+  for ( nn = 0; nn < num_names; nn++ )
+  {
+    nm = the_names + nn;
+
+    if ( (int)nm->hash                 == h &&
+         memcmp( name, nm->name, len ) == 0 &&
+         nm->name[len]                 == 0 )
+      return;
+  }
+
+  /* add new name */
+  if ( num_names >= max_names )
+  {
+    max_names += (max_names >> 1) + 4;
+    the_names  = (NameRec*)realloc( the_names,
+                                    sizeof ( the_names[0] ) * max_names );
+    if ( !the_names )
+      panic( "not enough memory" );
+  }
+  nm = &the_names[num_names++];
+
+  nm->hash = h;
+  nm->name = (char*)malloc( len+1 );
+  if ( !nm->name )
+    panic( "not enough memory" );
+
+  memcpy( nm->name, name, len );
+  nm->name[len] = 0;
+}
+
+
+static int
+name_compare( const void*  name1,
+              const void*  name2 )
+{
+  Name  n1 = (Name)name1;
+  Name  n2 = (Name)name2;
+
+  return strcmp( n1->name, n2->name );
+}
+
+static void
+names_sort( void )
+{
+  qsort( the_names, (size_t)num_names,
+         sizeof ( the_names[0] ), name_compare );
+}
+
+
+static void
+names_dump( FILE*         out,
+            OutputFormat  format,
+            const char*   dll_name )
+{
+  int  nn;
+
+
+  switch ( format )
+  {
+    case OUTPUT_WINDOWS_DEF:
+      if ( dll_name )
+        fprintf( out, "LIBRARY %s\n", dll_name );
+
+      fprintf( out, "DESCRIPTION  FreeType 2 DLL\n" );
+      fprintf( out, "EXPORTS\n" );
+      for ( nn = 0; nn < num_names; nn++ )
+        fprintf( out, "  %s\n", the_names[nn].name );
+      break;
+
+    case OUTPUT_BORLAND_DEF:
+      if ( dll_name )
+        fprintf( out, "LIBRARY %s\n", dll_name );
+
+      fprintf( out, "DESCRIPTION  FreeType 2 DLL\n" );
+      fprintf( out, "EXPORTS\n" );
+      for ( nn = 0; nn < num_names; nn++ )
+        fprintf( out, "  _%s\n", the_names[nn].name );
+      break;
+
+    case OUTPUT_WATCOM_LBC:
+      {
+        const char*  dot;
+        char         temp[512];
+
+
+        if ( !dll_name )
+        {
+          fprintf( stderr,
+                   "you must provide a DLL name with the -d option!\n" );
+          exit( 4 );
+        }
+
+        /* we must omit the .dll suffix from the library name */
+        dot = strchr( dll_name, '.' );
+        if ( dot )
+        {
+          int  len = dot - dll_name;
+
+
+          if ( len > (int)( sizeof ( temp ) - 1 ) )
+            len = sizeof ( temp ) - 1;
+
+          memcpy( temp, dll_name, len );
+          temp[len] = 0;
+
+          dll_name = (const char*)temp;
+        }
+
+        for ( nn = 0; nn < num_names; nn++ )
+          fprintf( out, "++_%s.%s.%s\n", the_names[nn].name, dll_name,
+                        the_names[nn].name );
+      }
+      break;
+
+    case OUTPUT_NETWARE_IMP:
+      {
+        if ( dll_name )
+          fprintf( out, "  (%s)\n", dll_name );
+        for ( nn = 0; nn < num_names - 1; nn++ )
+          fprintf( out, "  %s,\n", the_names[nn].name );
+        fprintf( out, "  %s\n", the_names[num_names - 1].name );
+      }
+      break;
+
+    default:  /* LIST */
+      for ( nn = 0; nn < num_names; nn++ )
+        fprintf( out, "%s\n", the_names[nn].name );
+  }
+}
+
+
+
+
+/* states of the line parser */
+
+typedef enum  State_
+{
+  STATE_START = 0,  /* waiting for FT_EXPORT keyword and return type */
+  STATE_TYPE        /* type was read, waiting for function name      */
+
+} State;
+
+static int
+read_header_file( FILE*  file, int  verbose )
+{
+  static char  buff[LINEBUFF_SIZE + 1];
+  State        state = STATE_START;
+
+  while ( !feof( file ) )
+  {
+    char*  p;
+
+    if ( !fgets( buff, LINEBUFF_SIZE, file ) )
+      break;
+
+    p = buff;
+
+    while ( *p && (*p == ' ' || *p == '\\') )  /* skip leading whitespace */
+      p++;
+
+    if ( *p == '\n' || *p == '\r' )  /* skip empty lines */
+      continue;
+
+    switch ( state )
+    {
+      case STATE_START:
+        {
+          if ( memcmp( p, "FT_EXPORT(", 10 ) != 0 )
+            break;
+
+          p += 10;
+          for (;;)
+          {
+            if ( *p == 0 || *p == '\n' || *p == '\r' )
+              goto NextLine;
+
+            if ( *p == ')' )
+            {
+              p++;
+              break;
+            }
+
+            p++;
+          }
+
+          state = STATE_TYPE;
+
+         /* sometimes, the name is just after the FT_EXPORT(...), so
+          * skip whitespace, and fall-through if we find an alphanumeric
+          * character
+          */
+          while ( *p == ' ' || *p == '\t' )
+            p++;
+
+          if ( !isalpha(*p) )
+            break;
+        }
+        /* fall-through */
+
+      case STATE_TYPE:
+        {
+          char*   name = p;
+
+          while ( isalnum(*p) || *p == '_' )
+            p++;
+
+          if ( p > name )
+          {
+            if ( verbose )
+              fprintf( stderr, ">>> %.*s\n", (int)(p - name), name );
+
+            names_add( name, p );
+          }
+
+          state = STATE_START;
+        }
+        break;
+
+      default:
+        ;
+    }
+
+  NextLine:
+    ;
+  }
+
+  return 0;
+}
+
+
+static void
+usage( void )
+{
+  static const char* const  format =
+   "%s %s: extract FreeType API names from header files\n\n"
+   "this program is used to extract the list of public FreeType API\n"
+   "functions. It receives the list of header files as argument and\n"
+   "generates a sorted list of unique identifiers\n\n"
+
+   "usage: %s header1 [options] [header2 ...]\n\n"
+
+   "options:   -      : parse the content of stdin, ignore arguments\n"
+   "           -v     : verbose mode, output sent to standard error\n"
+   "           -oFILE : write output to FILE instead of standard output\n"
+   "           -dNAME : indicate DLL file name, 'freetype.dll' by default\n"
+   "           -w     : output .DEF file for Visual C++ and Mingw\n"
+   "           -wB    : output .DEF file for Borland C++\n"
+   "           -wW    : output Watcom Linker Response File\n"
+   "           -wN    : output NetWare Import File\n"
+   "\n";
+
+  fprintf( stderr,
+           format,
+           PROGRAM_NAME,
+           PROGRAM_VERSION,
+           PROGRAM_NAME
+           );
+  exit(1);
+}
+
+
+int  main( int argc, const char* const*  argv )
+{
+  int           from_stdin = 0;
+  int           verbose = 0;
+  OutputFormat  format = OUTPUT_LIST;  /* the default */
+  FILE*         out    = stdout;
+  const char*   library_name = NULL;
+
+  if ( argc < 2 )
+    usage();
+
+  /* '-' used as a single argument means read source file from stdin */
+  while ( argc > 1 && argv[1][0] == '-' )
+  {
+    const char*  arg = argv[1];
+
+    switch ( arg[1] )
+    {
+      case 'v':
+        verbose = 1;
+        break;
+
+      case 'o':
+        if ( arg[2] == 0 )
+        {
+          if ( argc < 2 )
+            usage();
+
+          arg = argv[2];
+          argv++;
+          argc--;
+        }
+        else
+          arg += 2;
+
+        out = fopen( arg, "wt" );
+        if ( !out )
+        {
+          fprintf( stderr, "could not open '%s' for writing\n", argv[2] );
+          exit(3);
+        }
+        break;
+
+      case 'd':
+        if ( arg[2] == 0 )
+        {
+          if ( argc < 2 )
+            usage();
+
+          arg = argv[2];
+          argv++;
+          argc--;
+        }
+        else
+          arg += 2;
+
+        library_name = arg;
+        break;
+
+      case 'w':
+        format = OUTPUT_WINDOWS_DEF;
+        switch ( arg[2] )
+        {
+          case 'B':
+            format = OUTPUT_BORLAND_DEF;
+            break;
+
+          case 'W':
+            format = OUTPUT_WATCOM_LBC;
+            break;
+
+          case 'N':
+            format = OUTPUT_NETWARE_IMP;
+            break;
+
+          case 0:
+            break;
+
+          default:
+            usage();
+        }
+        break;
+
+      case 0:
+        from_stdin = 1;
+        break;
+
+      default:
+        usage();
+    }
+
+    argc--;
+    argv++;
+  }
+
+  if ( from_stdin )
+  {
+    read_header_file( stdin, verbose );
+  }
+  else
+  {
+    for ( --argc, argv++; argc > 0; argc--, argv++ )
+    {
+      FILE*  file = fopen( argv[0], "rb" );
+
+      if ( !file )
+        fprintf( stderr, "unable to open '%s'\n", argv[0] );
+      else
+      {
+        if ( verbose )
+          fprintf( stderr, "opening '%s'\n", argv[0] );
+
+        read_header_file( file, verbose );
+        fclose( file );
+      }
+    }
+  }
+
+  if ( num_names == 0 )
+    panic( "could not find exported functions !!\n" );
+
+  names_sort();
+  names_dump( out, format, library_name );
+
+  if ( out != stdout )
+    fclose( out );
+
+  return 0;
+}
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d13 1
+a13 1
+ * Author: David Turner, 2005, 2006, 2008, 2009
+d25 1
+a25 1
+#define  PROGRAM_VERSION  "0.1"
+d34 2
+a35 1
+  OUTPUT_WATCOM_LBC     /* output a Watcom Linker Command File                */
+d63 3
+a65 2
+  int   nn, len, h;
+  Name  nm;
+d91 3
+a93 2
+    the_names  = (NameRec*)realloc( the_names, sizeof(the_names[0])*max_names );
+    if ( the_names == NULL )
+d100 1
+a100 1
+  if ( nm->name == NULL )
+d121 2
+a122 1
+  qsort( the_names, (size_t)num_names, sizeof(the_names[0]), name_compare );
+d133 1
+d158 3
+a160 3
+        /* we must omit the .dll suffix from the library name */
+        char   temp[512];
+        char*  dot;
+d162 1
+a162 1
+        if ( dll_name == NULL )
+d165 2
+a166 2
+                   "you must provide a DLL name with the -d option !!\n" );
+          exit(4);
+d169 1
+d171 1
+a171 1
+        if ( dot != NULL )
+d173 5
+a177 3
+          int  len = (dot - dll_name);
+          if ( len > (int)(sizeof(temp)-1) )
+            len = sizeof(temp)-1;
+d191 10
+d222 1
+a222 1
+  static char  buff[ LINEBUFF_SIZE+1 ];
+d325 1
+d374 1
+a374 1
+        if ( out == NULL )
+d409 4
+d443 1
+a443 1
+      if ( file == NULL )
+@
+
+
+1.3
+log
+@Merge freetype 2.3.6
+@
+text
+@d13 1
+a13 1
+ * Author: David Turner, 2005, 2006, 2008
+d268 1
+a268 1
+              fprintf( stderr, ">>> %.*s\n", p-name, name );
+@
+
+
+1.2
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d13 1
+a13 1
+ * Author: David Turner, 2005, 2006
+d29 1
+a29 1
+typedef enum
+d47 1
+a47 1
+typedef struct
+d194 1
+a194 1
+typedef enum
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d197 1
+a197 1
+  STATE_TYPE,       /* type was read, waiting for function name      */
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d197 1
+a197 1
+  STATE_TYPE        /* type was read, waiting for function name      */
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d13 1
+a13 1
+ * Author: David Turner, 2005, 2006, 2008
+d29 1
+a29 1
+typedef enum  OutputFormat_
+d47 1
+a47 1
+typedef struct  NameRec_
+d194 1
+a194 1
+typedef enum  State_
+@
+
+
+1.1.115.1
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@@
+
+
+1.1.115.2
+log
+@we need newer freetype for advance calculation
+@
+text
+@d13 1
+a13 1
+ * Author: David Turner, 2005, 2006, 2008, 2009
+d29 1
+a29 1
+typedef enum  OutputFormat_
+d47 1
+a47 1
+typedef struct  NameRec_
+d194 1
+a194 1
+typedef enum  State_
+d197 1
+a197 1
+  STATE_TYPE        /* type was read, waiting for function name      */
+d268 1
+a268 1
+              fprintf( stderr, ">>> %.*s\n", (int)(p - name), name );
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d13 1
+a13 1
+ * Author: David Turner, 2005, 2006, 2008-2013, 2015
+d25 1
+a25 1
+#define  PROGRAM_VERSION  "0.2"
+d34 1
+a34 2
+  OUTPUT_WATCOM_LBC,    /* output a Watcom Linker Command File                */
+  OUTPUT_NETWARE_IMP    /* output a NetWare ImportFile                        */
+d62 2
+a63 3
+  unsigned int  h;
+  int           nn, len;
+  Name          nm;
+d89 2
+a90 3
+    the_names  = (NameRec*)realloc( the_names,
+                                    sizeof ( the_names[0] ) * max_names );
+    if ( !the_names )
+d97 1
+a97 1
+  if ( !nm->name )
+d118 1
+a118 2
+  qsort( the_names, (size_t)num_names,
+         sizeof ( the_names[0] ), name_compare );
+a128 1
+
+d153 3
+a155 3
+        const char*  dot;
+        char         temp[512];
+
+d157 1
+a157 1
+        if ( !dll_name )
+d160 2
+a161 2
+                   "you must provide a DLL name with the -d option!\n" );
+          exit( 4 );
+a163 1
+        /* we must omit the .dll suffix from the library name */
+d165 1
+a165 1
+        if ( dot )
+d167 3
+a169 5
+          int  len = dot - dll_name;
+
+
+          if ( len > (int)( sizeof ( temp ) - 1 ) )
+            len = sizeof ( temp ) - 1;
+a182 10
+    case OUTPUT_NETWARE_IMP:
+      {
+        if ( dll_name )
+          fprintf( out, "  (%s)\n", dll_name );
+        for ( nn = 0; nn < num_names - 1; nn++ )
+          fprintf( out, "  %s,\n", the_names[nn].name );
+        fprintf( out, "  %s\n", the_names[num_names - 1].name );
+      }
+      break;
+
+d204 1
+a204 1
+  static char  buff[LINEBUFF_SIZE + 1];
+a306 1
+   "           -wN    : output NetWare Import File\n"
+d355 1
+a355 1
+        if ( !out )
+a389 4
+          case 'N':
+            format = OUTPUT_NETWARE_IMP;
+            break;
+
+d420 1
+a420 1
+      if ( !file )
+@
+
+

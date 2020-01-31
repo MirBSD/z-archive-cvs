@@ -1,0 +1,816 @@
+head	1.4;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2017.04.15.19.22.03;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10058F2723111C7BEE2;
+
+1.3
+date	2013.08.06.19.48.20;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100520152445E05B912;
+
+1.2
+date	2006.06.29.20.25.04;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.16;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.31;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.16;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.43;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.34;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.23;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.11;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.4
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftrend1.c                                                              */
+/*                                                                         */
+/*    The FreeType glyph rasterizer interface (body).                      */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+#include FT_INTERNAL_OBJECTS_H
+#include FT_OUTLINE_H
+#include "ftrend1.h"
+#include "ftraster.h"
+#include "rastpic.h"
+
+#include "rasterrs.h"
+
+
+  /* initialize renderer -- init its raster */
+  static FT_Error
+  ft_raster1_init( FT_Renderer  render )
+  {
+    FT_Library  library = FT_MODULE_LIBRARY( render );
+
+
+    render->clazz->raster_class->raster_reset( render->raster,
+                                               library->raster_pool,
+                                               library->raster_pool_size );
+
+    return FT_Err_Ok;
+  }
+
+
+  /* set render-specific mode */
+  static FT_Error
+  ft_raster1_set_mode( FT_Renderer  render,
+                       FT_ULong     mode_tag,
+                       FT_Pointer   data )
+  {
+    /* we simply pass it to the raster */
+    return render->clazz->raster_class->raster_set_mode( render->raster,
+                                                         mode_tag,
+                                                         data );
+  }
+
+
+  /* transform a given glyph image */
+  static FT_Error
+  ft_raster1_transform( FT_Renderer       render,
+                        FT_GlyphSlot      slot,
+                        const FT_Matrix*  matrix,
+                        const FT_Vector*  delta )
+  {
+    FT_Error error = FT_Err_Ok;
+
+
+    if ( slot->format != render->glyph_format )
+    {
+      error = FT_THROW( Invalid_Argument );
+      goto Exit;
+    }
+
+    if ( matrix )
+      FT_Outline_Transform( &slot->outline, matrix );
+
+    if ( delta )
+      FT_Outline_Translate( &slot->outline, delta->x, delta->y );
+
+  Exit:
+    return error;
+  }
+
+
+  /* return the glyph's control box */
+  static void
+  ft_raster1_get_cbox( FT_Renderer   render,
+                       FT_GlyphSlot  slot,
+                       FT_BBox*      cbox )
+  {
+    FT_ZERO( cbox );
+
+    if ( slot->format == render->glyph_format )
+      FT_Outline_Get_CBox( &slot->outline, cbox );
+  }
+
+
+  /* convert a slot's glyph image into a bitmap */
+  static FT_Error
+  ft_raster1_render( FT_Renderer       render,
+                     FT_GlyphSlot      slot,
+                     FT_Render_Mode    mode,
+                     const FT_Vector*  origin )
+  {
+    FT_Error     error;
+    FT_Outline*  outline;
+    FT_BBox      cbox, cbox0;
+    FT_UInt      width, height, pitch;
+    FT_Bitmap*   bitmap;
+    FT_Memory    memory;
+
+    FT_Raster_Params  params;
+
+
+    /* check glyph image format */
+    if ( slot->format != render->glyph_format )
+    {
+      error = FT_THROW( Invalid_Argument );
+      goto Exit;
+    }
+
+    /* check rendering mode */
+    if ( mode != FT_RENDER_MODE_MONO )
+    {
+      /* raster1 is only capable of producing monochrome bitmaps */
+      return FT_THROW( Cannot_Render_Glyph );
+    }
+
+    outline = &slot->outline;
+
+    /* translate the outline to the new origin if needed */
+    if ( origin )
+      FT_Outline_Translate( outline, origin->x, origin->y );
+
+    /* compute the control box, and grid fit it */
+    FT_Outline_Get_CBox( outline, &cbox0 );
+
+    /* undocumented but confirmed: bbox values get rounded */
+#if 1
+    cbox.xMin = FT_PIX_ROUND( cbox0.xMin );
+    cbox.yMin = FT_PIX_ROUND( cbox0.yMin );
+    cbox.xMax = FT_PIX_ROUND( cbox0.xMax );
+    cbox.yMax = FT_PIX_ROUND( cbox0.yMax );
+#else
+    cbox.xMin = FT_PIX_FLOOR( cbox.xMin );
+    cbox.yMin = FT_PIX_FLOOR( cbox.yMin );
+    cbox.xMax = FT_PIX_CEIL( cbox.xMax );
+    cbox.yMax = FT_PIX_CEIL( cbox.yMax );
+#endif
+
+    /* If either `width' or `height' round to 0, try    */
+    /* explicitly rounding up/down.  In the case of     */
+    /* glyphs containing only one very narrow feature,  */
+    /* this gives the drop-out compensation in the scan */
+    /* conversion code a chance to do its stuff.        */
+    width  = (FT_UInt)( ( cbox.xMax - cbox.xMin ) >> 6 );
+    if ( width == 0 )
+    {
+      cbox.xMin = FT_PIX_FLOOR( cbox0.xMin );
+      cbox.xMax = FT_PIX_CEIL( cbox0.xMax );
+
+      width = (FT_UInt)( ( cbox.xMax - cbox.xMin ) >> 6 );
+    }
+
+    height = (FT_UInt)( ( cbox.yMax - cbox.yMin ) >> 6 );
+    if ( height == 0 )
+    {
+      cbox.yMin = FT_PIX_FLOOR( cbox0.yMin );
+      cbox.yMax = FT_PIX_CEIL( cbox0.yMax );
+
+      height = (FT_UInt)( ( cbox.yMax - cbox.yMin ) >> 6 );
+    }
+
+    if ( width > FT_USHORT_MAX || height > FT_USHORT_MAX )
+    {
+      error = FT_THROW( Invalid_Argument );
+      goto Exit;
+    }
+
+    bitmap = &slot->bitmap;
+    memory = render->root.memory;
+
+    /* release old bitmap buffer */
+    if ( slot->internal->flags & FT_GLYPH_OWN_BITMAP )
+    {
+      FT_FREE( bitmap->buffer );
+      slot->internal->flags &= ~FT_GLYPH_OWN_BITMAP;
+    }
+
+    pitch              = ( ( width + 15 ) >> 4 ) << 1;
+    bitmap->pixel_mode = FT_PIXEL_MODE_MONO;
+
+    bitmap->width = width;
+    bitmap->rows  = height;
+    bitmap->pitch = (int)pitch;
+
+    if ( FT_ALLOC_MULT( bitmap->buffer, pitch, height ) )
+      goto Exit;
+
+    slot->internal->flags |= FT_GLYPH_OWN_BITMAP;
+
+    /* translate outline to render it into the bitmap */
+    FT_Outline_Translate( outline, -cbox.xMin, -cbox.yMin );
+
+    /* set up parameters */
+    params.target = bitmap;
+    params.source = outline;
+    params.flags  = 0;
+
+    /* render outline into the bitmap */
+    error = render->raster_render( render->raster, &params );
+
+    FT_Outline_Translate( outline, cbox.xMin, cbox.yMin );
+
+    if ( error )
+      goto Exit;
+
+    slot->format      = FT_GLYPH_FORMAT_BITMAP;
+    slot->bitmap_left = (FT_Int)( cbox.xMin >> 6 );
+    slot->bitmap_top  = (FT_Int)( cbox.yMax >> 6 );
+
+  Exit:
+    return error;
+  }
+
+
+  FT_DEFINE_RENDERER(
+    ft_raster1_renderer_class,
+
+      FT_MODULE_RENDERER,
+      sizeof ( FT_RendererRec ),
+
+      "raster1",
+      0x10000L,
+      0x20000L,
+
+      NULL,    /* module specific interface */
+
+      (FT_Module_Constructor)ft_raster1_init,  /* module_init   */
+      (FT_Module_Destructor) NULL,             /* module_done   */
+      (FT_Module_Requester)  NULL,             /* get_interface */
+
+    FT_GLYPH_FORMAT_OUTLINE,
+
+    (FT_Renderer_RenderFunc)   ft_raster1_render,     /* render_glyph    */
+    (FT_Renderer_TransformFunc)ft_raster1_transform,  /* transform_glyph */
+    (FT_Renderer_GetCBoxFunc)  ft_raster1_get_cbox,   /* get_glyph_cbox  */
+    (FT_Renderer_SetModeFunc)  ft_raster1_set_mode,   /* set_mode        */
+
+    (FT_Raster_Funcs*)&FT_STANDARD_RASTER_GET         /* raster_class    */
+  )
+
+
+/* END */
+@
+
+
+1.3
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2005, 2006 by                         */
+d20 1
+d41 1
+a41 1
+    return Raster_Err_Ok;
+d65 1
+a65 1
+    FT_Error error = Raster_Err_Ok;
+d70 1
+a70 1
+      error = Raster_Err_Invalid_Argument;
+d91 1
+a91 1
+    FT_MEM_ZERO( cbox, sizeof ( *cbox ) );
+d107 1
+a107 1
+    FT_BBox      cbox;
+d118 1
+a118 1
+      error = Raster_Err_Invalid_Argument;
+a122 1
+#ifndef FT_CONFIG_OPTION_PIC
+d126 1
+a126 2
+      if ( render->clazz == &ft_raster1_renderer_class )
+        return Raster_Err_Cannot_Render_Glyph;
+a127 25
+    else
+    {
+      /* raster5 is only capable of producing 5-gray-levels bitmaps */
+      if ( render->clazz == &ft_raster5_renderer_class )
+        return Raster_Err_Cannot_Render_Glyph;
+    }
+#else /* FT_CONFIG_OPTION_PIC */
+    /* When PIC is enabled, we cannot get to the class object      */
+    /* so instead we check the final character in the class name   */
+    /* ("raster5" or "raster1"). Yes this is a hack.               */
+    /* The "correct" thing to do is have different render function */
+    /* for each of the classes.                                    */
+    if ( mode != FT_RENDER_MODE_MONO )
+    {
+      /* raster1 is only capable of producing monochrome bitmaps */
+      if ( render->clazz->root.module_name[6] == '1' )
+        return Raster_Err_Cannot_Render_Glyph;
+    }
+    else
+    {
+      /* raster5 is only capable of producing 5-gray-levels bitmaps */
+      if ( render->clazz->root.module_name[6] == '5' )
+        return Raster_Err_Cannot_Render_Glyph;
+    }
+#endif /* FT_CONFIG_OPTION_PIC */
+d136 1
+a136 1
+    FT_Outline_Get_CBox( outline, &cbox );
+d138 7
+d149 1
+d151 5
+d157 8
+d166 14
+d190 2
+a191 13
+    /* allocate new one, depends on pixel format */
+    if ( !( mode & FT_RENDER_MODE_MONO ) )
+    {
+      /* we pad to 32 bits, only for backwards compatibility with FT 1.x */
+      pitch              = FT_PAD_CEIL( width, 4 );
+      bitmap->pixel_mode = FT_PIXEL_MODE_GRAY;
+      bitmap->num_grays  = 256;
+    }
+    else
+    {
+      pitch              = ( ( width + 15 ) >> 4 ) << 1;
+      bitmap->pixel_mode = FT_PIXEL_MODE_MONO;
+    }
+d195 1
+a195 1
+    bitmap->pitch = pitch;
+a209 3
+    if ( bitmap->pixel_mode == FT_PIXEL_MODE_GRAY )
+      params.flags |= FT_RASTER_FLAG_AA;
+
+d227 3
+a229 2
+  FT_DEFINE_RENDERER(ft_raster1_renderer_class,
+    
+d231 1
+a231 1
+      sizeof( FT_RendererRec ),
+d237 1
+a237 33
+      0,    /* module specific interface */
+
+      (FT_Module_Constructor)ft_raster1_init,
+      (FT_Module_Destructor) 0,
+      (FT_Module_Requester)  0
+    ,
+
+    FT_GLYPH_FORMAT_OUTLINE,
+
+    (FT_Renderer_RenderFunc)   ft_raster1_render,
+    (FT_Renderer_TransformFunc)ft_raster1_transform,
+    (FT_Renderer_GetCBoxFunc)  ft_raster1_get_cbox,
+    (FT_Renderer_SetModeFunc)  ft_raster1_set_mode,
+
+    (FT_Raster_Funcs*)    &FT_STANDARD_RASTER_GET
+  )
+
+
+  /* This renderer is _NOT_ part of the default modules; you will need */
+  /* to register it by hand in your application.  It should only be    */
+  /* used for backwards-compatibility with FT 1.x anyway.              */
+  /*                                                                   */
+  FT_DEFINE_RENDERER(ft_raster5_renderer_class,
+  
+    
+      FT_MODULE_RENDERER,
+      sizeof( FT_RendererRec ),
+
+      "raster5",
+      0x10000L,
+      0x20000L,
+
+      0,    /* module specific interface */
+d239 3
+a241 4
+      (FT_Module_Constructor)ft_raster1_init,
+      (FT_Module_Destructor) 0,
+      (FT_Module_Requester)  0
+    ,
+d245 4
+a248 4
+    (FT_Renderer_RenderFunc)   ft_raster1_render,
+    (FT_Renderer_TransformFunc)ft_raster1_transform,
+    (FT_Renderer_GetCBoxFunc)  ft_raster1_get_cbox,
+    (FT_Renderer_SetModeFunc)  ft_raster1_set_mode,
+d250 1
+a250 1
+    (FT_Raster_Funcs*)    &FT_STANDARD_RASTER_GET
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d24 1
+d122 1
+d135 19
+d232 2
+a233 4
+  FT_CALLBACK_TABLE_DEF
+  const FT_Renderer_Class  ft_raster1_renderer_class =
+  {
+    {
+d246 1
+a246 1
+    },
+d255 2
+a256 2
+    (FT_Raster_Funcs*)    &ft_standard_raster
+  };
+d263 3
+a265 4
+  FT_CALLBACK_TABLE_DEF
+  const FT_Renderer_Class  ft_raster5_renderer_class =
+  {
+    {
+d278 1
+a278 1
+    },
+d287 2
+a288 2
+    (FT_Raster_Funcs*)    &ft_standard_raster
+  };
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003 by                                     */
+d58 4
+a61 4
+  ft_raster1_transform( FT_Renderer   render,
+                        FT_GlyphSlot  slot,
+                        FT_Matrix*    matrix,
+                        FT_Vector*    delta )
+d98 4
+a101 4
+  ft_raster1_render( FT_Renderer     render,
+                     FT_GlyphSlot    slot,
+                     FT_Render_Mode  mode,
+                     FT_Vector*      origin )
+d164 1
+a164 1
+      pitch = FT_PAD_CEIL( width, 4 );
+d170 1
+a170 1
+      pitch = ( ( width + 15 ) >> 4 ) << 1;
+d178 1
+a178 1
+    if ( FT_ALLOC( bitmap->buffer, (FT_ULong)pitch * height ) )
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2005, 2006 by                         */
+d58 4
+a61 4
+  ft_raster1_transform( FT_Renderer       render,
+                        FT_GlyphSlot      slot,
+                        const FT_Matrix*  matrix,
+                        const FT_Vector*  delta )
+d98 4
+a101 4
+  ft_raster1_render( FT_Renderer       render,
+                     FT_GlyphSlot      slot,
+                     FT_Render_Mode    mode,
+                     const FT_Vector*  origin )
+d164 1
+a164 1
+      pitch              = FT_PAD_CEIL( width, 4 );
+d170 1
+a170 1
+      pitch              = ( ( width + 15 ) >> 4 ) << 1;
+d178 1
+a178 1
+    if ( FT_ALLOC_MULT( bitmap->buffer, pitch, height ) )
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2005, 2006 by                         */
+d58 4
+a61 4
+  ft_raster1_transform( FT_Renderer       render,
+                        FT_GlyphSlot      slot,
+                        const FT_Matrix*  matrix,
+                        const FT_Vector*  delta )
+d98 4
+a101 4
+  ft_raster1_render( FT_Renderer       render,
+                     FT_GlyphSlot      slot,
+                     FT_Render_Mode    mode,
+                     const FT_Vector*  origin )
+d164 1
+a164 1
+      pitch              = FT_PAD_CEIL( width, 4 );
+d170 1
+a170 1
+      pitch              = ( ( width + 15 ) >> 4 ) << 1;
+d178 1
+a178 1
+    if ( FT_ALLOC_MULT( bitmap->buffer, pitch, height ) )
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@a23 1
+#include "rastpic.h"
+a120 1
+#ifndef FT_CONFIG_OPTION_PIC
+a132 19
+#else /* FT_CONFIG_OPTION_PIC */
+    /* When PIC is enabled, we cannot get to the class object      */
+    /* so instead we check the final character in the class name   */
+    /* ("raster5" or "raster1"). Yes this is a hack.               */
+    /* The "correct" thing to do is have different render function */
+    /* for each of the classes.                                    */
+    if ( mode != FT_RENDER_MODE_MONO )
+    {
+      /* raster1 is only capable of producing monochrome bitmaps */
+      if ( render->clazz->root.module_name[6] == '1' )
+        return Raster_Err_Cannot_Render_Glyph;
+    }
+    else
+    {
+      /* raster5 is only capable of producing 5-gray-levels bitmaps */
+      if ( render->clazz->root.module_name[6] == '5' )
+        return Raster_Err_Cannot_Render_Glyph;
+    }
+#endif /* FT_CONFIG_OPTION_PIC */
+d211 4
+a214 2
+  FT_DEFINE_RENDERER(ft_raster1_renderer_class,
+    
+d227 1
+a227 1
+    ,
+d236 2
+a237 2
+    (FT_Raster_Funcs*)    &FT_STANDARD_RASTER_GET
+  )
+d244 4
+a247 3
+  FT_DEFINE_RENDERER(ft_raster5_renderer_class,
+  
+    
+d260 1
+a260 1
+    ,
+d269 2
+a270 2
+    (FT_Raster_Funcs*)    &FT_STANDARD_RASTER_GET
+  )
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+a19 1
+#include FT_INTERNAL_DEBUG_H
+d40 1
+a40 1
+    return FT_Err_Ok;
+d64 1
+a64 1
+    FT_Error error = FT_Err_Ok;
+d69 1
+a69 1
+      error = FT_THROW( Invalid_Argument );
+d90 1
+a90 1
+    FT_ZERO( cbox );
+d106 1
+a106 1
+    FT_BBox      cbox, cbox0;
+d117 1
+a117 1
+      error = FT_THROW( Invalid_Argument );
+d122 1
+d126 2
+a127 1
+      return FT_THROW( Cannot_Render_Glyph );
+d129 25
+d162 1
+a162 1
+    FT_Outline_Get_CBox( outline, &cbox0 );
+a163 7
+    /* undocumented but confirmed: bbox values get rounded */
+#if 1
+    cbox.xMin = FT_PIX_ROUND( cbox0.xMin );
+    cbox.yMin = FT_PIX_ROUND( cbox0.yMin );
+    cbox.xMax = FT_PIX_ROUND( cbox0.xMax );
+    cbox.yMax = FT_PIX_ROUND( cbox0.yMax );
+#else
+a167 1
+#endif
+a168 5
+    /* If either `width' or `height' round to 0, try    */
+    /* explicitly rounding up/down.  In the case of     */
+    /* glyphs containing only one very narrow feature,  */
+    /* this gives the drop-out compensation in the scan */
+    /* conversion code a chance to do its stuff.        */
+a169 8
+    if ( width == 0 )
+    {
+      cbox.xMin = FT_PIX_FLOOR( cbox0.xMin );
+      cbox.xMax = FT_PIX_CEIL( cbox0.xMax );
+
+      width = (FT_UInt)( ( cbox.xMax - cbox.xMin ) >> 6 );
+    }
+
+a170 14
+    if ( height == 0 )
+    {
+      cbox.yMin = FT_PIX_FLOOR( cbox0.yMin );
+      cbox.yMax = FT_PIX_CEIL( cbox0.yMax );
+
+      height = (FT_UInt)( ( cbox.yMax - cbox.yMin ) >> 6 );
+    }
+
+    if ( width > FT_USHORT_MAX || height > FT_USHORT_MAX )
+    {
+      error = FT_THROW( Invalid_Argument );
+      goto Exit;
+    }
+
+d181 13
+a193 2
+    pitch              = ( ( width + 15 ) >> 4 ) << 1;
+    bitmap->pixel_mode = FT_PIXEL_MODE_MONO;
+d197 1
+a197 1
+    bitmap->pitch = (int)pitch;
+d212 3
+d232 8
+a239 2
+  FT_DEFINE_RENDERER(
+    ft_raster1_renderer_class,
+d241 25
+d267 1
+a267 1
+      sizeof ( FT_RendererRec ),
+d269 1
+a269 1
+      "raster1",
+d273 1
+a273 1
+      NULL,    /* module specific interface */
+d275 4
+a278 3
+      (FT_Module_Constructor)ft_raster1_init,  /* module_init   */
+      (FT_Module_Destructor) NULL,             /* module_done   */
+      (FT_Module_Requester)  NULL,             /* get_interface */
+d282 4
+a285 4
+    (FT_Renderer_RenderFunc)   ft_raster1_render,     /* render_glyph    */
+    (FT_Renderer_TransformFunc)ft_raster1_transform,  /* transform_glyph */
+    (FT_Renderer_GetCBoxFunc)  ft_raster1_get_cbox,   /* get_glyph_cbox  */
+    (FT_Renderer_SetModeFunc)  ft_raster1_set_mode,   /* set_mode        */
+d287 1
+a287 1
+    (FT_Raster_Funcs*)&FT_STANDARD_RASTER_GET         /* raster_class    */
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

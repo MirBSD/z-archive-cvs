@@ -1,0 +1,461 @@
+head	1.3;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2017.04.15.19.21.52;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10058F2723111C7BEE2;
+
+1.2
+date	2006.06.29.20.24.59;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.15;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.56;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.15;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.34;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.15;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2017.04.15.15.42.05;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.3
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  psauxmod.c                                                             */
+/*                                                                         */
+/*    FreeType auxiliary PostScript module implementation (body).          */
+/*                                                                         */
+/*  Copyright 2000-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include "psauxmod.h"
+#include "psobjs.h"
+#include "t1decode.h"
+#include "t1cmap.h"
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+#include "afmparse.h"
+#endif
+
+
+  FT_CALLBACK_TABLE_DEF
+  const PS_Table_FuncsRec  ps_table_funcs =
+  {
+    ps_table_new,     /* init    */
+    ps_table_done,    /* done    */
+    ps_table_add,     /* add     */
+    ps_table_release  /* release */
+  };
+
+
+  FT_CALLBACK_TABLE_DEF
+  const PS_Parser_FuncsRec  ps_parser_funcs =
+  {
+    ps_parser_init,             /* init             */
+    ps_parser_done,             /* done             */
+
+    ps_parser_skip_spaces,      /* skip_spaces      */
+    ps_parser_skip_PS_token,    /* skip_PS_token    */
+
+    ps_parser_to_int,           /* to_int           */
+    ps_parser_to_fixed,         /* to_fixed         */
+    ps_parser_to_bytes,         /* to_bytes         */
+    ps_parser_to_coord_array,   /* to_coord_array   */
+    ps_parser_to_fixed_array,   /* to_fixed_array   */
+    ps_parser_to_token,         /* to_token         */
+    ps_parser_to_token_array,   /* to_token_array   */
+
+    ps_parser_load_field,       /* load_field       */
+    ps_parser_load_field_table  /* load_field_table */
+  };
+
+
+  FT_CALLBACK_TABLE_DEF
+  const T1_Builder_FuncsRec  t1_builder_funcs =
+  {
+    t1_builder_init,          /* init */
+    t1_builder_done,          /* done */
+
+    t1_builder_check_points,  /* check_points  */
+    t1_builder_add_point,     /* add_point     */
+    t1_builder_add_point1,    /* add_point1    */
+    t1_builder_add_contour,   /* add_contour   */
+    t1_builder_start_point,   /* start_point   */
+    t1_builder_close_contour  /* close_contour */
+  };
+
+
+  FT_CALLBACK_TABLE_DEF
+  const T1_Decoder_FuncsRec  t1_decoder_funcs =
+  {
+    t1_decoder_init,              /* init              */
+    t1_decoder_done,              /* done              */
+    t1_decoder_parse_charstrings  /* parse_charstrings */
+  };
+
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+  FT_CALLBACK_TABLE_DEF
+  const AFM_Parser_FuncsRec  afm_parser_funcs =
+  {
+    afm_parser_init,  /* init  */
+    afm_parser_done,  /* done  */
+    afm_parser_parse  /* parse */
+  };
+#endif
+
+
+  FT_CALLBACK_TABLE_DEF
+  const T1_CMap_ClassesRec  t1_cmap_classes =
+  {
+    &t1_cmap_standard_class_rec,
+    &t1_cmap_expert_class_rec,
+    &t1_cmap_custom_class_rec,
+    &t1_cmap_unicode_class_rec
+  };
+
+
+  static
+  const PSAux_Interface  psaux_interface =
+  {
+    &ps_table_funcs,
+    &ps_parser_funcs,
+    &t1_builder_funcs,
+    &t1_decoder_funcs,
+    t1_decrypt,
+
+    (const T1_CMap_ClassesRec*) &t1_cmap_classes,
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+    &afm_parser_funcs,
+#else
+    0,
+#endif
+  };
+
+
+  FT_CALLBACK_TABLE_DEF
+  const FT_Module_Class  psaux_module_class =
+  {
+    0,
+    sizeof ( FT_ModuleRec ),
+    "psaux",
+    0x20000L,
+    0x20000L,
+
+    &psaux_interface,  /* module-specific interface */
+
+    (FT_Module_Constructor)NULL,  /* module_init   */
+    (FT_Module_Destructor) NULL,  /* module_done   */
+    (FT_Module_Requester)  NULL   /* get_interface */
+  };
+
+
+/* END */
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2006 by                               */
+d33 4
+a36 4
+    ps_table_new,
+    ps_table_done,
+    ps_table_add,
+    ps_table_release
+d43 16
+a58 13
+    ps_parser_init,
+    ps_parser_done,
+    ps_parser_skip_spaces,
+    ps_parser_skip_PS_token,
+    ps_parser_to_int,
+    ps_parser_to_fixed,
+    ps_parser_to_bytes,
+    ps_parser_to_coord_array,
+    ps_parser_to_fixed_array,
+    ps_parser_to_token,
+    ps_parser_to_token_array,
+    ps_parser_load_field,
+    ps_parser_load_field_table
+d65 9
+a73 8
+    t1_builder_init,
+    t1_builder_done,
+    t1_builder_check_points,
+    t1_builder_add_point,
+    t1_builder_add_point1,
+    t1_builder_add_contour,
+    t1_builder_start_point,
+    t1_builder_close_contour
+d80 3
+a82 3
+    t1_decoder_init,
+    t1_decoder_done,
+    t1_decoder_parse_charstrings
+d90 3
+a92 3
+    afm_parser_init,
+    afm_parser_done,
+    afm_parser_parse
+d130 1
+a130 1
+    sizeof( FT_ModuleRec ),
+d137 3
+a139 3
+    (FT_Module_Constructor)0,
+    (FT_Module_Destructor) 0,
+    (FT_Module_Requester)  0
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003 by                                     */
+d25 4
+d82 11
+d110 1
+a111 2
+    t1_decrypt,
+    
+d113 6
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2006 by                               */
+a24 4
+#ifndef T1_CONFIG_OPTION_NO_AFM
+#include "afmparse.h"
+#endif
+
+a77 11
+#ifndef T1_CONFIG_OPTION_NO_AFM
+  FT_CALLBACK_TABLE_DEF
+  const AFM_Parser_FuncsRec  afm_parser_funcs =
+  {
+    afm_parser_init,
+    afm_parser_done,
+    afm_parser_parse
+  };
+#endif
+
+
+d95 1
+d97 1
+a97 1
+
+a98 6
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+    &afm_parser_funcs,
+#else
+    0,
+#endif
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2006 by                               */
+a24 4
+#ifndef T1_CONFIG_OPTION_NO_AFM
+#include "afmparse.h"
+#endif
+
+a77 11
+#ifndef T1_CONFIG_OPTION_NO_AFM
+  FT_CALLBACK_TABLE_DEF
+  const AFM_Parser_FuncsRec  afm_parser_funcs =
+  {
+    afm_parser_init,
+    afm_parser_done,
+    afm_parser_parse
+  };
+#endif
+
+
+d95 1
+d97 1
+a97 1
+
+a98 6
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+    &afm_parser_funcs,
+#else
+    0,
+#endif
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2016 by                                                 */
+d33 4
+a36 4
+    ps_table_new,     /* init    */
+    ps_table_done,    /* done    */
+    ps_table_add,     /* add     */
+    ps_table_release  /* release */
+d43 13
+a55 16
+    ps_parser_init,             /* init             */
+    ps_parser_done,             /* done             */
+
+    ps_parser_skip_spaces,      /* skip_spaces      */
+    ps_parser_skip_PS_token,    /* skip_PS_token    */
+
+    ps_parser_to_int,           /* to_int           */
+    ps_parser_to_fixed,         /* to_fixed         */
+    ps_parser_to_bytes,         /* to_bytes         */
+    ps_parser_to_coord_array,   /* to_coord_array   */
+    ps_parser_to_fixed_array,   /* to_fixed_array   */
+    ps_parser_to_token,         /* to_token         */
+    ps_parser_to_token_array,   /* to_token_array   */
+
+    ps_parser_load_field,       /* load_field       */
+    ps_parser_load_field_table  /* load_field_table */
+d62 8
+a69 9
+    t1_builder_init,          /* init */
+    t1_builder_done,          /* done */
+
+    t1_builder_check_points,  /* check_points  */
+    t1_builder_add_point,     /* add_point     */
+    t1_builder_add_point1,    /* add_point1    */
+    t1_builder_add_contour,   /* add_contour   */
+    t1_builder_start_point,   /* start_point   */
+    t1_builder_close_contour  /* close_contour */
+d76 3
+a78 3
+    t1_decoder_init,              /* init              */
+    t1_decoder_done,              /* done              */
+    t1_decoder_parse_charstrings  /* parse_charstrings */
+d86 3
+a88 3
+    afm_parser_init,  /* init  */
+    afm_parser_done,  /* done  */
+    afm_parser_parse  /* parse */
+d126 1
+a126 1
+    sizeof ( FT_ModuleRec ),
+d133 3
+a135 3
+    (FT_Module_Constructor)NULL,  /* module_init   */
+    (FT_Module_Destructor) NULL,  /* module_done   */
+    (FT_Module_Requester)  NULL   /* get_interface */
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

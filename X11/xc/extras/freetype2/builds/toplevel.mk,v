@@ -1,0 +1,1057 @@
+head	1.6;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@# @;
+
+
+1.6
+date	2017.04.15.19.20.00;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.19.46.24;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520152445E05B912;
+
+1.4
+date	2008.06.12.20.53.48;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.04.20;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.09;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.42.56;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.42;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.39.28;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.42.56;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.34.04;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.38.02;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.12;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.41.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@#
+# FreeType build system -- top-level sub-Makefile
+#
+
+
+# Copyright 1996-2016 by
+# David Turner, Robert Wilhelm, and Werner Lemberg.
+#
+# This file is part of the FreeType project, and may only be used, modified,
+# and distributed under the terms of the FreeType project license,
+# LICENSE.TXT.  By continuing to use, modify, or distribute this file you
+# indicate that you have read the license and understand and accept it
+# fully.
+
+
+# This file is designed for GNU Make, do not use it with another Make tool!
+#
+# It works as follows:
+#
+# - When invoked for the first time, this Makefile includes the rules found
+#   in `PROJECT/builds/detect.mk'.  They are in charge of detecting the
+#   current platform.
+#
+#   A summary of the detection is displayed, and the file `config.mk' is
+#   created in the current directory.
+#
+# - When invoked later, this Makefile includes the rules found in
+#   `config.mk'.  This sub-Makefile defines some system-specific variables
+#   (like compiler, compilation flags, object suffix, etc.), then includes
+#   the rules found in `PROJECT/builds/PROJECT.mk', used to build the
+#   library.
+#
+# See the comments in `builds/detect.mk' and `builds/PROJECT.mk' for more
+# details on host platform detection and library builds.
+
+
+# First of all, check whether we have `$(value ...)'.  We do this by testing
+# for `$(eval ...)' which has been introduced in the same GNU make version.
+
+eval_available :=
+$(eval eval_available := T)
+ifneq ($(eval_available),T)
+  $(error FreeType's build system needs a Make program which supports $$(value))
+endif
+
+
+.PHONY: all dist distclean modules setup
+
+
+# The `space' variable is used to avoid trailing spaces in defining the
+# `T' variable later.
+#
+empty :=
+space := $(empty) $(empty)
+
+
+# The main configuration file, defining the `XXX_MODULES' variables.  We
+# prefer a `modules.cfg' file in OBJ_DIR over TOP_DIR.
+#
+ifndef MODULES_CFG
+  MODULES_CFG := $(TOP_DIR)/modules.cfg
+  ifneq ($(wildcard $(OBJ_DIR)/modules.cfg),)
+    MODULES_CFG := $(OBJ_DIR)/modules.cfg
+  endif
+endif
+
+
+# FTMODULE_H, as its name suggests, indicates where the FreeType module
+# class file resides.
+#
+FTMODULE_H ?= $(OBJ_DIR)/ftmodule.h
+
+
+include $(MODULES_CFG)
+
+
+# The list of modules we are using.
+#
+MODULES := $(FONT_MODULES)    \
+           $(HINTING_MODULES) \
+           $(RASTER_MODULES)  \
+           $(AUX_MODULES)
+
+
+CONFIG_MK ?= config.mk
+
+# If no configuration sub-makefile is present, or if `setup' is the target
+# to be built, run the auto-detection rules to figure out which
+# configuration rules file to use.
+#
+# Note that the configuration file is put in the current directory, which is
+# not necessarily $(TOP_DIR).
+
+# If `config.mk' is not present, set `check_platform'.
+#
+ifeq ($(wildcard $(CONFIG_MK)),)
+  check_platform := 1
+endif
+
+# If `setup' is one of the targets requested, set `check_platform'.
+#
+ifneq ($(findstring setup,$(MAKECMDGOALS)),)
+  check_platform := 1
+endif
+
+# Include the automatic host platform detection rules when we need to
+# check the platform.
+#
+ifdef check_platform
+
+  all modules: setup
+
+  include $(TOP_DIR)/builds/detect.mk
+
+  # This rule makes sense for Unix only to remove files created by a run of
+  # the configure script which hasn't been successful (so that no
+  # `config.mk' has been created).  It uses the built-in $(RM) command of
+  # GNU make.  Similarly, `nul' is created if e.g. `make setup windows' has
+  # been erroneously used.
+  #
+  # Note: This test is duplicated in `builds/unix/detect.mk'.
+  #
+  is_unix := $(strip $(wildcard /sbin/init) \
+                     $(wildcard /usr/sbin/init) \
+                     $(wildcard /dev/null) \
+                     $(wildcard /hurd/auth))
+  ifneq ($(is_unix),)
+
+    distclean:
+	  $(RM) builds/unix/config.cache
+	  $(RM) builds/unix/config.log
+	  $(RM) builds/unix/config.status
+	  $(RM) builds/unix/unix-def.mk
+	  $(RM) builds/unix/unix-cc.mk
+	  $(RM) builds/unix/freetype2.pc
+	  $(RM) nul
+
+  endif # test is_unix
+
+  # IMPORTANT:
+  #
+  # `setup' must be defined by the host platform detection rules to create
+  # the `config.mk' file in the current directory.
+
+else
+
+  # A configuration sub-Makefile is present -- simply run it.
+  #
+  all: single
+
+  BUILD_PROJECT := yes
+  include $(CONFIG_MK)
+
+endif # test check_platform
+
+
+# We always need the list of modules in ftmodule.h.
+#
+all setup: $(FTMODULE_H)
+
+
+# The `modules' target unconditionally rebuilds the module list.
+#
+modules:
+	$(FTMODULE_H_INIT)
+	$(FTMODULE_H_CREATE)
+	$(FTMODULE_H_DONE)
+
+include $(TOP_DIR)/builds/modules.mk
+
+
+# get FreeType version string, using a
+# poor man's `sed' emulation with make's built-in string functions
+#
+work := $(strip $(shell $(CAT) $(TOP_DIR)/include/freetype/freetype.h))
+work := $(subst |,x,$(work))
+work := $(subst $(space),|,$(work))
+work := $(subst \#define|FREETYPE_MAJOR|,$(space),$(work))
+work := $(word 2,$(work))
+major := $(subst |,$(space),$(work))
+major := $(firstword $(major))
+
+work := $(subst \#define|FREETYPE_MINOR|,$(space),$(work))
+work := $(word 2,$(work))
+minor := $(subst |,$(space),$(work))
+minor := $(firstword $(minor))
+
+work := $(subst \#define|FREETYPE_PATCH|,$(space),$(work))
+work := $(word 2,$(work))
+patch := $(subst |,$(space),$(work))
+patch := $(firstword $(patch))
+
+ifneq ($(findstring x0x,x$(patch)x),)
+  version := $(major).$(minor)
+  winversion := $(major)$(minor)
+else
+  version := $(major).$(minor).$(patch)
+  winversion := $(major)$(minor)$(patch)
+endif
+
+
+# This target builds the tarballs.
+#
+# Not to be run by a normal user -- there are no attempts to make it
+# generic.
+
+dist:
+	-rm -rf tmp
+	rm -f freetype-$(version).tar.gz
+	rm -f freetype-$(version).tar.bz2
+	rm -f ft$(winversion).zip
+
+	for d in `find . -wholename '*/.git' -prune \
+	                 -o -type f \
+	                 -o -print` ; do \
+	  mkdir -p tmp/$$d ; \
+	done ;
+
+	currdir=`pwd` ; \
+	for f in `find . -wholename '*/.git' -prune \
+	                 -o -name .gitignore \
+	                 -o -name .mailmap \
+	                 -o -type d \
+	                 -o -print` ; do \
+	  ln -s $$currdir/$$f tmp/$$f ; \
+	done
+
+	@@# Prevent generation of .pyc files.  Python follows (soft) links if
+	@@# the link's directory is write protected, so we have temporarily
+	@@# disable write access here too.
+	chmod -w src/tools/docmaker
+
+	cd tmp ; \
+	$(MAKE) devel ; \
+	$(MAKE) do-dist
+
+	chmod +w src/tools/docmaker
+
+	mv tmp freetype-$(version)
+
+	tar -H ustar -chf - freetype-$(version) \
+	| gzip -9 -c > freetype-$(version).tar.gz
+	tar -H ustar -chf - freetype-$(version) \
+	| bzip2 -c > freetype-$(version).tar.bz2
+
+	@@# Use CR/LF for zip files.
+	zip -lr9 ft$(winversion).zip freetype-$(version)
+
+	rm -fr freetype-$(version)
+
+
+# The locations of the latest `config.guess' and `config.sub' versions (from
+# GNU `config' git repository), relative to the `tmp' directory used during
+# `make dist'.
+#
+CONFIG_GUESS = ~/git/config/config.guess
+CONFIG_SUB   = ~/git/config/config.sub
+
+
+# Don't say `make do-dist'.  Always use `make dist' instead.
+#
+.PHONY: do-dist
+
+do-dist: distclean refdoc
+	@@# Without removing the files, `autoconf' and friends follow links.
+	rm -f builds/unix/aclocal.m4
+	rm -f builds/unix/configure.ac
+	rm -f builds/unix/configure
+
+	sh autogen.sh
+	rm -rf builds/unix/autom4te.cache
+
+	cp $(CONFIG_GUESS) builds/unix
+	cp $(CONFIG_SUB) builds/unix
+
+# EOF
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2003, 2006, 2008, 2009 by
+d115 2
+a116 2
+  # This rule makes sense for Unix only to remove files created by a run
+  # of the configure script which hasn't been successful (so that no
+d118 1
+a118 1
+  # GNU make.  Similarly, `nul' is created if e.g. `make setup win32' has
+d125 1
+d172 30
+a206 12
+# we check for `dist', not `distclean'
+ifneq ($(findstring distx,$(MAKECMDGOALS)x),)
+  FT_H := include/freetype/freetype.h
+
+  major := $(shell sed -n 's/.*FREETYPE_MAJOR[^0-9]*\([0-9]\+\)/\1/p' < $(FT_H))
+  minor := $(shell sed -n 's/.*FREETYPE_MINOR[^0-9]*\([0-9]\+\)/\1/p' < $(FT_H))
+  patch := $(shell sed -n 's/.*FREETYPE_PATCH[^0-9]*\([0-9]\+\)/\1/p' < $(FT_H))
+
+  version    := $(major).$(minor).$(patch)
+  winversion := $(major)$(minor)$(patch)
+endif
+
+d221 2
+a222 1
+	                 -o -name .cvsignore \
+d241 1
+a241 1
+	tar cfh - freetype-$(version) \
+d243 1
+a243 1
+	tar cfh - freetype-$(version) \
+d253 2
+a254 1
+# GNU `config' CVS), relative to the `tmp' directory used during `make dist'.
+@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2003, 2006, 2008 by
+d37 10
+d180 3
+a182 3
+  major := $(shell sed -n 's/.*FREETYPE_MAJOR.*\([0-9]\+\)/\1/p' < $(FT_H))
+  minor := $(shell sed -n 's/.*FREETYPE_MINOR.*\([0-9]\+\)/\1/p' < $(FT_H))
+  patch := $(shell sed -n 's/.*FREETYPE_PATCH.*\([0-9]\+\)/\1/p' < $(FT_H))
+d194 1
+a194 1
+	for d in `find . -wholename '*/CVS' -prune \
+d201 1
+a201 1
+	for f in `find . -wholename '*/CVS' -prune \
+d222 1
+a222 1
+	| gzip -c > freetype-$(version).tar.gz
+d227 1
+a227 1
+	zip -lr ft$(winversion).zip freetype-$(version)
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2003, 2006 by
+d225 2
+a226 2
+CONFIG_GUESS = ../../../config/config.guess
+CONFIG_SUB   = ../../../config/config.sub
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d166 12
+d180 3
+a182 3
+	rm -f freetype-2.2.1.tar.gz
+	rm -f freetype-2.2.1.tar.bz2
+	rm -f ft221.zip
+d209 1
+a209 1
+	mv tmp freetype-2.2.1
+d211 4
+a214 4
+	tar cfh - freetype-2.2.1 \
+	| gzip -c > freetype-2.2.1.tar.gz
+	tar cfh - freetype-2.2.1 \
+	| bzip2 -c > freetype-2.2.1.tar.bz2
+d217 1
+a217 1
+	zip -lr ft221.zip freetype-2.2.1
+d219 1
+a219 1
+	rm -fr freetype-2.2.1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2003 by
+d20 12
+a31 12
+# - When invoked for the first time, this Makefile will include the rules
+#   found in `PROJECT/builds/detect.mk'.  They are in charge of detecting
+#   the current platform.
+#
+#   A summary of the detection will be displayed, and the file `config.mk'
+#   will be created in the current directory.
+#
+# - When invoked later, this Makefile will include the rules found in
+#   `config.mk'.  This sub-Makefile will define some system-specific
+#   variables (like compiler, compilation flags, object suffix, etc.), then
+#   include the rules found in `PROJECT/builds/PROJECT.mk', used to build
+#   the library.
+d37 2
+a38 1
+.PHONY: all setup distclean modules
+d47 8
+a54 2
+ifndef CONFIG_MK
+  CONFIG_MK := config.mk
+d57 20
+d101 1
+a101 9
+  # This is the first rule `make' sees.
+  #
+  all: setup
+
+  ifdef USE_MODULES
+    # If the module list $(MODULE_LIST) file is not present, generate it.
+    #
+    #modules: make_module_list setup
+  endif
+a104 8
+  ifdef USE_MODULES
+    include $(TOP_DIR)/builds/modules.mk
+
+    ifeq ($(wildcard $(MODULE_LIST)),)
+      setup: make_module_list
+    endif
+  endif
+
+d111 1
+a111 1
+  # note: This test is duplicated in "builds/toplevel.mk".
+a139 4
+  ifdef USE_MODULES
+    modules: make_module_list
+  endif
+
+d146 87
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2003, 2006 by
+d20 12
+a31 12
+# - When invoked for the first time, this Makefile includes the rules found
+#   in `PROJECT/builds/detect.mk'.  They are in charge of detecting the
+#   current platform.
+#
+#   A summary of the detection is displayed, and the file `config.mk' is
+#   created in the current directory.
+#
+# - When invoked later, this Makefile includes the rules found in
+#   `config.mk'.  This sub-Makefile defines some system-specific variables
+#   (like compiler, compilation flags, object suffix, etc.), then includes
+#   the rules found in `PROJECT/builds/PROJECT.mk', used to build the
+#   library.
+d37 1
+a37 2
+.PHONY: all dist distclean modules setup
+
+d46 2
+a47 8
+# The main configuration file, defining the `XXX_MODULES' variables.  We
+# prefer a `modules.cfg' file in OBJ_DIR over TOP_DIR.
+#
+ifndef MODULES_CFG
+  MODULES_CFG := $(TOP_DIR)/modules.cfg
+  ifneq ($(wildcard $(OBJ_DIR)/modules.cfg),)
+    MODULES_CFG := $(OBJ_DIR)/modules.cfg
+  endif
+a49 20
+
+# FTMODULE_H, as its name suggests, indicates where the FreeType module
+# class file resides.
+#
+FTMODULE_H ?= $(OBJ_DIR)/ftmodule.h
+
+
+include $(MODULES_CFG)
+
+
+# The list of modules we are using.
+#
+MODULES := $(FONT_MODULES)    \
+           $(HINTING_MODULES) \
+           $(RASTER_MODULES)  \
+           $(AUX_MODULES)
+
+
+CONFIG_MK ?= config.mk
+
+d74 9
+a82 1
+  all modules: setup
+d86 8
+d100 1
+a100 1
+  # Note: This test is duplicated in `builds/unix/detect.mk'.
+d129 4
+a138 99
+# We always need the list of modules in ftmodule.h.
+#
+all setup: $(FTMODULE_H)
+
+
+# The `modules' target unconditionally rebuilds the module list.
+#
+modules:
+	$(FTMODULE_H_INIT)
+	$(FTMODULE_H_CREATE)
+	$(FTMODULE_H_DONE)
+
+include $(TOP_DIR)/builds/modules.mk
+
+
+# This target builds the tarballs.
+#
+# Not to be run by a normal user -- there are no attempts to make it
+# generic.
+
+# we check for `dist', not `distclean'
+ifneq ($(findstring distx,$(MAKECMDGOALS)x),)
+  FT_H := include/freetype/freetype.h
+
+  major := $(shell sed -n 's/.*FREETYPE_MAJOR.*\([0-9]\+\)/\1/p' < $(FT_H))
+  minor := $(shell sed -n 's/.*FREETYPE_MINOR.*\([0-9]\+\)/\1/p' < $(FT_H))
+  patch := $(shell sed -n 's/.*FREETYPE_PATCH.*\([0-9]\+\)/\1/p' < $(FT_H))
+
+  version    := $(major).$(minor).$(patch)
+  winversion := $(major)$(minor)$(patch)
+endif
+
+dist:
+	-rm -rf tmp
+	rm -f freetype-$(version).tar.gz
+	rm -f freetype-$(version).tar.bz2
+	rm -f ft$(winversion).zip
+
+	for d in `find . -wholename '*/CVS' -prune \
+	                 -o -type f \
+	                 -o -print` ; do \
+	  mkdir -p tmp/$$d ; \
+	done ;
+
+	currdir=`pwd` ; \
+	for f in `find . -wholename '*/CVS' -prune \
+	                 -o -name .cvsignore \
+	                 -o -type d \
+	                 -o -print` ; do \
+	  ln -s $$currdir/$$f tmp/$$f ; \
+	done
+
+	@@# Prevent generation of .pyc files.  Python follows (soft) links if
+	@@# the link's directory is write protected, so we have temporarily
+	@@# disable write access here too.
+	chmod -w src/tools/docmaker
+
+	cd tmp ; \
+	$(MAKE) devel ; \
+	$(MAKE) do-dist
+
+	chmod +w src/tools/docmaker
+
+	mv tmp freetype-$(version)
+
+	tar cfh - freetype-$(version) \
+	| gzip -c > freetype-$(version).tar.gz
+	tar cfh - freetype-$(version) \
+	| bzip2 -c > freetype-$(version).tar.bz2
+
+	@@# Use CR/LF for zip files.
+	zip -lr ft$(winversion).zip freetype-$(version)
+
+	rm -fr freetype-$(version)
+
+
+# The locations of the latest `config.guess' and `config.sub' versions (from
+# GNU `config' CVS), relative to the `tmp' directory used during `make dist'.
+#
+CONFIG_GUESS = ../../../config/config.guess
+CONFIG_SUB   = ../../../config/config.sub
+
+
+# Don't say `make do-dist'.  Always use `make dist' instead.
+#
+.PHONY: do-dist
+
+do-dist: distclean refdoc
+	@@# Without removing the files, `autoconf' and friends follow links.
+	rm -f builds/unix/aclocal.m4
+	rm -f builds/unix/configure.ac
+	rm -f builds/unix/configure
+
+	sh autogen.sh
+	rm -rf builds/unix/autom4te.cache
+
+	cp $(CONFIG_GUESS) builds/unix
+	cp $(CONFIG_SUB) builds/unix
+
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2003, 2006, 2008 by
+d225 2
+a226 2
+CONFIG_GUESS = ~/git/config/config.guess
+CONFIG_SUB   = ~/git/config/config.sub
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2003, 2006 by
+d20 12
+a31 12
+# - When invoked for the first time, this Makefile includes the rules found
+#   in `PROJECT/builds/detect.mk'.  They are in charge of detecting the
+#   current platform.
+#
+#   A summary of the detection is displayed, and the file `config.mk' is
+#   created in the current directory.
+#
+# - When invoked later, this Makefile includes the rules found in
+#   `config.mk'.  This sub-Makefile defines some system-specific variables
+#   (like compiler, compilation flags, object suffix, etc.), then includes
+#   the rules found in `PROJECT/builds/PROJECT.mk', used to build the
+#   library.
+d37 1
+a37 2
+.PHONY: all dist distclean modules setup
+
+d46 2
+a47 8
+# The main configuration file, defining the `XXX_MODULES' variables.  We
+# prefer a `modules.cfg' file in OBJ_DIR over TOP_DIR.
+#
+ifndef MODULES_CFG
+  MODULES_CFG := $(TOP_DIR)/modules.cfg
+  ifneq ($(wildcard $(OBJ_DIR)/modules.cfg),)
+    MODULES_CFG := $(OBJ_DIR)/modules.cfg
+  endif
+a49 20
+
+# FTMODULE_H, as its name suggests, indicates where the FreeType module
+# class file resides.
+#
+FTMODULE_H ?= $(OBJ_DIR)/ftmodule.h
+
+
+include $(MODULES_CFG)
+
+
+# The list of modules we are using.
+#
+MODULES := $(FONT_MODULES)    \
+           $(HINTING_MODULES) \
+           $(RASTER_MODULES)  \
+           $(AUX_MODULES)
+
+
+CONFIG_MK ?= config.mk
+
+d74 9
+a82 1
+  all modules: setup
+d86 8
+d100 1
+a100 1
+  # Note: This test is duplicated in `builds/unix/detect.mk'.
+d129 4
+a138 87
+# We always need the list of modules in ftmodule.h.
+#
+all setup: $(FTMODULE_H)
+
+
+# The `modules' target unconditionally rebuilds the module list.
+#
+modules:
+	$(FTMODULE_H_INIT)
+	$(FTMODULE_H_CREATE)
+	$(FTMODULE_H_DONE)
+
+include $(TOP_DIR)/builds/modules.mk
+
+
+# This target builds the tarballs.
+#
+# Not to be run by a normal user -- there are no attempts to make it
+# generic.
+
+dist:
+	-rm -rf tmp
+	rm -f freetype-2.2.1.tar.gz
+	rm -f freetype-2.2.1.tar.bz2
+	rm -f ft221.zip
+
+	for d in `find . -wholename '*/CVS' -prune \
+	                 -o -type f \
+	                 -o -print` ; do \
+	  mkdir -p tmp/$$d ; \
+	done ;
+
+	currdir=`pwd` ; \
+	for f in `find . -wholename '*/CVS' -prune \
+	                 -o -name .cvsignore \
+	                 -o -type d \
+	                 -o -print` ; do \
+	  ln -s $$currdir/$$f tmp/$$f ; \
+	done
+
+	@@# Prevent generation of .pyc files.  Python follows (soft) links if
+	@@# the link's directory is write protected, so we have temporarily
+	@@# disable write access here too.
+	chmod -w src/tools/docmaker
+
+	cd tmp ; \
+	$(MAKE) devel ; \
+	$(MAKE) do-dist
+
+	chmod +w src/tools/docmaker
+
+	mv tmp freetype-2.2.1
+
+	tar cfh - freetype-2.2.1 \
+	| gzip -c > freetype-2.2.1.tar.gz
+	tar cfh - freetype-2.2.1 \
+	| bzip2 -c > freetype-2.2.1.tar.bz2
+
+	@@# Use CR/LF for zip files.
+	zip -lr ft221.zip freetype-2.2.1
+
+	rm -fr freetype-2.2.1
+
+
+# The locations of the latest `config.guess' and `config.sub' versions (from
+# GNU `config' CVS), relative to the `tmp' directory used during `make dist'.
+#
+CONFIG_GUESS = ../../../config/config.guess
+CONFIG_SUB   = ../../../config/config.sub
+
+
+# Don't say `make do-dist'.  Always use `make dist' instead.
+#
+.PHONY: do-dist
+
+do-dist: distclean refdoc
+	@@# Without removing the files, `autoconf' and friends follow links.
+	rm -f builds/unix/aclocal.m4
+	rm -f builds/unix/configure.ac
+	rm -f builds/unix/configure
+
+	sh autogen.sh
+	rm -rf builds/unix/autom4te.cache
+
+	cp $(CONFIG_GUESS) builds/unix
+	cp $(CONFIG_SUB) builds/unix
+
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2003, 2006, 2008, 2009 by
+a36 10
+# First of all, check whether we have `$(value ...)'.  We do this by testing
+# for `$(eval ...)' which has been introduced in the same GNU make version.
+
+eval_available :=
+$(eval eval_available := T)
+ifneq ($(eval_available),T)
+  $(error FreeType's build system needs a Make program which supports $$(value))
+endif
+
+
+a165 12
+# we check for `dist', not `distclean'
+ifneq ($(findstring distx,$(MAKECMDGOALS)x),)
+  FT_H := include/freetype/freetype.h
+
+  major := $(shell sed -n 's/.*FREETYPE_MAJOR[^0-9]*\([0-9]\+\)/\1/p' < $(FT_H))
+  minor := $(shell sed -n 's/.*FREETYPE_MINOR[^0-9]*\([0-9]\+\)/\1/p' < $(FT_H))
+  patch := $(shell sed -n 's/.*FREETYPE_PATCH[^0-9]*\([0-9]\+\)/\1/p' < $(FT_H))
+
+  version    := $(major).$(minor).$(patch)
+  winversion := $(major)$(minor)$(patch)
+endif
+
+d168 3
+a170 3
+	rm -f freetype-$(version).tar.gz
+	rm -f freetype-$(version).tar.bz2
+	rm -f ft$(winversion).zip
+d172 1
+a172 1
+	for d in `find . -wholename '*/.git' -prune \
+d179 1
+a179 1
+	for f in `find . -wholename '*/.git' -prune \
+d197 1
+a197 1
+	mv tmp freetype-$(version)
+d199 4
+a202 4
+	tar cfh - freetype-$(version) \
+	| gzip -9 -c > freetype-$(version).tar.gz
+	tar cfh - freetype-$(version) \
+	| bzip2 -c > freetype-$(version).tar.bz2
+d205 1
+a205 1
+	zip -lr9 ft$(winversion).zip freetype-$(version)
+d207 1
+a207 1
+	rm -fr freetype-$(version)
+d213 2
+a214 2
+CONFIG_GUESS = ~/git/config/config.guess
+CONFIG_SUB   = ~/git/config/config.sub
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2016 by
+d115 2
+a116 2
+  # This rule makes sense for Unix only to remove files created by a run of
+  # the configure script which hasn't been successful (so that no
+d118 1
+a118 1
+  # GNU make.  Similarly, `nul' is created if e.g. `make setup windows' has
+a124 1
+                     $(wildcard /dev/null) \
+a170 30
+# get FreeType version string, using a
+# poor man's `sed' emulation with make's built-in string functions
+#
+work := $(strip $(shell $(CAT) $(TOP_DIR)/include/freetype/freetype.h))
+work := $(subst |,x,$(work))
+work := $(subst $(space),|,$(work))
+work := $(subst \#define|FREETYPE_MAJOR|,$(space),$(work))
+work := $(word 2,$(work))
+major := $(subst |,$(space),$(work))
+major := $(firstword $(major))
+
+work := $(subst \#define|FREETYPE_MINOR|,$(space),$(work))
+work := $(word 2,$(work))
+minor := $(subst |,$(space),$(work))
+minor := $(firstword $(minor))
+
+work := $(subst \#define|FREETYPE_PATCH|,$(space),$(work))
+work := $(word 2,$(work))
+patch := $(subst |,$(space),$(work))
+patch := $(firstword $(patch))
+
+ifneq ($(findstring x0x,x$(patch)x),)
+  version := $(major).$(minor)
+  winversion := $(major)$(minor)
+else
+  version := $(major).$(minor).$(patch)
+  winversion := $(major)$(minor)$(patch)
+endif
+
+
+d176 12
+d202 1
+a202 2
+	                 -o -name .gitignore \
+	                 -o -name .mailmap \
+d221 1
+a221 1
+	tar -H ustar -chf - freetype-$(version) \
+d223 1
+a223 1
+	tar -H ustar -chf - freetype-$(version) \
+d233 1
+a233 2
+# GNU `config' git repository), relative to the `tmp' directory used during
+# `make dist'.
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

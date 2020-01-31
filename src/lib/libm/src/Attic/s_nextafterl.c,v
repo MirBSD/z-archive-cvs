@@ -1,0 +1,184 @@
+head	1.3;
+access;
+symbols
+	cvs-201110182115:1.1.3.1 netbsd:1.1.3;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2012.09.04.18.16.17;	author tg;	state dead;
+branches;
+next	1.2;
+commitid	100504644903517C0CE;
+
+1.2
+date	2011.10.18.20.18.54;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E9DDF4606CD9B54;
+
+1.1
+date	2011.10.18.19.20.58;	author bsiegert;	state Exp;
+branches
+	1.1.3.1;
+next	;
+commitid	1004E9DD18376042FF5;
+
+1.1.3.1
+date	2011.10.18.19.20.58;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004E9DD18376042FF5;
+
+
+desc
+@@
+
+
+1.3
+log
+@tentative major bump to libm.so.7.0 which probably should have been
+done instead of a minor bump to 6.2 back then… but what few did we
+know… anyway, basically remove the “long double” remnants, since if
+you were using it on MirBSD, you were Doing It Wrong already anyway
+as sparc only has 32/64 bit float, and while i387 has 32/64/80 bit,
+our FPUCW limits precision to 64 bit (and the ABIs are at issue for
+whether “long double” should be stored with 80 or 96 bit and *THEN*
+SSE wants 128-bit alignment for them, so…)
+
+This removes “long double” functions nobody should have been using,
+on i386, which doesn’t really warrant a major bump, and __infinity,
+which our new libm provides as GCC builtin (and __infinityf was not
+included anyway).
+
+BUT! Do not use this yet. This needs verification on sparc, where a
+Perl build failed due to having *more* (but actually even uselesser
+– heh) long double stubs…
+@
+text
+@/*	$NetBSD: s_nextafterl.c,v 1.2 2010/09/17 20:39:39 christos Exp $	*/
+
+/* @@(#)s_nextafter.c 5.1 93/09/24 */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+
+#include <sys/cdefs.h>
+__RCSID("$NetBSD: s_nextafterl.c,v 1.2 2010/09/17 20:39:39 christos Exp $");
+
+#include <float.h>
+#include <math.h>
+#include <machine/ieee.h>
+
+#ifdef __HAVE_LONG_DOUBLE
+#ifdef EXT_EXP_INFNAN
+#if LDBL_MAX_EXP != 0x4000
+#error "Unsupported long double format"
+#endif
+
+/*
+ * IEEE functions
+ *      nextafterl(x,y)
+ *      return the next machine floating-point number of x in the
+ *      direction toward y.
+ *   Special cases:
+ *	If x == y, y shall be returned
+ *	If x or y is NaN, a NaN shall be returned
+ */
+long double
+nextafterl(long double x, long double y)
+{
+	volatile long double t;
+	union ieee_ext_u ux, uy;
+
+	ux.extu_ld = x;
+	uy.extu_ld = y;
+
+	if ((ux.extu_exp == EXT_EXP_NAN &&
+		((ux.extu_frach &~ LDBL_NBIT)|ux.extu_fracl) != 0) ||
+	    (uy.extu_exp == EXT_EXP_NAN &&
+		((uy.extu_frach &~ LDBL_NBIT)|uy.extu_fracl) != 0))
+		return x+y;			/* x or y is nan */
+
+	if (x == y) return y;			/* x=y, return y */
+
+	if (x == 0.0) {
+		ux.extu_frach = 0;		/* return +-minsubnormal */
+		ux.extu_fracl = 1;
+		ux.extu_sign = uy.extu_sign;
+		t = ux.extu_ld * ux.extu_ld;
+		if (t == ux.extu_ld)
+			return t;
+		else
+			return ux.extu_ld;	/* raise underflow flag */
+	}
+
+	if ((x>0.0) ^ (x<y)) {			/* x -= ulp */
+		if (ux.extu_fracl == 0) {
+			if ((ux.extu_frach & ~LDBL_NBIT) == 0)
+				ux.extu_exp -= 1;
+			ux.extu_frach = (ux.extu_frach - 1) |
+					(ux.extu_frach & LDBL_NBIT);
+		}
+		ux.extu_fracl -= 1;
+	} else {				/* x += ulp */
+		ux.extu_fracl += 1;
+		if (ux.extu_fracl == 0) {
+			ux.extu_frach = (ux.extu_frach + 1) |
+					(ux.extu_frach & LDBL_NBIT);
+			if ((ux.extu_frach & ~LDBL_NBIT) == 0)
+				ux.extu_exp += 1;
+		}
+	}
+
+	if (ux.extu_exp == EXT_EXP_INF)
+		return x+x;			/* overflow  */
+
+	if (ux.extu_exp == 0) {			/* underflow */
+		mask_nbit_l(ux);
+		t = ux.extu_ld * ux.extu_ld;
+		if (t != ux.extu_ld)		/* raise underflow flag */
+			return ux.extu_ld;
+	}
+
+	return ux.extu_ld;
+}
+#endif
+#endif
+@
+
+
+1.2
+log
+@more long double stuff
+@
+text
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d22 1
+d96 1
+@
+
+
+1.1.3.1
+log
+@Import current libm from NetBSD, with the directories complex, noieee_src, arch/!i387 removed.
+
+The idea is to get fmin and fmax, which are needed by some newer software.
+@
+text
+@@

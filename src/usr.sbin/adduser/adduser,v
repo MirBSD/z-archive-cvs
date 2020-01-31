@@ -1,0 +1,630 @@
+head	1.11;
+access;
+symbols
+	MIRBSD_10:1.5.0.2
+	MIRBSD_10_BASE:1.5;
+locks; strict;
+comment	@# @;
+
+
+1.11
+date	2009.03.29.13.04.24;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	10049CF71B654F9EF54;
+
+1.10
+date	2008.09.20.19.35.23;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	10048D5507B3334B1BA;
+
+1.9
+date	2008.06.25.12.10.22;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	100486235C00FA0286B;
+
+1.8
+date	2008.06.25.12.04.30;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004862342B66853B9B;
+
+1.7
+date	2008.06.25.11.53.39;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100486231B134612122;
+
+1.6
+date	2008.06.25.11.50.38;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004862311F12BC073C;
+
+1.5
+date	2007.04.18.00.28.28;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100462566185DC19581;
+
+1.4
+date	2006.09.20.22.24.52;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004511BFAD3427E1F6;
+
+1.3
+date	2006.07.09.02.14.02;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10044B06676606C76B2;
+
+1.2
+date	2006.07.08.21.45.06;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044B0277509D17EA4;
+
+1.1
+date	2006.07.08.21.42.56;	author tg;	state Exp;
+branches;
+next	;
+commitid	10044B026E94C0157F8;
+
+
+desc
+@@
+
+
+1.11
+log
+@• take care of dbins
+• #!/bin/mksh shebang, in most places
+• rcsid while here
+@
+text
+@#!/bin/mksh
+# $MirOS: src/usr.sbin/adduser/adduser,v 1.10 2008/09/20 19:35:23 tg Exp $
+#-
+# Copyright (c) 2006, 2007, 2008
+#	Thorsten Glaser <tg@@mirbsd.de>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un-
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person's immediate fault when using the work as intended.
+
+me=${0##*/}
+
+function die
+{
+	print -u2 "$me: $*"
+	exit 1
+}
+
+(( USER_ID )) && die need root
+
+T=$(mktemp /etc/pwd.tmp.XXXXXXXXXX) || die mktemp failed
+trap 'rm -f $T; exit 1' 1 2 3 5 13 15
+cat /etc/group >$T
+
+function Lstripcom {
+	cat "$@@" | { set -o noglob; while read _line; do
+		_line=${_line%%#*}
+		[[ -n $_line ]] && print -r -- $_line
+	done; }
+}
+
+function ask {
+	local question=$1 default=$2
+	integer len
+
+	set -o noglob
+	[[ -z $default ]] || question="$question [$default]"
+	let len=${#question}
+	if (( len >= 32 )); then
+		question="$question "
+	elif (( len >= 24 )); then
+		question="$question\t"
+	elif (( len >= 16 )); then
+		question="$question\t\t"
+	elif (( len >= 8 )); then
+		question="$question\t\t\t"
+	else
+		question="$question\t\t\t\t"
+	fi
+	print -n -- "$question"
+	read resp
+	: ${resp:=$default}
+	set +o noglob
+}
+
+function ask_pass {
+	local question=$1
+	integer len=${#question}
+
+	set -o noglob
+	if (( len >= 32 )); then
+		question="$question "
+	elif (( len >= 24 )); then
+		question="$question\t"
+	elif (( len >= 16 )); then
+		question="$question\t\t"
+	elif (( len >= 8 )); then
+		question="$question\t\t\t"
+	else
+		question="$question\t\t\t\t"
+	fi
+	print -n -- "$question"
+	stty -echo
+	read resp
+	stty echo
+	set +o noglob
+	print
+}
+
+function ask_yn {
+	typeset -l rsp
+
+	while [[ $rsp != @@(y|n) ]]; do
+		ask "$1" "${2:-no}"
+		rsp=$resp
+		[[ $rsp = yes ]] && rsp=y
+		[[ $rsp = no ]] && rsp=n
+	done
+	resp=$rsp
+}
+
+function is_ugid_used {
+	grep -q "^[^:]*:[^:]*:$1:" /etc/passwd $T 2>/dev/null
+}
+
+# Find first free pair of UID/GID
+integer uid=3000
+while :; do
+	is_ugid_used $uid || break
+	let uid++
+done
+
+uname=
+gecos=
+homedir=
+shell=
+passwd=
+
+while :; do
+	while :; do
+		ask "User name?" "$uname"
+		if [[ $resp != +([-_a-z0-9\$]) ]]; then
+			print -u2 'ERROR: User name can only consist of lower'
+			print -u2 '\tcase letters, numbers, dash, underscore or'
+			print -u2 '\tdollar sign (SMB/CIFS server names only)'
+			continue
+		fi
+		while IFS=: read uexist rest; do
+			[[ $uexist = $resp ]] || continue
+			print -u2 "ERROR: User name $resp already exists!"
+			continue 2
+		done </etc/passwd
+		uname=$resp
+		# lazy assistance
+		while IFS=: read uexist pw gid rest; do
+			[[ $uexist = $uname ]] || continue
+			print "Found group $uname at GID $gid"
+			break
+		done </etc/group
+		break
+	done
+	while :; do
+		ask "User ID?" $uid
+		typeset -Ui respval="$resp"
+		if (( (respval < 10) || (respval > 32765) )); then
+			print -u2 "ERROR: User ID $respval not within bounds!"
+			print -u2 '\tAllowed values are between 10 and 32765'
+			continue
+		fi
+		# if user name and UID match, be lazy on group checking
+		tline="$uname:*:$respval:"
+		while IFS= read -r line; do
+			[[ $line = $tline ]] && continue
+			print -r -- "$line"
+		done </etc/group >$T
+		# now validate group name and UID/GID
+		while IFS=: read uexist rest; do
+			[[ $uexist = $uname ]] || continue
+			print -u2 "ERROR: User name $uname already exists!"
+			continue 3	# to the outer-most loop
+		done <$T
+		if is_ugid_used $respval; then
+			print -u2 "ERROR: User ID $respval already exists!"
+			continue
+		fi
+		let uid=$respval
+		break
+	done
+	while :; do
+		ask "Real name?" "$gecos"
+		if [[ -z $resp ]]; then
+			print -u2 "ERROR: empty real name field not allowed!"
+			continue
+		fi
+		if [[ $resp = *:* ]]; then
+			print -u2 "ERROR: colon not allowed in real name field!"
+			continue
+		fi
+		gecos=$resp
+		break
+	done
+	while :; do
+		ask "Home directory?" "${homedir:-/home/$uname}"
+		: ${resp:=/}
+		if [[ $resp != /* ]]; then
+			print -u2 'ERROR: please use absolute pathname for'
+			print -u2 '\tthe home directory!'
+			continue
+		fi
+		if [[ $resp = *@@(:|\*|\?)* ]]; then
+			print -u2 "ERROR: not allowed in home directory:"
+			print -u2 '\tcolon, asterisk, question mark'
+			continue
+		fi
+		if [[ -e $resp ]]; then
+			print -u2 "ERROR: directory $homedir already exists!"
+			continue
+		fi
+		homedir=$resp
+		break
+	done
+	while :; do
+		ask "Login shell?" "${shell:-/bin/mksh}"
+		[[ $shell = - ]] && shell=/sbin/nologin
+		[[ $shell = /sbin/nologin ]] && break
+		shells=
+		Lstripcom /etc/shells |&
+		while read -p line; do
+			shells="$shells $line"
+			[[ $line = $resp ]] || continue
+			shell=$resp
+			break 2
+		done
+		print -u2 "ERROR: login shell $resp not allowed!"
+		print -u2 '\tChoose one of:'
+		print -u2 "\t${shells# }"
+	done
+	[[ $shell = /sbin/nologin ]] || while :; do
+		ask_pass "Login passphrase:"
+		t=$resp
+		ask_pass "Please repeat:"
+		if [[ $t != $resp ]]; then
+			t=
+			print -u2 'ERROR: passwords do not match! Try again.'
+			continue
+		fi
+		t=
+		if [[ -z $resp ]]; then
+			ask_yn "Prevent user from logging in?" yes
+			if [[ $resp = y ]]; then
+				shell=/sbin/nologin
+			else
+				passwd=skey
+			fi
+		else
+			passwd="$(encrypt <<<"$resp")"
+			resp=
+			if [[ $passwd != @@(\$2a\$)* ]]; then
+				print -u2 'ERROR: encrypted password is not in'
+				print -u2 '\texpected blowfish format, please'
+				print -u2 '\tfix this in /etc/login.conf, the'
+				print -u2 '\t"default" class settings.'
+				continue
+			fi
+		fi
+		break
+	done
+	[[ $shell = /sbin/nologin ]] && passwd=\*
+	print 'For advanced settings, such as login class, additional'
+	print '\tgroups, timeouts, please edit the files manually.'
+	ask_yn "Everything okay?"
+	[[ $resp = y ]] && break
+done
+
+chown root:wheel $T
+chmod 600 $T
+print -r -- "$uname:$passwd:$uid:$uid::0:0:$gecos:$homedir:$shell" >$T
+cat /etc/master.passwd >>$T
+sort -t: -nk3 -o $T $T
+mv /etc/master.passwd /etc/master.passwd.bak
+mv $T /etc/master.passwd
+chown root:wheel /etc/master.passwd
+chmod 600 /etc/master.passwd
+rm -f /etc/master.passwd.bak
+
+print -r -- "$uname:*:$uid:" >$T
+chown root:wheel $T
+chmod 644 $T
+cat /etc/group >>$T
+sort -t: -nk3 -uo $T $T
+mv /etc/group /etc/group.bak
+mv $T /etc/group
+rm -f /etc/group.bak
+
+cp -R /etc/skel "$homedir"
+chown -R $uid:$uid "$homedir"
+
+pwd_mkdb -p /etc/master.passwd
+exit 0
+@
+
+
+1.10
+log
+@• use /usr/dbin/mksh as default shell
+• allow “-” as /sbin/nologion alias in adduser(8)
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/usr.sbin/adduser/adduser,v 1.9 2008/06/25 12:10:22 tg Exp $
+d204 1
+a204 1
+		ask "Login shell?" "${shell:-/usr/dbin/mksh}"
+@
+
+
+1.9
+log
+@… even more comfy ☺
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/usr.sbin/adduser/adduser,v 1.8 2008/06/25 12:04:30 tg Exp $
+d204 2
+a205 1
+		ask "Login shell?" "${shell:-/bin/mksh}"
+@
+
+
+1.8
+log
+@be lazy if group name + GID already exist, but are to be recreated with
+exactly the same values
+‣ allows /etc/group to be a kind of “lazy central name⇐⇒UID mapping”
+  database, easier to set up than LDAP or stuff
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/usr.sbin/adduser/adduser,v 1.7 2008/06/25 11:53:39 tg Exp $
+d135 6
+@
+
+
+1.7
+log
+@make it harder to accidentally set empty passwords on logins:
+if the password is empty, we already ask if the account is to
+be disabled (/sbin/nologin as shell); if not, use the special
+string "skey" as password instead (for SSH key logins etc).
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/usr.sbin/adduser/adduser,v 1.6 2008/06/25 11:50:38 tg Exp $
+d34 1
+d104 1
+a104 1
+	grep -q "^[^:]*:[^:]*:$1:" /etc/passwd /etc/group 2>/dev/null
+a133 5
+		while IFS=: read uexist rest; do
+			[[ $uexist = $resp ]] || continue
+			print -u2 "ERROR: User name $resp already exists!"
+			continue 2
+		done </etc/group
+d145 12
+d264 1
+a264 1
+sort -t: -nk3 -o $T $T
+@
+
+
+1.6
+log
+@modernise (req. mksh R34 now)
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/usr.sbin/adduser/adduser,v 1.5 2007/04/18 00:28:28 tg Exp $
+d216 5
+a220 2
+			[[ $resp = y ]] || continue
+			shell=/sbin/nologin
+@
+
+
+1.5
+log
+@• adduser: use a faster logic to check for UID and GID existence and
+  reverse the return code logic
+• adduser.8: enhance documentation
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.20 2006/12/11 21:04:56 tg Rel $
+d4 1
+a4 1
+# Copyright (c) 2006, 2007
+a12 4
+# Advertising materials mentioning features or use of this work must
+# display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+d30 1
+a30 1
+(( $(id -u) )) && die need root
+d35 2
+a36 5
+function Lstripcom
+{
+	local _line
+	set -o noglob
+	cat "$@@" | while read _line; do
+d39 1
+a39 2
+	done
+	set +o noglob
+d42 1
+a42 2
+function ask
+{
+d60 1
+a60 1
+	print -n $question
+d66 1
+a66 2
+function ask_pass
+{
+d82 1
+a82 1
+	print -n $question
+d90 4
+a93 4
+function ask_yn
+{
+	resp=
+	while [[ $resp != @@(y|n) ]]; do
+d95 3
+a97 2
+		[[ $resp = yes ]] && resp=y
+		[[ $resp = no ]] && resp=n
+d99 1
+d102 1
+a102 2
+function is_ugid_used
+{
+d107 1
+a107 1
+let uid=3000
+d123 2
+a124 2
+			print -u2 'ERROR: User name can only consist of small'
+			print -u2 '\tletters, numbers, dash, underscore or'
+d202 1
+a202 1
+		print -ru2 "       $shells"
+d219 1
+a219 1
+			passwd="$(print -nr -- "$resp" | encrypt)"
+@
+
+
+1.4
+log
+@catch signal 5 too, idea from original lynx "oldlynx" sample script, thanks TD
+while here, update licences where I can
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/usr.sbin/adduser/adduser,v 1.3 2006/07/09 02:14:02 tg Exp $
+d4 1
+a4 1
+# Copyright (c) 2006
+d7 5
+a11 6
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+d17 8
+a24 8
+# Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+# express, or implied, to the maximum extent permitted by applicable
+# law, without malicious intent or gross negligence; in no event may
+# licensor, an author or contributor be held liable for any indirect
+# or other damage, or direct damage except proven a consequence of a
+# direct error of said person and intended use of this work, loss or
+# other issues arising in any way out of its use, even if advised of
+# the possibility of such damage or existence of a defect.
+d110 1
+a110 1
+function is_free_ugid
+d112 1
+a112 7
+	while IFS=: read un up id rest; do
+		[[ $id = $1 ]] && return 1
+	done </etc/passwd
+	while IFS=: read un up id rest; do
+		[[ $id = $1 ]] && return 1
+	done </etc/group
+	return 0
+d118 1
+a118 1
+	is_free_ugid $uid && break
+d158 1
+a158 1
+		if ! is_free_ugid $respval; then
+@
+
+
+1.3
+log
+@oops :$ we should ask for the passphrase twice, then compare.
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/usr.sbin/adduser/adduser,v 1.2 2006/07/08 21:45:06 tg Exp $
+d14 2
+a15 2
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+d25 1
+a25 1
+# the possibility of such damage or existence of a nontrivial bug.
+d38 1
+a38 1
+trap 'rm -f $T; exit 1' 1 2 3 13 15
+@
+
+
+1.2
+log
+@plug tempfile leak
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/usr.sbin/adduser/adduser,v 1.1 2006/07/08 21:42:56 tg Exp $
+d222 8
+@
+
+
+1.1
+log
+@write a menu-driven adduser(8) in shell
+no TFM yet :(
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.8 2006/06/16 23:03:39 tg Rel $
+d38 1
+@
+

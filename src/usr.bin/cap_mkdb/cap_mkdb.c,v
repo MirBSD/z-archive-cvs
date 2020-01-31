@@ -1,0 +1,822 @@
+head	1.11;
+access;
+symbols
+	MIRBSD_10:1.11.0.2
+	MIRBSD_10_BASE:1.11
+	OPENBSD_4_0:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.11
+date	2006.11.01.00.51.37;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1004547EF993C4D0271;
+
+1.10
+date	2006.11.01.00.49.45;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004547EF352E006B52;
+
+1.9
+date	2006.10.31.03.04.49;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004546BD3A2E52212C;
+
+1.8
+date	2006.10.31.02.52.38;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004546B982741EB680;
+
+1.7
+date	2006.10.31.02.14.42;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004546B1A47376ED1B;
+
+1.6
+date	2006.10.31.01.57.05;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004546AD8801B95BCB;
+
+1.5
+date	2006.10.30.23.52.28;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100454690031E41F1EA;
+
+1.4
+date	2006.10.28.19.34.43;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004543B0E335654F75;
+
+1.3
+date	2006.10.28.19.32.38;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004543B03326B18792;
+
+1.2
+date	2006.10.27.15.52.26;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045422B50085FDDE7;
+
+1.1
+date	2005.02.05.17.29.25;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.25;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.11.01.00.47.10;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004547EE9A3FF9C881;
+
+
+desc
+@@
+
+
+1.11
+log
+@OpenBSD: cap_mkdb.c,v 1.14 plugged a memory leak,
+however, they didn't plug it for all possible cases
+@
+text
+@/**	$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.10 2006/11/01 00:49:45 tg Exp $ */
+/*	$OpenBSD: cap_mkdb.c,v 1.14 2006/03/04 20:32:51 otto Exp $	*/
+/*	$NetBSD: cap_mkdb.c,v 1.5 1995/09/02 05:47:12 jtc Exp $	*/
+
+/*-
+ * Copyright (c) 2006
+ *	Thorsten Glaser <tg@@mirbsd.de>
+ * Copyright (c) 1992, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/param.h>
+#include <sys/stat.h>
+
+#include <db.h>
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <unistd.h>
+
+__COPYRIGHT("@@(#) Copyright (c) 1992, 1993\n\
+	The Regents of the University of California.  All rights reserved.\n");
+__SCCSID("@@(#)cap_mkdb.c	8.2 (Berkeley) 4/27/95");
+__RCSID("$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.10 2006/11/01 00:49:45 tg Exp $");
+
+void	 db_build(char **);
+void	 dounlink(void);
+__dead void usage(void);
+int	 igetnext(char **, char **);
+int	 main(int, char *[]);
+
+DB *capdbp;
+int info, verbose;
+bool commentfld = false;
+char *capname, buf[8 * 1024];
+
+#ifdef DEBUG
+static int debug_put(const struct __db *, DBT *, const DBT *, unsigned int);
+static FILE *capdbpf;
+static DB capdbps = {
+	DB_RECNO,
+	NULL,
+	NULL,
+	NULL,
+	debug_put,
+	NULL,
+	NULL,
+	NULL,
+	NULL
+};
+#else
+HASHINFO openinfo = {
+	4096,		/* bsize */
+	16,		/* ffactor */
+	256,		/* nelem */
+	2048 * 1024,	/* cachesize */
+	NULL,		/* hash() */
+	0		/* lorder */
+};
+#endif
+
+/*
+ * cap_mkdb creates a capability hash database for quick retrieval of capability
+ * records.  The database contains 2 types of entries: records and references
+ * marked by the first byte in the data.  A record entry contains the actual
+ * capability record whereas a reference contains the name (key) under which
+ * the correct record is stored.
+ */
+int
+main(int argc, char *argv[])
+{
+	int c;
+
+	capname = NULL;
+	while ((c = getopt(argc, argv, "cf:iv")) != -1) {
+		switch(c) {
+		case 'c':
+			commentfld = true;
+			break;
+		case 'f':
+			capname = optarg;
+			break;
+		case 'v':
+			verbose = 1;
+			break;
+		case 'i':
+			info = 1;
+			break;
+		case '?':
+		default:
+			usage();
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (*argv == NULL)
+		usage();
+
+	/*
+	 * The database file is the first argument if no name is specified.
+	 * Make arrangements to unlink it if we exit badly.
+	 */
+	(void)snprintf(buf, sizeof(buf), "%s.db", capname ? capname : *argv);
+	if ((capname = strdup(buf)) == NULL)
+		err(1, NULL);
+#ifdef DEBUG
+	capdbp = &capdbps;
+	if ((capdbpf = fopen(capname, "wb+")) == NULL)
+#else
+	if ((capdbp = dbopen(capname, O_CREAT | O_TRUNC | O_RDWR,
+	    DEFFILEMODE, DB_HASH, &openinfo)) == NULL)
+#endif
+		err(1, "%s", buf);
+
+	if (atexit(dounlink))
+		err(1, "atexit");
+
+	db_build(argv);
+
+#ifdef DEBUG
+	if (fclose(capdbpf))
+#else
+	if (capdbp->close(capdbp) < 0)
+#endif
+		err(1, "%s", capname);
+	capname = NULL;
+	exit(0);
+}
+
+void
+dounlink(void)
+{
+	if (capname != NULL)
+		(void)unlink(capname);
+}
+
+/*
+ * Any changes to these definitions should be made also in the getcap(3)
+ * library routines.
+ */
+#define RECOK	(char)0
+#define TCERR	(char)1
+#define SHADOW	(char)2
+
+/*
+ * db_build() builds the name and capability databases according to the
+ * details above.
+ */
+void
+db_build(char **ifiles)
+{
+	DBT key, data;
+	recno_t reccnt;
+	size_t len, bplen;
+	int st;
+	char *bp, *p, *t, *c;
+
+	cgetusedb(0);		/* disable reading of .db files in getcap(3) */
+
+	data.data = NULL;
+	key.data = NULL;
+	for (reccnt = 0, bplen = 0;
+	     (st = (info ? igetnext(&bp, ifiles) : cgetnext(&bp, ifiles))) > 0;) {
+
+		/*
+		 * Allocate enough memory to store record, terminating
+		 * NULL and one extra byte.
+		 */
+		len = strlen(bp);
+		if (info)
+			/* we need to escape all colons, safe approach */
+			for (p = bp; *p; ++p)
+				if (*p == ':')
+					len += 3;
+		if (bplen <= len + 2) {
+			int newbplen = bplen + MAX(256, len + 2);
+			void *newdata;
+
+			if ((newdata = realloc(data.data, newbplen)) == NULL)
+				err(1, NULL);
+			data.data = newdata;
+			bplen = newbplen;
+		}
+
+		/* Find the end of the name field. */
+		p = bp;
+		while (*p) {
+			if (*p == (info ? ',' : ':'))
+				break;
+			if ((*p == '\\') || (*p == '^'))
+				++p;
+			if (*p)
+				++p;
+		}
+		if (!*p) {
+			warnx("no name field: %.*s", (int)MIN(len, 20), bp);
+			goto next_cap;
+		}
+
+#ifdef DEBUG
+		bzero(data.data, bplen);
+#endif
+
+		/* First byte of stored record indicates status. */
+		switch(st) {
+		case 1:
+			((char *)(data.data))[0] = RECOK;
+			break;
+		case 2:
+			((char *)(data.data))[0] = TCERR;
+			warnx("Record not tc expanded: %.*s", (int)(p - bp), bp);
+			break;
+		}
+
+		/* Create the stored record. */
+		t = (char *)data.data + 1;
+		c = bp;
+		/* Copy capability, collapsing empty fields */
+		while (*c) {
+			while ((*c == '\\') || (*c == '^')) {
+				*t++ = *c++;
+				if (*c == '\0')
+					break;
+				if (info && ((c[-1] == '\\') && (*c == ':'))) {
+					/* must be escaped */
+					*t++ = '0';
+					*t++ = '7';
+					*t++ = '2';
+					c++;
+				} else
+					*t++ = *c++;
+			}
+			/* we have an unescaped character */
+			if (*c == (info ? ',' : ':')) {
+				/* field end */
+				*t++ = ':';
+				/* skip delimiter and following white space */
+				while ((*c == (info ? ',' : ':')) ||
+				    (*c == ' ') || (*c == '\t') ||
+				    (*c == '\n') || (*c == '\r'))
+					c++;
+				continue;
+			}
+			/* it's a normal character */
+			if (info && (*c == ':')) {
+				/* must be escaped */
+				*t++ = '\\';
+				*t++ = '0';
+				*t++ = '7';
+				*t++ = '2';
+				c++;
+				continue;
+			}
+			*t++ = *c++;
+		}
+		*t++ = '\0';
+		data.size = t - (char *)data.data;
+
+		/* Store the record under the name field. */
+		/* No need for escapes 'cause the cap parser never sees this */
+		key.data = bp;
+		key.size = p - bp;
+
+		switch(capdbp->put(capdbp, &key, &data, R_NOOVERWRITE)) {
+		case -1:
+			err(1, "put");
+			/* NOTREACHED */
+		case 1:
+			warnx("ignored duplicate: %.*s",
+			    (int)key.size, (char *)key.data);
+			goto next_cap;
+		}
+		++reccnt;
+
+		/* If only one name, ignore the rest. */
+		if ((p = strchr(bp, '|')) == NULL)
+			goto next_cap;
+
+#ifdef DEBUG
+		bzero(data.data, bplen);
+#endif
+
+		/* The rest of the names reference the entire name. */
+		/* No need for escapes 'cause the cap parser never sees this */
+		((char *)(data.data))[0] = SHADOW;
+		(void) memmove(&((u_char *)(data.data))[1], key.data, key.size);
+		data.size = key.size + 1;
+
+		/* Store references for other names. */
+		/* No need for escapes either, but honour them */
+		for (p = t = bp;; ++p) {
+			/* We know we can't hit NUL, cf. warnx("no name field */
+			while ((*p == '\\') || (*p == '^'))
+				p += 2;
+			if ((p > t) && ((*p == '|') ||
+			    (!commentfld && (*p == (info ? ',' : ':'))))) {
+				key.size = p - t;
+				key.data = t;
+				switch(capdbp->put(capdbp,
+				    &key, &data, R_NOOVERWRITE)) {
+				case -1:
+					err(1, "put");
+					/* NOTREACHED */
+				case 1:
+					warnx("ignored duplicate: %.*s",
+					      (int)key.size, (char *)key.data);
+				}
+				t = p + 1;
+			}
+			if (*p == (info ? ',' : ':'))
+				break;
+		}
+ next_cap:
+		free(bp);
+	}
+
+	switch(st) {
+	case -1:
+		err(1, "file argument");
+		/* NOTREACHED */
+	case -2:
+		errx(1, "potential reference loop detected");
+		/* NOTREACHED */
+	}
+
+	if (verbose)
+		(void)printf("cap_mkdb: %d capability records\n", reccnt);
+}
+
+void
+usage(void)
+{
+	(void)fprintf(stderr,
+	    "usage: cap_mkdb [-civ] [-f outfile] file1 [file2 ...]\n");
+	exit(1);
+}
+
+#ifdef DEBUG
+static int
+debug_put(const struct __db *tmp1 __unused, DBT *key, const DBT *data,
+    unsigned int tmp2 __unused)
+{
+	char *ob, *bp;
+	size_t len;
+
+	len = key->size + data->size + 2;
+	if ((ob = malloc(len)) == NULL)
+		err(1, "malloc");
+	memmove(ob, key->data, key->size);
+	bp = ob + key->size;
+	*bp++ = '\t';
+	memmove(bp, data->data, data->size);
+	bp += data->size;
+	*bp = '\n';
+
+	fwrite(ob, len, 1, capdbpf);
+	return (0);
+}
+#endif
+@
+
+
+1.10
+log
+@To help millert to merge my fixes, sync with OpenBSD 4.0
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.9 2006/10/31 03:04:49 tg Exp $ */
+d54 1
+a54 1
+__RCSID("$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.9 2006/10/31 03:04:49 tg Exp $");
+d228 1
+a228 1
+			continue;
+d302 1
+a302 1
+			continue;
+d308 1
+a308 1
+			continue;
+d344 1
+@
+
+
+1.9
+log
+@also escape \: as \072 (leaving us with the ^: combo not cought, but that's
+illegal anyway and doesn't appear in any of the term* source files - didn't
+check vgrind's though)
+
+affects 185 terminal descriptions
+@
+text
+@d1 2
+a2 2
+/**	$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.8 2006/10/31 02:52:38 tg Exp $ */
+/*	$OpenBSD: cap_mkdb.c,v 1.13 2003/09/26 21:25:34 tedu Exp $	*/
+d54 1
+a54 1
+__RCSID("$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.8 2006/10/31 02:52:38 tg Exp $");
+d344 1
+@
+
+
+1.8
+log
+@* cap_mkdb: if a comma is preceded by a backslash, we didn't covert it to a
+  colon with the last commit; however, while "\," is not a delimiter, "\\,"
+  is, and so is "^\," so re-write the conversion code
+* read_bsd_terminfo.c: handle escaped characters here too (the new cap_mkdb
+  ensures every other {,un}escapation not handled here is already done)
+* read_bsd_terminfo.c: while here, make path to terminfo configurable (hiya
+  Tom, this is for you), and add a sensible disclaimer
+* cap_mkdb: simplify the code and add more comments; compress terminfo recs
+  as well (like termcap ones); convert colons to \072 as per termcap(5) for
+  terminfo-format source files
+
+this fixes a total of 321 out of 1320 terminal descriptions we have
+
+(and I originally only wanted to check if our screen terminfo
+ description matches upstream's during an update… here I come)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.7 2006/10/31 02:14:42 tg Exp $ */
+d54 1
+a54 1
+__RCSID("$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.7 2006/10/31 02:14:42 tg Exp $");
+d255 8
+a262 1
+				*t++ = *c++;
+@
+
+
+1.7
+log
+@think before code
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.6 2006/10/31 01:57:05 tg Exp $ */
+d54 1
+a54 1
+__RCSID("$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.6 2006/10/31 01:57:05 tg Exp $");
+d187 1
+a187 1
+	char *bp, *p, *t;
+d201 5
+d217 10
+a226 1
+		if ((p = strchr(bp, info ? ',' : ':')) == NULL) {
+d247 19
+a265 12
+		if (info) {
+			(void) memcpy(&((u_char *)(data.data))[1], bp, len + 1);
+			data.size = len + 2;
+			for (t = memchr((char *)data.data + 1, ',', data.size - 1);
+			     t;
+			     t = memchr(t, ',', data.size - (t - (char *)data.data)))
+				if (t++, ((t <= (char *)data.data + 2) ||
+				    (t[-2] != '\\')))
+					t[-1] = ':';
+
+			if (memchr((char *)data.data + 1, '\0', data.size - 2)) {
+				warnx("NUL in entry: %.*s", (int)MIN(len, 20), bp);
+d268 9
+a276 25
+		} else {
+			char *capbeg, *capend;
+
+			t = (char *)data.data + 1;
+			/* Copy the cap name and trailing ':' */
+			len = p - bp + 1;
+			memcpy(t, bp, len);
+			t += len;
+
+			/* Copy entry, collapsing empty fields. */
+			capbeg = p + 1;
+			while (*capbeg) {
+				/* Skip empty fields. */
+				if ((len = strspn(capbeg, ": \t\n\r")))
+					capbeg += len;
+
+				/* Find the end of this cap and copy it w/ : */
+				capend = strchr(capbeg, ':');
+				if (capend)
+					len = capend - capbeg + 1;
+				else
+					len = strlen(capbeg);
+				memcpy(t, capbeg, len);
+				t += len;
+				capbeg += len;
+d278 1
+a278 2
+			*t = '\0';
+			data.size = t - (char *)data.data + 1;
+d280 2
+d284 1
+d308 1
+d314 1
+d316 3
+@
+
+
+1.6
+log
+@add debugging for RECNO
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.5 2006/10/30 23:52:28 tg Exp $ */
+d54 1
+a54 1
+__RCSID("$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.5 2006/10/30 23:52:28 tg Exp $");
+d68 12
+a79 9
+#define DB_TYPE DB_RECNO
+RECNOINFO openinfo = {
+	0,		/* flags */
+	2048 * 1024,	/* cachesize */
+	4096,		/* psize */
+	0,		/* lorder */
+	0,		/* reclen */
+	'\n',		/* bval */
+	NULL		/* bfname */
+a81 1
+#define DB_TYPE DB_HASH
+d137 4
+d142 2
+a143 1
+	    DEFFILEMODE, DB_TYPE, &openinfo)) == NULL)
+d151 3
+d155 1
+d347 23
+@
+
+
+1.5
+log
+@leverage this code to the same level as the one in libncurses:
+if a comma is prefixed by a backslash, don't convert it into a
+colon for the capability database (cgetent(3))
+
+the libncurses reading code only converts back if not prefixed
+by a backslash the colon is either
+
+cought by infocmp -d -B /usr/ports/misc/screen/w-screen-4.0.3-0/screen-4.0.3/terminfo/x screen screen
+XXX this is still broken, see next commit
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.4 2006/10/28 19:34:43 tg Exp $ */
+d6 2
+d54 1
+a54 1
+__RCSID("$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.4 2006/10/28 19:34:43 tg Exp $");
+d67 13
+d88 1
+d136 1
+a136 1
+	    DEFFILEMODE, DB_HASH, &openinfo)) == NULL)
+d206 4
+d285 4
+@
+
+
+1.4
+log
+@ok I botched, reverse logic error again
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.3 2006/10/28 19:32:38 tg Exp $ */
+d52 1
+a52 1
+__RCSID("$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.3 2006/10/28 19:32:38 tg Exp $");
+d208 3
+a210 1
+				*t++ = ':';
+@
+
+
+1.3
+log
+@instead of always (as per termcap(5) and terminfo(5) spec) skipping the
+comment field in the first capability of each record, only do so when a
+new -c option is given, to retain compatibility with databases that are
+no termcap/terminfo databases (conservative approach)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.2 2006/10/27 15:52:26 tg Exp $ */
+d52 1
+a52 1
+__RCSID("$MirOS: src/usr.bin/cap_mkdb/cap_mkdb.c,v 1.2 2006/10/27 15:52:26 tg Exp $");
+d271 1
+a271 1
+			    (commentfld && (*p == (info ? ',' : ':'))))) {
+@
+
+
+1.2
+log
+@don't index by the comment field, long-standing bug fixed
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d42 1
+d52 1
+a52 1
+__RCSID("$MirOS$");
+d56 1
+a56 1
+void	 usage(void);
+d62 1
+d87 1
+a87 1
+	while ((c = getopt(argc, argv, "f:iv")) != -1) {
+d89 3
+d270 2
+a271 1
+			if (p > t && (*p == '|')) {
+d307 1
+a307 1
+	    "usage: cap_mkdb [-iv] [-f outfile] file1 [file2 ...]\n");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a33 13
+#ifndef lint
+static char copyright[] =
+"@@(#) Copyright (c) 1992, 1993\n\
+	The Regents of the University of California.  All rights reserved.\n";
+#endif /* not lint */
+
+#ifndef lint
+#if 0
+static char sccsid[] = "@@(#)cap_mkdb.c	8.2 (Berkeley) 4/27/95";
+#endif
+static char rcsid[] = "$OpenBSD: cap_mkdb.c,v 1.13 2003/09/26 21:25:34 tedu Exp $";
+#endif /* not lint */
+
+d48 5
+d265 1
+a265 1
+			if (p > t && (*p == (info ? ',' : ':') || *p == '|')) {
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import OpenBSD 4.0's cap_mkdb(1)
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: cap_mkdb.c,v 1.14 2006/03/04 20:32:51 otto Exp $	*/
+d43 1
+a43 1
+static char rcsid[] = "$OpenBSD: cap_mkdb.c,v 1.14 2006/03/04 20:32:51 otto Exp $";
+a288 1
+		free(bp);
+@
+

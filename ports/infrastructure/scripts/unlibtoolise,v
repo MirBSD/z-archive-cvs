@@ -1,0 +1,239 @@
+head	1.4;
+access;
+symbols
+	MIRBSD_8_BASE:1.4;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2005.11.09.20.32.46;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	ada43725cdcd80c;
+
+1.3
+date	2005.07.23.17.39.29;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	2bc242e280465cd7;
+
+1.2
+date	2005.07.18.17.14.32;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	213f42dbe26df79e;
+
+1.1
+date	2005.07.05.22.14.29;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	657642cb060fe726;
+
+
+desc
+@@
+
+
+1.4
+log
+@Only take "plain" .la files, i.e. not those in command lines, especially
+not @@comment foo.la. Oops.
+@
+text
+@#!/usr/bin/perl -W
+# $MirOS: ports/infrastructure/scripts/unlibtoolise,v 1.3 2005/07/23 17:39:29 bsiegert Exp $
+#-
+# Copyright (c) 2005,
+#	Benny Siegert <bsiegert@@gmx.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publically perform, modi-
+# fy, merge, distribute, sell, give away or sublicence, provided the
+# above copyright notices, these terms and the disclaimer are retai-
+# ned in all redistributions, or reproduced in accompanying documen-
+# tation or other materials provided with binary redistributions.
+#
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of covered work, even if advised of the possibility of such damage.
+#-
+# This script is the reverse of the libtoolise routine in make-plist.
+# It uses the same routine to re-add the files referenced by a .la
+# (libtool library info file) into the PLIST. It is called from
+# within bsd.port.mk in the w-pkgname/fake-arch/usr/local directory.
+# It is called as a filter with the list on stdin and the LOCALBASE
+# environment variable set to something like /usr/local.
+
+use strict;
+use File::Spec;
+
+# Given the name of a .la file, return a list of files referenced by it.
+sub libtoolise_plist
+{
+	my $file = shift;
+	my $prefix;
+	my @@libnames;
+	local $_;
+
+	open(FILE, '<', $file) || die "Cannot open $file";
+	while (<FILE>) {
+		chomp;
+		next unless m/^([^=]+)='(.*)'$/;
+		if ($1 eq 'libdir') {
+			$prefix = File::Spec->abs2rel($2, $ENV{LOCALBASE});
+		} elsif (	  ($1 eq 'dlname')
+				||($1 eq 'library_names')
+				||($1 eq 'old_library')) {
+			push(@@libnames, split(/ /, $2));
+		}
+	}
+	close(FILE);
+
+	foreach (@@libnames) {
+		$_ = File::Spec->catfile($prefix, $_);
+	}
+	# remove duplicates
+	return %{{ map { $_ => 1 } File::Spec->no_upwards(@@libnames) }};
+}
+
+sub print_lib
+{
+	my $libs = shift;
+	
+	foreach my $name (keys %$libs) {
+		if ($name =~ m/lib.*\.so\.\d+\.\d+/) {
+			print "\@@lib $name\n";
+		} else {
+			print $name . "\n";
+		}
+	}
+}
+
+my %ltlibs = ();
+my @@plist = <>;
+
+# for all .la files, create a hash of hashes with dependent files
+foreach my $entry (@@plist) {
+	chomp $entry;
+	$ltlibs{$entry} = \%{{ libtoolise_plist($entry) }}
+		if ($entry =~ m/^[^@@].*\.la$/);
+}
+
+# now kill those files that are already in the plist
+foreach (@@plist) {
+	my $entry;
+	if (m/^\@@lib /) {
+		$entry = $';
+	} else {
+		$entry = $_;
+	}
+	foreach my $key (keys %ltlibs) {
+		delete $ltlibs{$key}->{$entry}
+			if defined $ltlibs{$key}->{$entry};
+	}
+}
+
+# and now print the whole thing
+foreach (@@plist) {
+	print_lib($ltlibs{$_}) if (m/\.la$/ && defined $ltlibs{$_});
+	print $_ . "\n";
+}
+@
+
+
+1.3
+log
+@Add the files from a .la directly above the corresponding .la entry in the
+PLIST. This solves the following problem:
+
+libxml has an executable (IIRC xml-catalog) that depends on the library. It
+is called in the last line of the PLIST via @@exec. If we add the library at
+the end, it is not yet installed when the @@exec is run, leading to an error.
+
+idea from tg@@
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/infrastructure/scripts/unlibtoolise,v 1.2 2005/07/18 17:14:32 bsiegert Exp $
+d81 1
+a81 1
+		if ($entry =~ m/\.la$/);
+@
+
+
+1.2
+log
+@Unbreak (hopefully) unlibtoolise.
+
+* Move the script invocation after fragment substitution
+* Only add files from *.la if they are not already present in the PLIST, thus
+  prevent double inclusion for ports which are not yet libtoolised (i.e. all)
+* use @@lib where applicable
+
+The clou is that we do not need to mark .la files specially, it just
+works(TM)---at least I hope so. Please test.
+@
+text
+@d2 1
+a2 1
+# $MirOS$
+d22 6
+d38 1
+d61 13
+d77 1
+d80 2
+a81 1
+	%ltlibs = (%ltlibs, %{{ libtoolise_plist($entry) }}) if ($entry =~ m/\.la$/);
+d83 2
+a84 1
+# twofold iteration not an oversight
+d86 1
+a86 2
+	print $_ . "\n";
+	$ltlibs{$_} = 0 if defined $ltlibs{$_};
+d88 7
+a94 1
+		$ltlibs{$'} = 0 if defined $ltlibs{$'};
+d98 4
+a101 7
+while (my ($key, $value) = each(%ltlibs)) {
+	next unless $value == 1;
+	if ($key =~ m/lib.*\.so\.\d+\.\d+/) {
+		print "\@@lib $key\n";
+	} else {
+		print $key . "\n";
+	}
+@
+
+
+1.1
+log
+@Add an unlibtoolise filter to re-add the files from *.la to the plist.
+Call it in WRKINST, LOCALBASE has to be set.
+@
+text
+@d26 1
+d54 20
+a73 11
+while (<>) {
+	chomp;
+	if (m/\.la$/) {
+		print $_ . "\n";
+		foreach (keys %{{ libtoolise_plist($_) }}) {
+			if (m/lib.*\.so\.\d+\.\d+/) {
+				print "\@@lib $_\n";
+			} else {
+				print $_ . "\n";
+			}
+		}
+d75 1
+a75 1
+		print $_ . "\n";
+@
+

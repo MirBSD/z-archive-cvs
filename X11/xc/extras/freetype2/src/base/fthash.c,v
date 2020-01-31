@@ -1,0 +1,1067 @@
+head	1.3;
+access;
+symbols
+	freetype-2_7_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2017.04.15.19.21.24;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10058F2723111C7BEE2;
+
+1.2
+date	2006.06.29.20.24.42;	author tg;	state dead;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.07;	author tg;	state Exp;
+branches
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.103.1
+date	2005.03.18.10.43.07;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.03;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2017.04.15.15.42.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.3
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  fthash.c                                                               */
+/*                                                                         */
+/*    Hashing functions (body).                                            */
+/*                                                                         */
+/***************************************************************************/
+
+/*
+ * Copyright 2000 Computing Research Labs, New Mexico State University
+ * Copyright 2001-2015
+ *   Francesco Zappa Nardelli
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COMPUTING RESEARCH LAB OR NEW MEXICO STATE UNIVERSITY BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT
+ * OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+ * THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*  This file is based on code from bdf.c,v 1.22 2000/03/16 20:08:50     */
+  /*                                                                       */
+  /*  taken from Mark Leisher's xmbdfed package                            */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_HASH_H
+#include FT_INTERNAL_MEMORY_H
+
+
+#define INITIAL_HT_SIZE  241
+
+
+  static FT_ULong
+  hash_str_lookup( FT_Hashkey*  key )
+  {
+    const char*  kp  = key->str;
+    FT_ULong     res = 0;
+
+
+    /* Mocklisp hash function. */
+    while ( *kp )
+      res = ( res << 5 ) - res + (FT_ULong)*kp++;
+
+    return res;
+  }
+
+
+  static FT_ULong
+  hash_num_lookup( FT_Hashkey*  key )
+  {
+    FT_ULong  num = (FT_ULong)key->num;
+    FT_ULong  res;
+
+
+    /* Mocklisp hash function. */
+    res = num & 0xFF;
+    res = ( res << 5 ) - res + ( ( num >>  8 ) & 0xFF );
+    res = ( res << 5 ) - res + ( ( num >> 16 ) & 0xFF );
+    res = ( res << 5 ) - res + ( ( num >> 24 ) & 0xFF );
+
+    return res;
+  }
+
+
+  static FT_Bool
+  hash_str_compare( FT_Hashkey*  a,
+                    FT_Hashkey*  b )
+  {
+    if ( a->str[0] == b->str[0]           &&
+         ft_strcmp( a->str, b->str ) == 0 )
+      return 1;
+
+    return 0;
+  }
+
+
+  static FT_Bool
+  hash_num_compare( FT_Hashkey*  a,
+                    FT_Hashkey*  b )
+  {
+    if ( a->num == b->num )
+      return 1;
+
+    return 0;
+  }
+
+
+  static FT_Hashnode*
+  hash_bucket( FT_Hashkey  key,
+               FT_Hash     hash )
+  {
+    FT_ULong      res = 0;
+    FT_Hashnode*  bp  = hash->table;
+    FT_Hashnode*  ndp;
+
+
+    res = (hash->lookup)( &key );
+
+    ndp = bp + ( res % hash->size );
+    while ( *ndp )
+    {
+      if ( (hash->compare)( &(*ndp)->key, &key ) )
+        break;
+
+      ndp--;
+      if ( ndp < bp )
+        ndp = bp + ( hash->size - 1 );
+    }
+
+    return ndp;
+  }
+
+
+  static FT_Error
+  hash_rehash( FT_Hash    hash,
+               FT_Memory  memory )
+  {
+    FT_Hashnode*  obp = hash->table;
+    FT_Hashnode*  bp;
+    FT_Hashnode*  nbp;
+
+    FT_UInt   i, sz = hash->size;
+    FT_Error  error = FT_Err_Ok;
+
+
+    hash->size <<= 1;
+    hash->limit  = hash->size / 3;
+
+    if ( FT_NEW_ARRAY( hash->table, hash->size ) )
+      goto Exit;
+
+    for ( i = 0, bp = obp; i < sz; i++, bp++ )
+    {
+      if ( *bp )
+      {
+        nbp = hash_bucket( (*bp)->key, hash );
+        *nbp = *bp;
+      }
+    }
+
+    FT_FREE( obp );
+
+  Exit:
+    return error;
+  }
+
+
+  static FT_Error
+  hash_init( FT_Hash    hash,
+             FT_Bool    is_num,
+             FT_Memory  memory )
+  {
+    FT_UInt   sz = INITIAL_HT_SIZE;
+    FT_Error  error;
+
+
+    hash->size  = sz;
+    hash->limit = sz / 3;
+    hash->used  = 0;
+
+    if ( is_num )
+    {
+      hash->lookup  = hash_num_lookup;
+      hash->compare = hash_num_compare;
+    }
+    else
+    {
+      hash->lookup  = hash_str_lookup;
+      hash->compare = hash_str_compare;
+    }
+
+    FT_MEM_NEW_ARRAY( hash->table, sz );
+
+    return error;
+  }
+
+
+  FT_Error
+  ft_hash_str_init( FT_Hash    hash,
+                    FT_Memory  memory )
+  {
+    return hash_init( hash, 0, memory );
+  }
+
+
+  FT_Error
+  ft_hash_num_init( FT_Hash    hash,
+                    FT_Memory  memory )
+  {
+    return hash_init( hash, 1, memory );
+  }
+
+
+  void
+  ft_hash_str_free( FT_Hash    hash,
+                    FT_Memory  memory )
+  {
+    if ( hash )
+    {
+      FT_UInt       sz = hash->size;
+      FT_Hashnode*  bp = hash->table;
+      FT_UInt       i;
+
+
+      for ( i = 0; i < sz; i++, bp++ )
+        FT_FREE( *bp );
+
+      FT_FREE( hash->table );
+    }
+  }
+
+
+  /* `ft_hash_num_free' is the same as `ft_hash_str_free' */
+
+
+  static FT_Error
+  hash_insert( FT_Hashkey  key,
+               size_t      data,
+               FT_Hash     hash,
+               FT_Memory   memory )
+  {
+    FT_Hashnode   nn;
+    FT_Hashnode*  bp    = hash_bucket( key, hash );
+    FT_Error      error = FT_Err_Ok;
+
+
+    nn = *bp;
+    if ( !nn )
+    {
+      if ( FT_NEW( nn ) )
+        goto Exit;
+      *bp = nn;
+
+      nn->key  = key;
+      nn->data = data;
+
+      if ( hash->used >= hash->limit )
+      {
+        error = hash_rehash( hash, memory );
+        if ( error )
+          goto Exit;
+      }
+
+      hash->used++;
+    }
+    else
+      nn->data = data;
+
+  Exit:
+    return error;
+  }
+
+
+  FT_Error
+  ft_hash_str_insert( const char*  key,
+                      size_t       data,
+                      FT_Hash      hash,
+                      FT_Memory    memory )
+  {
+    FT_Hashkey  hk;
+
+
+    hk.str = key;
+
+    return hash_insert( hk, data, hash, memory );
+  }
+
+
+  FT_Error
+  ft_hash_num_insert( FT_Int     num,
+                      size_t     data,
+                      FT_Hash    hash,
+                      FT_Memory  memory )
+  {
+    FT_Hashkey  hk;
+
+
+    hk.num = num;
+
+    return hash_insert( hk, data, hash, memory );
+  }
+
+
+  static size_t*
+  hash_lookup( FT_Hashkey  key,
+               FT_Hash     hash )
+  {
+    FT_Hashnode*  np = hash_bucket( key, hash );
+
+
+    return (*np) ? &(*np)->data
+                 : NULL;
+  }
+
+
+  size_t*
+  ft_hash_str_lookup( const char*  key,
+                      FT_Hash      hash )
+  {
+    FT_Hashkey  hk;
+
+
+    hk.str = key;
+
+    return hash_lookup( hk, hash );
+  }
+
+
+  size_t*
+  ft_hash_num_lookup( FT_Int   num,
+                      FT_Hash  hash )
+  {
+    FT_Hashkey  hk;
+
+
+    hk.num = num;
+
+    return hash_lookup( hk, hash );
+  }
+
+
+/* END */
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d1 41
+a42 1
+#include FT_TYPES_H
+a44 1
+#include FT_INTERNAL_DEBUG_H
+a45 3
+#define  FT_HASH_MAX_LOAD  2
+#define  FT_HASH_MIN_LOAD  1
+#define  FT_HASH_SUB_LOAD  (FT_HASH_MAX_LOAD-FT_HASH_MIN_LOAD)
+d47 1
+a47 2
+/* this one _must_ be a power of 2 !! */
+#define  FT_HASH_INITIAL_SIZE  8
+d50 2
+a51 4
+  FT_BASE_DEF( void )
+  ft_hash_done( FT_Hash              table,
+                FT_Hash_ForeachFunc  node_func,
+                const FT_Pointer     node_data )
+d53 2
+a54 3
+    if ( table )
+    {
+      FT_Memory  memory = table->memory;
+a55 2
+      if ( node_func )
+        ft_hash_foreach( table, node_func, node_data );
+d57 3
+a59 4
+      FT_FREE( table->buckets );
+      table->p     = 0;
+      table->mask  = 0;
+      table->slack = 0;
+d61 1
+a61 2
+      table->node_equal = NULL;
+    }
+d65 2
+a66 2
+  FT_BASE_DEF( FT_UInt )
+  ft_hash_get_size( FT_Hash  table )
+d68 3
+a70 1
+    FT_UInt  result = 0;
+d72 5
+a76 2
+    if ( table )
+      result = (table->p + table->mask + 1)*FT_HASH_MAX_LOAD - table->slack;
+d78 1
+a78 1
+    return result;
+d82 11
+d94 3
+a96 4
+  FT_BASE_DEF( FT_Error )
+  ft_hash_init( FT_Hash            table,
+                FT_Hash_EqualFunc  equal,
+                FT_Memory          memory )
+d98 15
+a112 1
+    FT_Error  error;
+d114 1
+a114 5
+    table->memory     = memory;
+    table->p          = 0;
+    table->mask       = FT_HASH_INITIAL_SIZE-1;
+    table->slack      = FT_HASH_INITIAL_SIZE*FT_HASH_MAX_LOAD;
+    table->node_equal = equal;
+d116 5
+a120 1
+    (void)FT_NEW_ARRAY( table->buckets, FT_HASH_INITIAL_SIZE*2 );
+d122 6
+a127 1
+    return error;
+d131 10
+a141 8
+  FT_BASE_DEF( void )
+  ft_hash_foreach( FT_Hash              table,
+                   FT_Hash_ForeachFunc  foreach_func,
+                   const FT_Pointer     foreach_data )
+  {
+    FT_UInt       count = table->p + table->mask + 1;
+    FT_HashNode*  pnode = table->buckets;
+    FT_HashNode   node, next;
+d143 7
+a149 1
+    for ( ; count > 0; count--, pnode++ )
+d151 1
+a151 2
+      node = *pnode;
+      while ( node )
+d153 2
+a154 3
+        next = node->link;
+        foreach_func( node, foreach_data );
+        node = next;
+d157 5
+d165 8
+d174 3
+a176 11
+  FT_BASE_DEF( FT_HashLookup )
+  ft_hash_lookup( FT_Hash      table,
+                  FT_HashNode  keynode )
+  {
+    FT_UInt       index;
+    FT_UInt32     hash = keynode->hash;
+    FT_HashNode   node, *pnode;
+
+    index = (FT_UInt)(hash & table->mask);
+    if ( index < table->p )
+      index = (FT_UInt)(hash & (2*table->mask+1));
+d178 6
+a183 2
+    pnode = &table->buckets[index];
+    for (;;)
+d185 5
+a189 3
+      node = *pnode;
+      if ( node == NULL )
+        break;
+d191 2
+a192 2
+      if ( node->hash == hash && table->node_equal( node, keynode ) )
+        break;
+a193 2
+      pnode = &node->link;
+    }
+d195 5
+a199 1
+    return pnode;
+d203 6
+d211 3
+a213 4
+  FT_BASE_DEF( FT_Error )
+  ft_hash_add( FT_Hash        table,
+               FT_HashLookup  lookup,
+               FT_HashNode    new_node )
+d215 5
+a219 1
+    FT_Error     error = 0;
+a220 3
+    /* add it to the hash table */
+    new_node->link = *lookup;
+    *lookup        = new_node;
+d222 9
+a230 5
+    if ( --table->slack < 0 )
+    {
+      FT_UInt       p     = table->p;
+      FT_UInt       mask  = table->mask;
+      FT_HashNode   new_list, node, *pnode;
+a231 18
+      /* split a single bucket */
+      new_list = NULL;
+      pnode    = table->buckets + p;
+      for (;;)
+      {
+        node = *pnode;
+        if ( node == NULL )
+          break;
+
+        if ( node->hash & mask )
+        {
+          *pnode     = node->link;
+          node->link = new_list;
+          new_list   = node;
+        }
+        else
+          pnode = &node->link;
+      }
+d233 9
+a241 1
+      table->buckets[ p + mask + 1 ] = new_list;
+a242 1
+      table->slack += FT_HASH_MAX_LOAD;
+d244 6
+a249 3
+      if ( p >= mask )
+      {
+        FT_Memory  memory = table->memory;
+d251 2
+d254 4
+a257 1
+        if (FT_RENEW_ARRAY( table->buckets, (mask+1)*2, (mask+1)*4 ))
+d259 1
+d261 1
+a261 5
+        table->mask = 2*mask + 1;
+        table->p    = 0;
+      }
+      else
+        table->p = p + 1;
+d263 3
+d271 28
+d300 4
+a303 3
+  FT_BASE_DEF( FT_Error )
+  ft_hash_remove( FT_Hash        table,
+                  FT_HashLookup  lookup )
+d305 1
+a305 3
+    FT_HashNode  node;
+    FT_UInt      num_buckets;
+    FT_Error     error = 0;
+a306 1
+    FT_ASSERT( pnode != NULL && node != NULL );
+d308 3
+a310 3
+    node       = *lookup;
+    *lookup    = node->link;
+    node->link = NULL;
+a311 1
+    num_buckets = ( table->p + table->mask + 1) ;
+d313 6
+a318 7
+    if ( ++ table->slack > (FT_Long)num_buckets*FT_HASH_SUB_LOAD )
+    {
+      FT_UInt       p         = table->p;
+      FT_UInt       mask      = table->mask;
+      FT_UInt       old_index = p + mask;
+      FT_HashNode*  pnode;
+      FT_HashNode*  pold;
+d320 1
+a320 2
+      if ( old_index < FT_HASH_INITIAL_SIZE )
+        goto Exit;
+d322 2
+a323 3
+      if ( p == 0 )
+      {
+        FT_Memory  memory = table->memory;
+a324 2
+        table->mask >>= 1;
+        p             = table->mask;
+d326 5
+a330 8
+        if ( FT_RENEW_ARRAY( table->buckets, (mask+1)*2, (mask+1) ) )
+        {
+          /* this should never happen normally, but who knows :-)   */
+          /* we need to re-inject the node in the hash table before */
+          /* returning there, since it's safer                      */
+          pnode      = table->buckets;
+          node->link = *pnode;
+          *pnode     = node;
+a331 5
+          goto Exit;
+        }
+      }
+      else
+        p--;
+d333 1
+a333 7
+      pnode = table->buckets + p;
+      while ( *pnode )
+        pnode = &(*pnode)->link;
+
+      pold   = table->buckets + old_index;
+      *pnode = *pold;
+      *pold  = NULL;
+d335 1
+a335 5
+      table->slack -= FT_HASH_MAX_LOAD;
+      table->p      = p;
+    }
+  Exit:
+    return error;
+d337 3
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@a0 41
+/***************************************************************************/
+/*                                                                         */
+/*  fthash.c                                                               */
+/*                                                                         */
+/*    Hashing functions (body).                                            */
+/*                                                                         */
+/***************************************************************************/
+
+/*
+ * Copyright 2000 Computing Research Labs, New Mexico State University
+ * Copyright 2001-2015
+ *   Francesco Zappa Nardelli
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COMPUTING RESEARCH LAB OR NEW MEXICO STATE UNIVERSITY BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT
+ * OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+ * THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*  This file is based on code from bdf.c,v 1.22 2000/03/16 20:08:50     */
+  /*                                                                       */
+  /*  taken from Mark Leisher's xmbdfed package                            */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+d2 1
+d5 1
+d7 3
+d11 2
+a12 1
+#define INITIAL_HT_SIZE  241
+d15 4
+a18 2
+  static FT_ULong
+  hash_str_lookup( FT_Hashkey*  key )
+d20 3
+a22 2
+    const char*  kp  = key->str;
+    FT_ULong     res = 0;
+d24 2
+d27 4
+a30 3
+    /* Mocklisp hash function. */
+    while ( *kp )
+      res = ( res << 5 ) - res + (FT_ULong)*kp++;
+d32 2
+a33 1
+    return res;
+d37 2
+a38 2
+  static FT_ULong
+  hash_num_lookup( FT_Hashkey*  key )
+d40 1
+a40 3
+    FT_ULong  num = (FT_ULong)key->num;
+    FT_ULong  res;
+
+d42 2
+a43 5
+    /* Mocklisp hash function. */
+    res = num & 0xFF;
+    res = ( res << 5 ) - res + ( ( num >>  8 ) & 0xFF );
+    res = ( res << 5 ) - res + ( ( num >> 16 ) & 0xFF );
+    res = ( res << 5 ) - res + ( ( num >> 24 ) & 0xFF );
+d45 1
+a45 1
+    return res;
+a48 11
+  static FT_Bool
+  hash_str_compare( FT_Hashkey*  a,
+                    FT_Hashkey*  b )
+  {
+    if ( a->str[0] == b->str[0]           &&
+         ft_strcmp( a->str, b->str ) == 0 )
+      return 1;
+
+    return 0;
+  }
+
+d50 4
+a53 3
+  static FT_Bool
+  hash_num_compare( FT_Hashkey*  a,
+                    FT_Hashkey*  b )
+d55 1
+a55 2
+    if ( a->num == b->num )
+      return 1;
+d57 5
+a61 2
+    return 0;
+  }
+d63 1
+d65 1
+a65 23
+  static FT_Hashnode*
+  hash_bucket( FT_Hashkey  key,
+               FT_Hash     hash )
+  {
+    FT_ULong      res = 0;
+    FT_Hashnode*  bp  = hash->table;
+    FT_Hashnode*  ndp;
+
+
+    res = (hash->lookup)( &key );
+
+    ndp = bp + ( res % hash->size );
+    while ( *ndp )
+    {
+      if ( (hash->compare)( &(*ndp)->key, &key ) )
+        break;
+
+      ndp--;
+      if ( ndp < bp )
+        ndp = bp + ( hash->size - 1 );
+    }
+
+    return ndp;
+a68 10
+  static FT_Error
+  hash_rehash( FT_Hash    hash,
+               FT_Memory  memory )
+  {
+    FT_Hashnode*  obp = hash->table;
+    FT_Hashnode*  bp;
+    FT_Hashnode*  nbp;
+
+    FT_UInt   i, sz = hash->size;
+    FT_Error  error = FT_Err_Ok;
+d70 8
+d79 1
+a79 7
+    hash->size <<= 1;
+    hash->limit  = hash->size / 3;
+
+    if ( FT_NEW_ARRAY( hash->table, hash->size ) )
+      goto Exit;
+
+    for ( i = 0, bp = obp; i < sz; i++, bp++ )
+d81 2
+a82 1
+      if ( *bp )
+d84 3
+a86 2
+        nbp = hash_bucket( (*bp)->key, hash );
+        *nbp = *bp;
+d89 1
+a90 1
+    FT_FREE( obp );
+a91 3
+  Exit:
+    return error;
+  }
+d93 11
+d105 6
+a110 7
+  static FT_Error
+  hash_init( FT_Hash    hash,
+             FT_Bool    is_num,
+             FT_Memory  memory )
+  {
+    FT_UInt   sz = INITIAL_HT_SIZE;
+    FT_Error  error;
+d112 2
+d115 1
+a115 13
+    hash->size  = sz;
+    hash->limit = sz / 3;
+    hash->used  = 0;
+
+    if ( is_num )
+    {
+      hash->lookup  = hash_num_lookup;
+      hash->compare = hash_num_compare;
+    }
+    else
+    {
+      hash->lookup  = hash_str_lookup;
+      hash->compare = hash_str_compare;
+d118 1
+a118 3
+    FT_MEM_NEW_ARRAY( hash->table, sz );
+
+    return error;
+a121 6
+  FT_Error
+  ft_hash_str_init( FT_Hash    hash,
+                    FT_Memory  memory )
+  {
+    return hash_init( hash, 0, memory );
+  }
+d124 4
+a127 3
+  FT_Error
+  ft_hash_num_init( FT_Hash    hash,
+                    FT_Memory  memory )
+d129 1
+a129 2
+    return hash_init( hash, 1, memory );
+  }
+d131 3
+d135 1
+a135 5
+  void
+  ft_hash_str_free( FT_Hash    hash,
+                    FT_Memory  memory )
+  {
+    if ( hash )
+d137 3
+a139 3
+      FT_UInt       sz = hash->size;
+      FT_Hashnode*  bp = hash->table;
+      FT_UInt       i;
+d141 18
+d160 1
+a160 6
+      for ( i = 0; i < sz; i++, bp++ )
+        FT_FREE( *bp );
+
+      FT_FREE( hash->table );
+    }
+  }
+d162 1
+d164 3
+a166 1
+  /* `ft_hash_num_free' is the same as `ft_hash_str_free' */
+d169 2
+a170 17
+  static FT_Error
+  hash_insert( FT_Hashkey  key,
+               size_t      data,
+               FT_Hash     hash,
+               FT_Memory   memory )
+  {
+    FT_Hashnode   nn;
+    FT_Hashnode*  bp    = hash_bucket( key, hash );
+    FT_Error      error = FT_Err_Ok;
+
+
+    nn = *bp;
+    if ( !nn )
+    {
+      if ( FT_NEW( nn ) )
+        goto Exit;
+      *bp = nn;
+d172 2
+a173 8
+      nn->key  = key;
+      nn->data = data;
+
+      if ( hash->used >= hash->limit )
+      {
+        error = hash_rehash( hash, memory );
+        if ( error )
+          goto Exit;
+d175 2
+a176 2
+
+      hash->used++;
+a177 3
+    else
+      nn->data = data;
+
+a182 28
+  FT_Error
+  ft_hash_str_insert( const char*  key,
+                      size_t       data,
+                      FT_Hash      hash,
+                      FT_Memory    memory )
+  {
+    FT_Hashkey  hk;
+
+
+    hk.str = key;
+
+    return hash_insert( hk, data, hash, memory );
+  }
+
+
+  FT_Error
+  ft_hash_num_insert( FT_Int     num,
+                      size_t     data,
+                      FT_Hash    hash,
+                      FT_Memory  memory )
+  {
+    FT_Hashkey  hk;
+
+
+    hk.num = num;
+
+    return hash_insert( hk, data, hash, memory );
+  }
+d184 3
+a186 4
+
+  static size_t*
+  hash_lookup( FT_Hashkey  key,
+               FT_Hash     hash )
+d188 3
+a190 1
+    FT_Hashnode*  np = hash_bucket( key, hash );
+d192 1
+d194 3
+a196 3
+    return (*np) ? &(*np)->data
+                 : NULL;
+  }
+d198 1
+d200 7
+a206 5
+  size_t*
+  ft_hash_str_lookup( const char*  key,
+                      FT_Hash      hash )
+  {
+    FT_Hashkey  hk;
+d208 2
+d211 3
+a213 1
+    hk.str = key;
+d215 2
+a216 2
+    return hash_lookup( hk, hash );
+  }
+d218 8
+d227 5
+a231 5
+  size_t*
+  ft_hash_num_lookup( FT_Int   num,
+                      FT_Hash  hash )
+  {
+    FT_Hashkey  hk;
+d233 7
+d241 5
+a245 3
+    hk.num = num;
+
+    return hash_lookup( hk, hash );
+a246 3
+
+
+/* END */
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

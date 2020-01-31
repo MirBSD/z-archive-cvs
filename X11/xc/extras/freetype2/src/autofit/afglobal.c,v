@@ -1,0 +1,2066 @@
+head	1.6;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.04.15.19.21.17;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.19.47.34;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520152445E05B912;
+
+1.4
+date	2008.06.12.20.54.28;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.04.49;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.35;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.06;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.54;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.38.15;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.43.06;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.34.53;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.44;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.26;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.01;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  afglobal.c                                                             */
+/*                                                                         */
+/*    Auto-fitter routines to compute global hinting values (body).        */
+/*                                                                         */
+/*  Copyright 2003-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include "afglobal.h"
+#include "afranges.h"
+#include "afshaper.h"
+#include FT_INTERNAL_DEBUG_H
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_afglobal
+
+
+  /* get writing system specific header files */
+#undef  WRITING_SYSTEM
+#define WRITING_SYSTEM( ws, WS )  /* empty */
+#include "afwrtsys.h"
+
+#include "aferrors.h"
+#include "afpic.h"
+
+
+#undef  SCRIPT
+#define SCRIPT( s, S, d, h, H, ss )         \
+          AF_DEFINE_SCRIPT_CLASS(           \
+            af_ ## s ## _script_class,      \
+            AF_SCRIPT_ ## S,                \
+            af_ ## s ## _uniranges,         \
+            af_ ## s ## _nonbase_uniranges, \
+            AF_ ## H,                       \
+            ss )
+
+#include "afscript.h"
+
+
+#undef  STYLE
+#define STYLE( s, S, d, ws, sc, ss, c )  \
+          AF_DEFINE_STYLE_CLASS(         \
+            af_ ## s ## _style_class,    \
+            AF_STYLE_ ## S,              \
+            ws,                          \
+            sc,                          \
+            ss,                          \
+            c )
+
+#include "afstyles.h"
+
+
+#ifndef FT_CONFIG_OPTION_PIC
+
+#undef  WRITING_SYSTEM
+#define WRITING_SYSTEM( ws, WS )               \
+          &af_ ## ws ## _writing_system_class,
+
+  FT_LOCAL_ARRAY_DEF( AF_WritingSystemClass )
+  af_writing_system_classes[] =
+  {
+
+#include "afwrtsys.h"
+
+    NULL  /* do not remove */
+  };
+
+
+#undef  SCRIPT
+#define SCRIPT( s, S, d, h, H, ss )   \
+          &af_ ## s ## _script_class,
+
+  FT_LOCAL_ARRAY_DEF( AF_ScriptClass )
+  af_script_classes[] =
+  {
+
+#include "afscript.h"
+
+    NULL  /* do not remove */
+  };
+
+
+#undef  STYLE
+#define STYLE( s, S, d, ws, sc, ss, c ) \
+          &af_ ## s ## _style_class,
+
+  FT_LOCAL_ARRAY_DEF( AF_StyleClass )
+  af_style_classes[] =
+  {
+
+#include "afstyles.h"
+
+    NULL  /* do not remove */
+  };
+
+#endif /* !FT_CONFIG_OPTION_PIC */
+
+
+#ifdef FT_DEBUG_LEVEL_TRACE
+
+#undef  STYLE
+#define STYLE( s, S, d, ws, sc, ss, c )  #s,
+
+  FT_LOCAL_ARRAY_DEF( char* )
+  af_style_names[] =
+  {
+
+#include "afstyles.h"
+
+  };
+
+#endif /* FT_DEBUG_LEVEL_TRACE */
+
+
+  /* Compute the style index of each glyph within a given face. */
+
+  static FT_Error
+  af_face_globals_compute_style_coverage( AF_FaceGlobals  globals )
+  {
+    FT_Error    error;
+    FT_Face     face        = globals->face;
+    FT_CharMap  old_charmap = face->charmap;
+    FT_UShort*  gstyles     = globals->glyph_styles;
+    FT_UInt     ss;
+    FT_UInt     i;
+    FT_UInt     dflt        = ~0U; /* a non-valid value */
+
+
+    /* the value AF_STYLE_UNASSIGNED means `uncovered glyph' */
+    for ( i = 0; i < (FT_UInt)globals->glyph_count; i++ )
+      gstyles[i] = AF_STYLE_UNASSIGNED;
+
+    error = FT_Select_Charmap( face, FT_ENCODING_UNICODE );
+    if ( error )
+    {
+      /*
+       * Ignore this error; we simply use the fallback style.
+       * XXX: Shouldn't we rather disable hinting?
+       */
+      error = FT_Err_Ok;
+      goto Exit;
+    }
+
+    /* scan each style in a Unicode charmap */
+    for ( ss = 0; AF_STYLE_CLASSES_GET[ss]; ss++ )
+    {
+      AF_StyleClass       style_class =
+                            AF_STYLE_CLASSES_GET[ss];
+      AF_ScriptClass      script_class =
+                            AF_SCRIPT_CLASSES_GET[style_class->script];
+      AF_Script_UniRange  range;
+
+
+      if ( !script_class->script_uni_ranges )
+        continue;
+
+      /*
+       *  Scan all Unicode points in the range and set the corresponding
+       *  glyph style index.
+       */
+      if ( style_class->coverage == AF_COVERAGE_DEFAULT )
+      {
+        if ( (FT_UInt)style_class->script ==
+             globals->module->default_script )
+          dflt = ss;
+
+        for ( range = script_class->script_uni_ranges;
+              range->first != 0;
+              range++ )
+        {
+          FT_ULong  charcode = range->first;
+          FT_UInt   gindex;
+
+
+          gindex = FT_Get_Char_Index( face, charcode );
+
+          if ( gindex != 0                                                &&
+               gindex < (FT_ULong)globals->glyph_count                    &&
+               ( gstyles[gindex] & AF_STYLE_MASK ) == AF_STYLE_UNASSIGNED )
+            gstyles[gindex] = (FT_UShort)ss;
+
+          for (;;)
+          {
+            charcode = FT_Get_Next_Char( face, charcode, &gindex );
+
+            if ( gindex == 0 || charcode > range->last )
+              break;
+
+            if ( gindex < (FT_ULong)globals->glyph_count                    &&
+                 ( gstyles[gindex] & AF_STYLE_MASK ) == AF_STYLE_UNASSIGNED )
+              gstyles[gindex] = (FT_UShort)ss;
+          }
+        }
+
+        /* do the same for the script's non-base characters */
+        for ( range = script_class->script_uni_nonbase_ranges;
+              range->first != 0;
+              range++ )
+        {
+          FT_ULong  charcode = range->first;
+          FT_UInt   gindex;
+
+
+          gindex = FT_Get_Char_Index( face, charcode );
+
+          if ( gindex != 0                                          &&
+               gindex < (FT_ULong)globals->glyph_count              &&
+               ( gstyles[gindex] & AF_STYLE_MASK ) == (FT_UShort)ss )
+            gstyles[gindex] |= AF_NONBASE;
+
+          for (;;)
+          {
+            charcode = FT_Get_Next_Char( face, charcode, &gindex );
+
+            if ( gindex == 0 || charcode > range->last )
+              break;
+
+            if ( gindex < (FT_ULong)globals->glyph_count              &&
+                 ( gstyles[gindex] & AF_STYLE_MASK ) == (FT_UShort)ss )
+              gstyles[gindex] |= AF_NONBASE;
+          }
+        }
+      }
+      else
+      {
+        /* get glyphs not directly addressable by cmap */
+        af_shaper_get_coverage( globals, style_class, gstyles, 0 );
+      }
+    }
+
+    /* handle the remaining default OpenType features ... */
+    for ( ss = 0; AF_STYLE_CLASSES_GET[ss]; ss++ )
+    {
+      AF_StyleClass  style_class = AF_STYLE_CLASSES_GET[ss];
+
+
+      if ( style_class->coverage == AF_COVERAGE_DEFAULT )
+        af_shaper_get_coverage( globals, style_class, gstyles, 0 );
+    }
+
+    /* ... and finally the default OpenType features of the default script */
+    af_shaper_get_coverage( globals, AF_STYLE_CLASSES_GET[dflt], gstyles, 1 );
+
+    /* mark ASCII digits */
+    for ( i = 0x30; i <= 0x39; i++ )
+    {
+      FT_UInt  gindex = FT_Get_Char_Index( face, i );
+
+
+      if ( gindex != 0 && gindex < (FT_ULong)globals->glyph_count )
+        gstyles[gindex] |= AF_DIGIT;
+    }
+
+  Exit:
+    /*
+     *  By default, all uncovered glyphs are set to the fallback style.
+     *  XXX: Shouldn't we disable hinting or do something similar?
+     */
+    if ( globals->module->fallback_style != AF_STYLE_UNASSIGNED )
+    {
+      FT_Long  nn;
+
+
+      for ( nn = 0; nn < globals->glyph_count; nn++ )
+      {
+        if ( ( gstyles[nn] & AF_STYLE_MASK ) == AF_STYLE_UNASSIGNED )
+        {
+          gstyles[nn] &= ~AF_STYLE_MASK;
+          gstyles[nn] |= globals->module->fallback_style;
+        }
+      }
+    }
+
+#ifdef FT_DEBUG_LEVEL_TRACE
+
+    FT_TRACE4(( "\n"
+                "style coverage\n"
+                "==============\n"
+                "\n" ));
+
+    for ( ss = 0; AF_STYLE_CLASSES_GET[ss]; ss++ )
+    {
+      AF_StyleClass  style_class = AF_STYLE_CLASSES_GET[ss];
+      FT_UInt        count       = 0;
+      FT_Long        idx;
+
+
+      FT_TRACE4(( "%s:\n", af_style_names[style_class->style] ));
+
+      for ( idx = 0; idx < globals->glyph_count; idx++ )
+      {
+        if ( ( gstyles[idx] & AF_STYLE_MASK ) == style_class->style )
+        {
+          if ( !( count % 10 ) )
+            FT_TRACE4(( " " ));
+
+          FT_TRACE4(( " %d", idx ));
+          count++;
+
+          if ( !( count % 10 ) )
+            FT_TRACE4(( "\n" ));
+        }
+      }
+
+      if ( !count )
+        FT_TRACE4(( "  (none)\n" ));
+      if ( count % 10 )
+        FT_TRACE4(( "\n" ));
+    }
+
+#endif /* FT_DEBUG_LEVEL_TRACE */
+
+    FT_Set_Charmap( face, old_charmap );
+    return error;
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  af_face_globals_new( FT_Face          face,
+                       AF_FaceGlobals  *aglobals,
+                       AF_Module        module )
+  {
+    FT_Error        error;
+    FT_Memory       memory;
+    AF_FaceGlobals  globals = NULL;
+
+
+    memory = face->memory;
+
+    /* we allocate an AF_FaceGlobals structure together */
+    /* with the glyph_styles array                      */
+    if ( FT_ALLOC( globals,
+                   sizeof ( *globals ) +
+                     (FT_ULong)face->num_glyphs * sizeof ( FT_UShort ) ) )
+      goto Exit;
+
+    globals->face                      = face;
+    globals->glyph_count               = face->num_glyphs;
+    /* right after the globals structure come the glyph styles */
+    globals->glyph_styles              = (FT_UShort*)( globals + 1 );
+    globals->module                    = module;
+    globals->stem_darkening_for_ppem   = 0;
+    globals->darken_x                  = 0;
+    globals->darken_y                  = 0;
+    globals->standard_vertical_width   = 0;
+    globals->standard_horizontal_width = 0;
+    globals->scale_down_factor         = 0;
+
+#ifdef FT_CONFIG_OPTION_USE_HARFBUZZ
+    globals->hb_font = hb_ft_font_create( face, NULL );
+    globals->hb_buf  = hb_buffer_create();
+#endif
+
+    error = af_face_globals_compute_style_coverage( globals );
+    if ( error )
+    {
+      af_face_globals_free( globals );
+      globals = NULL;
+    }
+    else
+      globals->increase_x_height = AF_PROP_INCREASE_X_HEIGHT_MAX;
+
+  Exit:
+    *aglobals = globals;
+    return error;
+  }
+
+
+  FT_LOCAL_DEF( void )
+  af_face_globals_free( AF_FaceGlobals  globals )
+  {
+    if ( globals )
+    {
+      FT_Memory  memory = globals->face->memory;
+      FT_UInt    nn;
+
+
+      for ( nn = 0; nn < AF_STYLE_MAX; nn++ )
+      {
+        if ( globals->metrics[nn] )
+        {
+          AF_StyleClass          style_class =
+            AF_STYLE_CLASSES_GET[nn];
+          AF_WritingSystemClass  writing_system_class =
+            AF_WRITING_SYSTEM_CLASSES_GET[style_class->writing_system];
+
+
+          if ( writing_system_class->style_metrics_done )
+            writing_system_class->style_metrics_done( globals->metrics[nn] );
+
+          FT_FREE( globals->metrics[nn] );
+        }
+      }
+
+#ifdef FT_CONFIG_OPTION_USE_HARFBUZZ
+      hb_font_destroy( globals->hb_font );
+      globals->hb_font = NULL;
+
+      hb_buffer_destroy( globals->hb_buf );
+      globals->hb_buf = NULL;
+#endif
+
+      /* no need to free `globals->glyph_styles'; */
+      /* it is part of the `globals' array        */
+      FT_FREE( globals );
+    }
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  af_face_globals_get_metrics( AF_FaceGlobals    globals,
+                               FT_UInt           gindex,
+                               FT_UInt           options,
+                               AF_StyleMetrics  *ametrics )
+  {
+    AF_StyleMetrics  metrics = NULL;
+
+    AF_Style               style = (AF_Style)options;
+    AF_WritingSystemClass  writing_system_class;
+    AF_StyleClass          style_class;
+
+    FT_Error  error = FT_Err_Ok;
+
+
+    if ( gindex >= (FT_ULong)globals->glyph_count )
+    {
+      error = FT_THROW( Invalid_Argument );
+      goto Exit;
+    }
+
+    /* if we have a forced style (via `options'), use it, */
+    /* otherwise look into `glyph_styles' array           */
+    if ( style == AF_STYLE_NONE_DFLT || style + 1 >= AF_STYLE_MAX )
+      style = (AF_Style)( globals->glyph_styles[gindex] &
+                          AF_STYLE_UNASSIGNED           );
+
+    style_class          = AF_STYLE_CLASSES_GET[style];
+    writing_system_class = AF_WRITING_SYSTEM_CLASSES_GET
+                             [style_class->writing_system];
+
+    metrics = globals->metrics[style];
+    if ( !metrics )
+    {
+      /* create the global metrics object if necessary */
+      FT_Memory  memory = globals->face->memory;
+
+
+      if ( FT_ALLOC( metrics, writing_system_class->style_metrics_size ) )
+        goto Exit;
+
+      metrics->style_class = style_class;
+      metrics->globals     = globals;
+
+      if ( writing_system_class->style_metrics_init )
+      {
+        error = writing_system_class->style_metrics_init( metrics,
+                                                          globals->face );
+        if ( error )
+        {
+          if ( writing_system_class->style_metrics_done )
+            writing_system_class->style_metrics_done( metrics );
+
+          FT_FREE( metrics );
+          goto Exit;
+        }
+      }
+
+      globals->metrics[style] = metrics;
+    }
+
+  Exit:
+    *ametrics = metrics;
+
+    return error;
+  }
+
+
+  FT_LOCAL_DEF( FT_Bool )
+  af_face_globals_is_digit( AF_FaceGlobals  globals,
+                            FT_UInt         gindex )
+  {
+    if ( gindex < (FT_ULong)globals->glyph_count )
+      return (FT_Bool)( globals->glyph_styles[gindex] & AF_DIGIT );
+
+    return (FT_Bool)0;
+  }
+
+
+/* END */
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2005, 2006, 2007, 2008, 2009 by                  */
+d20 21
+a40 4
+#include "afdummy.h"
+#include "aflatin.h"
+#include "afcjk.h"
+#include "afindic.h"
+a42 1
+#include "aferrors.h"
+d44 25
+a68 3
+#ifdef FT_OPTION_AUTOFIT2
+#include "aflatin2.h"
+#endif
+d72 27
+a98 2
+/* when updating this table, don't forget to update 
+  AF_SCRIPT_CLASSES_COUNT and autofit_module_class_pic_init */
+d100 6
+a105 2
+  /* populate this list when you add new scripts */
+  static AF_ScriptClass const  af_script_classes[] =
+d107 3
+a109 7
+    &af_dummy_script_class,
+#ifdef FT_OPTION_AUTOFIT2
+    &af_latin2_script_class,
+#endif
+    &af_latin_script_class,
+    &af_cjk_script_class,
+    &af_indic_script_class, 
+d113 4
+a116 1
+#endif /* FT_CONFIG_OPTION_PIC */
+d118 5
+a122 14
+  /* index of default script in `af_script_classes' */
+#define AF_SCRIPT_LIST_DEFAULT  2
+  /* a bit mask indicating an uncovered glyph       */
+#define AF_SCRIPT_LIST_NONE     0x7F
+  /* if this flag is set, we have an ASCII digit    */
+#define AF_DIGIT                0x80
+
+
+  /*
+   *  Note that glyph_scripts[] is used to map each glyph into
+   *  an index into the `af_script_classes' array.
+   *
+   */
+  typedef struct  AF_FaceGlobalsRec_
+a123 3
+    FT_Face           face;
+    FT_Long           glyph_count;    /* same as face->num_glyphs */
+    FT_Byte*          glyph_scripts;
+d125 3
+a127 1
+    AF_ScriptMetrics  metrics[AF_SCRIPT_MAX];
+d129 1
+a129 1
+  } AF_FaceGlobalsRec;
+d132 1
+a132 1
+  /* Compute the script index of each glyph within a given face. */
+d135 1
+a135 1
+  af_face_globals_compute_script_coverage( AF_FaceGlobals  globals )
+d137 1
+a137 1
+    FT_Error    error       = AF_Err_Ok;
+d140 4
+a143 2
+    FT_Byte*    gscripts    = globals->glyph_scripts;
+    FT_UInt     ss, i;
+d146 3
+a148 4
+    /* the value 255 means `uncovered glyph' */
+    FT_MEM_SET( globals->glyph_scripts,
+                AF_SCRIPT_LIST_NONE,
+                globals->glyph_count );
+d153 5
+a157 5
+     /*
+      *  Ignore this error; we simply use the default script.
+      *  XXX: Shouldn't we rather disable hinting?
+      */
+      error = AF_Err_Ok;
+d161 2
+a162 2
+    /* scan each script in a Unicode charmap */
+    for ( ss = 0; AF_SCRIPT_CLASSES_GET[ss]; ss++ )
+d164 4
+a167 1
+      AF_ScriptClass      clazz = AF_SCRIPT_CLASSES_GET[ss];
+d171 1
+a171 1
+      if ( clazz->script_uni_ranges == NULL )
+d175 2
+a176 2
+       *  Scan all unicode points in the range and set the corresponding
+       *  glyph script index.
+d178 1
+a178 1
+      for ( range = clazz->script_uni_ranges; range->first != 0; range++ )
+d180 13
+a192 2
+        FT_ULong  charcode = range->first;
+        FT_UInt   gindex;
+d194 8
+d203 2
+a204 1
+        gindex = FT_Get_Char_Index( face, charcode );
+d206 4
+a209 5
+        if ( gindex != 0                             &&
+             gindex < (FT_ULong)globals->glyph_count &&
+             gscripts[gindex] == AF_SCRIPT_LIST_NONE )
+        {
+          gscripts[gindex] = (FT_Byte)ss;
+d212 4
+a215 1
+        for (;;)
+d217 3
+a219 1
+          charcode = FT_Get_Next_Char( face, charcode, &gindex );
+d221 1
+a221 2
+          if ( gindex == 0 || charcode > range->last )
+            break;
+d223 6
+a228 2
+          if ( gindex < (FT_ULong)globals->glyph_count &&
+               gscripts[gindex] == AF_SCRIPT_LIST_NONE )
+d230 8
+a237 1
+            gscripts[gindex] = (FT_Byte)ss;
+d241 5
+d248 13
+d268 1
+a268 1
+        gscripts[gindex] |= AF_DIGIT;
+d273 1
+a273 1
+     *  By default, all uncovered glyphs are set to the latin script.
+d276 1
+d283 5
+a287 2
+        if ( gscripts[nn] == AF_SCRIPT_LIST_NONE )
+          gscripts[nn] = AF_SCRIPT_LIST_DEFAULT;
+d291 39
+d337 2
+a338 1
+                       AF_FaceGlobals  *aglobals )
+d342 1
+a342 1
+    AF_FaceGlobals  globals;
+d347 26
+a372 2
+    if ( !FT_ALLOC( globals, sizeof ( *globals ) +
+                             face->num_glyphs * sizeof ( FT_Byte ) ) )
+d374 2
+a375 10
+      globals->face          = face;
+      globals->glyph_count   = face->num_glyphs;
+      globals->glyph_scripts = (FT_Byte*)( globals + 1 );
+
+      error = af_face_globals_compute_script_coverage( globals );
+      if ( error )
+      {
+        af_face_globals_free( globals );
+        globals = NULL;
+      }
+d377 2
+d380 1
+d395 1
+a395 1
+      for ( nn = 0; nn < AF_SCRIPT_MAX; nn++ )
+d399 4
+a402 1
+          AF_ScriptClass  clazz = AF_SCRIPT_CLASSES_GET[nn];
+d405 2
+a406 4
+          FT_ASSERT( globals->metrics[nn]->clazz == clazz );
+
+          if ( clazz->script_metrics_done )
+            clazz->script_metrics_done( globals->metrics[nn] );
+d412 7
+a418 3
+      globals->glyph_count   = 0;
+      globals->glyph_scripts = NULL;  /* no need to free this one! */
+      globals->face          = NULL;
+d420 2
+d428 4
+a431 4
+  af_face_globals_get_metrics( AF_FaceGlobals     globals,
+                               FT_UInt            gindex,
+                               FT_UInt            options,
+                               AF_ScriptMetrics  *ametrics )
+d433 7
+a439 7
+    AF_ScriptMetrics  metrics = NULL;
+    FT_UInt           gidx;
+    AF_ScriptClass    clazz;
+    FT_UInt           script     = options & 15;
+    const FT_Offset   script_max = sizeof ( AF_SCRIPT_CLASSES_GET ) /
+                                     sizeof ( AF_SCRIPT_CLASSES_GET[0] );
+    FT_Error          error      = AF_Err_Ok;
+d444 1
+a444 1
+      error = AF_Err_Invalid_Argument;
+d448 9
+a456 7
+    gidx = script;
+    if ( gidx == 0 || gidx + 1 >= script_max )
+      gidx = globals->glyph_scripts[gindex] & AF_SCRIPT_LIST_NONE;
+
+    clazz = AF_SCRIPT_CLASSES_GET[gidx];
+    if ( script == 0 )
+      script = clazz->script;
+d458 2
+a459 2
+    metrics = globals->metrics[clazz->script];
+    if ( metrics == NULL )
+d461 1
+a461 1
+      /* create the global metrics object when needed */
+d465 1
+a465 1
+      if ( FT_ALLOC( metrics, clazz->script_metrics_size ) )
+d468 2
+a469 1
+      metrics->clazz = clazz;
+d471 1
+a471 1
+      if ( clazz->script_metrics_init )
+d473 2
+a474 1
+        error = clazz->script_metrics_init( metrics, globals->face );
+d477 2
+a478 2
+          if ( clazz->script_metrics_done )
+            clazz->script_metrics_done( metrics );
+d485 1
+a485 1
+      globals->metrics[clazz->script] = metrics;
+d500 1
+a500 1
+      return (FT_Bool)( globals->glyph_scripts[gindex] & AF_DIGIT );
+@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2005, 2006, 2007, 2008 by                        */
+d24 1
+d32 5
+d50 2
+d54 4
+a57 2
+  /* indicates an uncovered glyph                   */
+#define AF_SCRIPT_LIST_NONE   255
+d68 1
+a68 1
+    FT_UInt           glyph_count;    /* same as face->num_glyphs */
+d85 1
+a85 1
+    FT_UInt     ss;
+d105 1
+a105 1
+    for ( ss = 0; af_script_classes[ss]; ss++ )
+d107 1
+a107 1
+      AF_ScriptClass      clazz = af_script_classes[ss];
+d127 1
+a127 1
+             gindex < globals->glyph_count           &&
+d140 1
+a140 1
+          if ( gindex < globals->glyph_count           &&
+d149 10
+d165 1
+a165 1
+      FT_UInt  nn;
+d224 1
+a224 1
+          AF_ScriptClass  clazz = af_script_classes[nn];
+d255 2
+a256 2
+    const FT_UInt     script_max = sizeof ( af_script_classes ) /
+                                     sizeof ( af_script_classes[0] );
+d260 1
+a260 1
+    if ( gindex >= globals->glyph_count )
+d268 1
+a268 1
+      gidx = globals->glyph_scripts[gindex];
+d270 1
+a270 1
+    clazz = af_script_classes[gidx];
+d309 11
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2005, 2006, 2007 by                              */
+d87 2
+a88 2
+      *  Ignore this error; we simply use Latin as the standard
+      *  script.  XXX: Shouldn't we rather disable hinting?
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2005, 2006 by                                    */
+d23 2
+d27 3
+d35 3
+d40 1
+a40 1
+
+d45 1
+a45 1
+#define AF_SCRIPT_LIST_DEFAULT  1
+d142 1
+a142 1
+     *  XXX: Shouldnt' we disable hinting or do something similar?
+d228 1
+d234 4
+a237 1
+    FT_Error          error = AF_Err_Ok;
+d246 8
+a253 2
+    gidx    = globals->glyph_scripts[gindex];
+    clazz   = af_script_classes[gidx];
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 18
+d22 3
+d26 2
+a27 3
+ /* populate this list when you add new scripts
+  */
+  static AF_ScriptClass const   af_script_classes[] =
+d29 3
+a31 2
+    & af_dummy_script_class,
+    & af_latin_script_class,
+d36 4
+a39 2
+#define AF_SCRIPT_LIST_DEFAULT   0    /* index of default script in 'af_script_classes' */
+#define AF_SCRIPT_LIST_NONE      255  /* indicates an uncovered glyph                      */
+a40 10
+ /*
+  *  note that glyph_scripts[] is used to map each glyph into
+  *  an index into the 'af_script_classes' array.
+  *
+  */
+  typedef struct AF_FaceGlobalsRec_
+  {
+    FT_Face            face;
+    FT_UInt            glyph_count;    /* same as face->num_glyphs     */
+    FT_Byte*           glyph_scripts;
+d42 12
+a53 1
+    AF_ScriptMetrics   metrics[ AF_SCRIPT_MAX ];
+d58 1
+a59 4
+
+ /* this function is used to compute the script index of each glyph
+  * within a given face
+  */
+d63 1
+a63 1
+    FT_Error    error       = 0;
+d69 2
+a70 2
+   /* the value 255 means "uncovered glyph"
+    */
+d78 3
+a80 2
+     /* ignore this error, we'll simply use Latin as the standard
+      * script. XXX: Shouldn't we rather disable hinting ??
+d82 1
+a82 1
+      error = 0;
+d86 1
+a86 2
+   /* scan each script in a Unicode charmap
+    */
+d92 1
+d96 4
+a99 3
+     /* scan all unicode points in the range, and set the corresponding
+      * glyph script index
+      */
+d105 1
+d108 3
+a110 3
+        if ( gindex != 0                               &&
+             gindex < globals->glyph_count             &&
+             gscripts[ gindex ] == AF_SCRIPT_LIST_NONE )
+d112 1
+a112 1
+          gscripts[ gindex ] = (FT_Byte) ss;
+d114 1
+d122 2
+a123 2
+          if ( gindex < globals->glyph_count       &&
+               gscripts[ gindex ] == AF_SCRIPT_LIST_NONE )
+d125 1
+a125 1
+            gscripts[ gindex ] = (FT_Byte) ss;
+d132 4
+a135 3
+   /* by default, all uncovered glyphs are set to the latin script
+    * XXX: shouldnt' we disable hinting or do something similar ?
+    */
+d139 1
+d142 2
+a143 2
+        if ( gscripts[ nn ] == AF_SCRIPT_LIST_NONE )
+          gscripts[ nn ] = AF_SCRIPT_LIST_DEFAULT;
+a151 1
+
+d160 1
+d163 2
+a164 2
+    if ( !FT_ALLOC( globals, sizeof(*globals) +
+                             face->num_glyphs*sizeof(FT_Byte) ) )
+d168 1
+a168 1
+      globals->glyph_scripts = (FT_Byte*)( globals+1 );
+d191 1
+d198 1
+d209 1
+a209 1
+      globals->glyph_scripts = NULL;  /* no need to free this one !! */
+d211 1
+d223 1
+a223 1
+    FT_UInt           index;
+d225 2
+a226 1
+    FT_Error          error = 0;
+d230 1
+a230 1
+      error = FT_Err_Invalid_Argument;
+d234 3
+a236 3
+    index   = globals->glyph_scripts[ gindex ];
+    clazz   = af_script_classes[ index ];
+    metrics = globals->metrics[ clazz->script ];
+d239 1
+a239 2
+     /* create the global metrics object when needed
+      */
+d242 1
+d261 1
+a261 1
+      globals->metrics[ clazz->script ] = metrics;
+d266 1
+d269 3
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@a0 18
+/***************************************************************************/
+/*                                                                         */
+/*  afglobal.c                                                             */
+/*                                                                         */
+/*    Auto-fitter routines to compute global hinting values (body).        */
+/*                                                                         */
+/*  Copyright 2003, 2004, 2005, 2006, 2007 by                              */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+a3 2
+#include "afcjk.h"
+#include "afindic.h"
+d5 6
+a10 5
+#include "aferrors.h"
+
+#ifdef FT_OPTION_AUTOFIT2
+#include "aflatin2.h"
+#endif
+a11 10
+  /* populate this list when you add new scripts */
+  static AF_ScriptClass const  af_script_classes[] =
+  {
+    &af_dummy_script_class,
+#ifdef FT_OPTION_AUTOFIT2
+    &af_latin2_script_class,
+#endif
+    &af_latin_script_class,
+    &af_cjk_script_class,
+    &af_indic_script_class, 
+d15 2
+a16 4
+  /* index of default script in `af_script_classes' */
+#define AF_SCRIPT_LIST_DEFAULT  2
+  /* indicates an uncovered glyph                   */
+#define AF_SCRIPT_LIST_NONE   255
+d18 10
+d29 1
+a29 10
+  /*
+   *  Note that glyph_scripts[] is used to map each glyph into
+   *  an index into the `af_script_classes' array.
+   *
+   */
+  typedef struct  AF_FaceGlobalsRec_
+  {
+    FT_Face           face;
+    FT_UInt           glyph_count;    /* same as face->num_glyphs */
+    FT_Byte*          glyph_scripts;
+d31 1
+a31 1
+    AF_ScriptMetrics  metrics[AF_SCRIPT_MAX];
+a32 1
+  } AF_FaceGlobalsRec;
+a34 1
+  /* Compute the script index of each glyph within a given face. */
+d36 3
+d42 1
+a42 1
+    FT_Error    error       = AF_Err_Ok;
+d48 2
+a49 2
+
+    /* the value 255 means `uncovered glyph' */
+d57 2
+a58 3
+     /*
+      *  Ignore this error; we simply use Latin as the standard
+      *  script.  XXX: Shouldn't we rather disable hinting?
+d60 1
+a60 1
+      error = AF_Err_Ok;
+d64 2
+a65 1
+    /* scan each script in a Unicode charmap */
+a70 1
+
+d74 3
+a76 4
+      /*
+       *  Scan all unicode points in the range and set the corresponding
+       *  glyph script index.
+       */
+a81 1
+
+d84 3
+a86 3
+        if ( gindex != 0                             &&
+             gindex < globals->glyph_count           &&
+             gscripts[gindex] == AF_SCRIPT_LIST_NONE )
+d88 1
+a88 1
+          gscripts[gindex] = (FT_Byte)ss;
+a89 1
+
+d97 2
+a98 2
+          if ( gindex < globals->glyph_count           &&
+               gscripts[gindex] == AF_SCRIPT_LIST_NONE )
+d100 1
+a100 1
+            gscripts[gindex] = (FT_Byte)ss;
+d107 3
+a109 4
+    /*
+     *  By default, all uncovered glyphs are set to the latin script.
+     *  XXX: Shouldn't we disable hinting or do something similar?
+     */
+a112 1
+
+d115 2
+a116 2
+        if ( gscripts[nn] == AF_SCRIPT_LIST_NONE )
+          gscripts[nn] = AF_SCRIPT_LIST_DEFAULT;
+d125 1
+a133 1
+
+d136 2
+a137 2
+    if ( !FT_ALLOC( globals, sizeof ( *globals ) +
+                             face->num_glyphs * sizeof ( FT_Byte ) ) )
+d141 1
+a141 1
+      globals->glyph_scripts = (FT_Byte*)( globals + 1 );
+a163 1
+
+a169 1
+
+d180 1
+a180 1
+      globals->glyph_scripts = NULL;  /* no need to free this one! */
+a181 1
+
+a189 1
+                               FT_UInt            options,
+d193 1
+a193 1
+    FT_UInt           gidx;
+d195 1
+a195 5
+    FT_UInt           script     = options & 15;
+    const FT_UInt     script_max = sizeof ( af_script_classes ) /
+                                     sizeof ( af_script_classes[0] );
+    FT_Error          error      = AF_Err_Ok;
+
+d199 1
+a199 1
+      error = AF_Err_Invalid_Argument;
+d203 3
+a205 9
+    gidx = script;
+    if ( gidx == 0 || gidx + 1 >= script_max )
+      gidx = globals->glyph_scripts[gindex];
+
+    clazz = af_script_classes[gidx];
+    if ( script == 0 )
+      script = clazz->script;
+
+    metrics = globals->metrics[clazz->script];
+d208 2
+a209 1
+      /* create the global metrics object when needed */
+a211 1
+
+d230 1
+a230 1
+      globals->metrics[clazz->script] = metrics;
+a234 1
+
+a236 3
+
+
+/* END */
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2005, 2006, 2007, 2008 by                        */
+d87 2
+a88 2
+      *  Ignore this error; we simply use the default script.
+      *  XXX: Shouldn't we rather disable hinting?
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@a0 18
+/***************************************************************************/
+/*                                                                         */
+/*  afglobal.c                                                             */
+/*                                                                         */
+/*    Auto-fitter routines to compute global hinting values (body).        */
+/*                                                                         */
+/*  Copyright 2003, 2004, 2005, 2006 by                                    */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+a3 3
+#include "afcjk.h"
+#include "aferrors.h"
+
+d5 3
+a7 2
+  /* populate this list when you add new scripts */
+  static AF_ScriptClass const  af_script_classes[] =
+d9 2
+a10 3
+    &af_dummy_script_class,
+    &af_latin_script_class,
+    &af_cjk_script_class,
+d15 2
+a16 4
+  /* index of default script in `af_script_classes' */
+#define AF_SCRIPT_LIST_DEFAULT  1
+  /* indicates an uncovered glyph                   */
+#define AF_SCRIPT_LIST_NONE   255
+d18 10
+d29 1
+a29 10
+  /*
+   *  Note that glyph_scripts[] is used to map each glyph into
+   *  an index into the `af_script_classes' array.
+   *
+   */
+  typedef struct  AF_FaceGlobalsRec_
+  {
+    FT_Face           face;
+    FT_UInt           glyph_count;    /* same as face->num_glyphs */
+    FT_Byte*          glyph_scripts;
+d31 1
+a31 1
+    AF_ScriptMetrics  metrics[AF_SCRIPT_MAX];
+a32 1
+  } AF_FaceGlobalsRec;
+a34 1
+  /* Compute the script index of each glyph within a given face. */
+d36 3
+d42 1
+a42 1
+    FT_Error    error       = AF_Err_Ok;
+d48 2
+a49 2
+
+    /* the value 255 means `uncovered glyph' */
+d57 2
+a58 3
+     /*
+      *  Ignore this error; we simply use Latin as the standard
+      *  script.  XXX: Shouldn't we rather disable hinting?
+d60 1
+a60 1
+      error = AF_Err_Ok;
+d64 2
+a65 1
+    /* scan each script in a Unicode charmap */
+a70 1
+
+d74 3
+a76 4
+      /*
+       *  Scan all unicode points in the range and set the corresponding
+       *  glyph script index.
+       */
+a81 1
+
+d84 3
+a86 3
+        if ( gindex != 0                             &&
+             gindex < globals->glyph_count           &&
+             gscripts[gindex] == AF_SCRIPT_LIST_NONE )
+d88 1
+a88 1
+          gscripts[gindex] = (FT_Byte)ss;
+a89 1
+
+d97 2
+a98 2
+          if ( gindex < globals->glyph_count           &&
+               gscripts[gindex] == AF_SCRIPT_LIST_NONE )
+d100 1
+a100 1
+            gscripts[gindex] = (FT_Byte)ss;
+d107 3
+a109 4
+    /*
+     *  By default, all uncovered glyphs are set to the latin script.
+     *  XXX: Shouldnt' we disable hinting or do something similar?
+     */
+a112 1
+
+d115 2
+a116 2
+        if ( gscripts[nn] == AF_SCRIPT_LIST_NONE )
+          gscripts[nn] = AF_SCRIPT_LIST_DEFAULT;
+d125 1
+a133 1
+
+d136 2
+a137 2
+    if ( !FT_ALLOC( globals, sizeof ( *globals ) +
+                             face->num_glyphs * sizeof ( FT_Byte ) ) )
+d141 1
+a141 1
+      globals->glyph_scripts = (FT_Byte*)( globals + 1 );
+a163 1
+
+a169 1
+
+d180 1
+a180 1
+      globals->glyph_scripts = NULL;  /* no need to free this one! */
+a181 1
+
+d193 1
+a193 1
+    FT_UInt           gidx;
+d195 1
+a195 2
+    FT_Error          error = AF_Err_Ok;
+
+d199 1
+a199 1
+      error = AF_Err_Invalid_Argument;
+d203 3
+a205 3
+    gidx    = globals->glyph_scripts[gindex];
+    clazz   = af_script_classes[gidx];
+    metrics = globals->metrics[clazz->script];
+d208 2
+a209 1
+      /* create the global metrics object when needed */
+a211 1
+
+d230 1
+a230 1
+      globals->metrics[clazz->script] = metrics;
+a234 1
+
+a236 3
+
+
+/* END */
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2005, 2006, 2007, 2008, 2009 by                  */
+a22 3
+#include "afindic.h"
+#include "afpic.h"
+
+a24 8
+#ifdef FT_OPTION_AUTOFIT2
+#include "aflatin2.h"
+#endif
+
+#ifndef FT_CONFIG_OPTION_PIC
+
+/* when updating this table, don't forget to update 
+  AF_SCRIPT_CLASSES_COUNT and autofit_module_class_pic_init */
+a29 3
+#ifdef FT_OPTION_AUTOFIT2
+    &af_latin2_script_class,
+#endif
+d32 1
+a32 1
+    &af_indic_script_class, 
+a35 2
+#endif /* FT_CONFIG_OPTION_PIC */
+
+d37 3
+a39 5
+#define AF_SCRIPT_LIST_DEFAULT  2
+  /* a bit mask indicating an uncovered glyph       */
+#define AF_SCRIPT_LIST_NONE     0x7F
+  /* if this flag is set, we have an ASCII digit    */
+#define AF_DIGIT                0x80
+d50 1
+a50 1
+    FT_Long           glyph_count;    /* same as face->num_glyphs */
+d67 1
+a67 1
+    FT_UInt     ss, i;
+d79 2
+a80 2
+      *  Ignore this error; we simply use the default script.
+      *  XXX: Shouldn't we rather disable hinting?
+d87 1
+a87 1
+    for ( ss = 0; AF_SCRIPT_CLASSES_GET[ss]; ss++ )
+d89 1
+a89 1
+      AF_ScriptClass      clazz = AF_SCRIPT_CLASSES_GET[ss];
+d109 1
+a109 1
+             gindex < (FT_ULong)globals->glyph_count &&
+d122 1
+a122 1
+          if ( gindex < (FT_ULong)globals->glyph_count &&
+a130 10
+    /* mark ASCII digits */
+    for ( i = 0x30; i <= 0x39; i++ )
+    {
+      FT_UInt  gindex = FT_Get_Char_Index( face, i );
+
+
+      if ( gindex != 0 && gindex < (FT_ULong)globals->glyph_count )
+        gscripts[gindex] |= AF_DIGIT;
+    }
+
+d134 1
+a134 1
+     *  XXX: Shouldn't we disable hinting or do something similar?
+d137 1
+a137 1
+      FT_Long  nn;
+d196 1
+a196 1
+          AF_ScriptClass  clazz = AF_SCRIPT_CLASSES_GET[nn];
+a219 1
+                               FT_UInt            options,
+d225 1
+a225 4
+    FT_UInt           script     = options & 15;
+    const FT_Offset   script_max = sizeof ( AF_SCRIPT_CLASSES_GET ) /
+                                     sizeof ( AF_SCRIPT_CLASSES_GET[0] );
+    FT_Error          error      = AF_Err_Ok;
+d228 1
+a228 1
+    if ( gindex >= (FT_ULong)globals->glyph_count )
+d234 2
+a235 8
+    gidx = script;
+    if ( gidx == 0 || gidx + 1 >= script_max )
+      gidx = globals->glyph_scripts[gindex] & AF_SCRIPT_LIST_NONE;
+
+    clazz = AF_SCRIPT_CLASSES_GET[gidx];
+    if ( script == 0 )
+      script = clazz->script;
+
+a270 11
+  FT_LOCAL_DEF( FT_Bool )
+  af_face_globals_is_digit( AF_FaceGlobals  globals,
+                            FT_UInt         gindex )
+  {
+    if ( gindex < (FT_ULong)globals->glyph_count )
+      return (FT_Bool)( globals->glyph_scripts[gindex] & AF_DIGIT );
+
+    return (FT_Bool)0;
+  }
+
+
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003-2016 by                                                 */
+d20 5
+a24 19
+#include "afranges.h"
+#include "afshaper.h"
+#include FT_INTERNAL_DEBUG_H
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_afglobal
+
+
+  /* get writing system specific header files */
+#undef  WRITING_SYSTEM
+#define WRITING_SYSTEM( ws, WS )  /* empty */
+#include "afwrtsys.h"
+a26 27
+#include "afpic.h"
+
+
+#undef  SCRIPT
+#define SCRIPT( s, S, d, h, H, ss )         \
+          AF_DEFINE_SCRIPT_CLASS(           \
+            af_ ## s ## _script_class,      \
+            AF_SCRIPT_ ## S,                \
+            af_ ## s ## _uniranges,         \
+            af_ ## s ## _nonbase_uniranges, \
+            AF_ ## H,                       \
+            ss )
+
+#include "afscript.h"
+
+
+#undef  STYLE
+#define STYLE( s, S, d, ws, sc, ss, c )  \
+          AF_DEFINE_STYLE_CLASS(         \
+            af_ ## s ## _style_class,    \
+            AF_STYLE_ ## S,              \
+            ws,                          \
+            sc,                          \
+            ss,                          \
+            c )
+
+#include "afstyles.h"
+d28 3
+d34 2
+a35 3
+#undef  WRITING_SYSTEM
+#define WRITING_SYSTEM( ws, WS )               \
+          &af_ ## ws ## _writing_system_class,
+d37 2
+a38 2
+  FT_LOCAL_ARRAY_DEF( AF_WritingSystemClass )
+  af_writing_system_classes[] =
+d40 7
+a46 31
+
+#include "afwrtsys.h"
+
+    NULL  /* do not remove */
+  };
+
+
+#undef  SCRIPT
+#define SCRIPT( s, S, d, h, H, ss )   \
+          &af_ ## s ## _script_class,
+
+  FT_LOCAL_ARRAY_DEF( AF_ScriptClass )
+  af_script_classes[] =
+  {
+
+#include "afscript.h"
+
+    NULL  /* do not remove */
+  };
+
+
+#undef  STYLE
+#define STYLE( s, S, d, ws, sc, ss, c ) \
+          &af_ ## s ## _style_class,
+
+  FT_LOCAL_ARRAY_DEF( AF_StyleClass )
+  af_style_classes[] =
+  {
+
+#include "afstyles.h"
+
+d50 1
+a50 4
+#endif /* !FT_CONFIG_OPTION_PIC */
+
+
+#ifdef FT_DEBUG_LEVEL_TRACE
+d52 14
+a65 5
+#undef  STYLE
+#define STYLE( s, S, d, ws, sc, ss, c )  #s,
+
+  FT_LOCAL_ARRAY_DEF( char* )
+  af_style_names[] =
+d67 3
+d71 1
+a71 3
+#include "afstyles.h"
+
+  };
+d73 1
+a73 1
+#endif /* FT_DEBUG_LEVEL_TRACE */
+d76 1
+a76 1
+  /* Compute the style index of each glyph within a given face. */
+d79 1
+a79 1
+  af_face_globals_compute_style_coverage( AF_FaceGlobals  globals )
+d81 1
+a81 1
+    FT_Error    error;
+d84 2
+a85 4
+    FT_UShort*  gstyles     = globals->glyph_styles;
+    FT_UInt     ss;
+    FT_UInt     i;
+    FT_UInt     dflt        = ~0U; /* a non-valid value */
+d88 4
+a91 3
+    /* the value AF_STYLE_UNASSIGNED means `uncovered glyph' */
+    for ( i = 0; i < (FT_UInt)globals->glyph_count; i++ )
+      gstyles[i] = AF_STYLE_UNASSIGNED;
+d96 5
+a100 5
+      /*
+       * Ignore this error; we simply use the fallback style.
+       * XXX: Shouldn't we rather disable hinting?
+       */
+      error = FT_Err_Ok;
+d104 2
+a105 2
+    /* scan each style in a Unicode charmap */
+    for ( ss = 0; AF_STYLE_CLASSES_GET[ss]; ss++ )
+d107 1
+a107 4
+      AF_StyleClass       style_class =
+                            AF_STYLE_CLASSES_GET[ss];
+      AF_ScriptClass      script_class =
+                            AF_SCRIPT_CLASSES_GET[style_class->script];
+d111 1
+a111 1
+      if ( !script_class->script_uni_ranges )
+d115 2
+a116 2
+       *  Scan all Unicode points in the range and set the corresponding
+       *  glyph style index.
+d118 1
+a118 1
+      if ( style_class->coverage == AF_COVERAGE_DEFAULT )
+d120 2
+a121 10
+        if ( (FT_UInt)style_class->script ==
+             globals->module->default_script )
+          dflt = ss;
+
+        for ( range = script_class->script_uni_ranges;
+              range->first != 0;
+              range++ )
+        {
+          FT_ULong  charcode = range->first;
+          FT_UInt   gindex;
+d124 1
+a124 1
+          gindex = FT_Get_Char_Index( face, charcode );
+d126 5
+a130 16
+          if ( gindex != 0                                                &&
+               gindex < (FT_ULong)globals->glyph_count                    &&
+               ( gstyles[gindex] & AF_STYLE_MASK ) == AF_STYLE_UNASSIGNED )
+            gstyles[gindex] = (FT_UShort)ss;
+
+          for (;;)
+          {
+            charcode = FT_Get_Next_Char( face, charcode, &gindex );
+
+            if ( gindex == 0 || charcode > range->last )
+              break;
+
+            if ( gindex < (FT_ULong)globals->glyph_count                    &&
+                 ( gstyles[gindex] & AF_STYLE_MASK ) == AF_STYLE_UNASSIGNED )
+              gstyles[gindex] = (FT_UShort)ss;
+          }
+d133 1
+a133 4
+        /* do the same for the script's non-base characters */
+        for ( range = script_class->script_uni_nonbase_ranges;
+              range->first != 0;
+              range++ )
+d135 1
+a135 3
+          FT_ULong  charcode = range->first;
+          FT_UInt   gindex;
+
+d137 2
+a138 1
+          gindex = FT_Get_Char_Index( face, charcode );
+d140 2
+a141 6
+          if ( gindex != 0                                          &&
+               gindex < (FT_ULong)globals->glyph_count              &&
+               ( gstyles[gindex] & AF_STYLE_MASK ) == (FT_UShort)ss )
+            gstyles[gindex] |= AF_NONBASE;
+
+          for (;;)
+d143 1
+a143 8
+            charcode = FT_Get_Next_Char( face, charcode, &gindex );
+
+            if ( gindex == 0 || charcode > range->last )
+              break;
+
+            if ( gindex < (FT_ULong)globals->glyph_count              &&
+                 ( gstyles[gindex] & AF_STYLE_MASK ) == (FT_UShort)ss )
+              gstyles[gindex] |= AF_NONBASE;
+a146 5
+      else
+      {
+        /* get glyphs not directly addressable by cmap */
+        af_shaper_get_coverage( globals, style_class, gstyles, 0 );
+      }
+a148 13
+    /* handle the remaining default OpenType features ... */
+    for ( ss = 0; AF_STYLE_CLASSES_GET[ss]; ss++ )
+    {
+      AF_StyleClass  style_class = AF_STYLE_CLASSES_GET[ss];
+
+
+      if ( style_class->coverage == AF_COVERAGE_DEFAULT )
+        af_shaper_get_coverage( globals, style_class, gstyles, 0 );
+    }
+
+    /* ... and finally the default OpenType features of the default script */
+    af_shaper_get_coverage( globals, AF_STYLE_CLASSES_GET[dflt], gstyles, 1 );
+
+d156 1
+a156 1
+        gstyles[gindex] |= AF_DIGIT;
+d161 1
+a161 1
+     *  By default, all uncovered glyphs are set to the fallback style.
+a163 1
+    if ( globals->module->fallback_style != AF_STYLE_UNASSIGNED )
+d170 2
+a171 5
+        if ( ( gstyles[nn] & AF_STYLE_MASK ) == AF_STYLE_UNASSIGNED )
+        {
+          gstyles[nn] &= ~AF_STYLE_MASK;
+          gstyles[nn] |= globals->module->fallback_style;
+        }
+a174 39
+#ifdef FT_DEBUG_LEVEL_TRACE
+
+    FT_TRACE4(( "\n"
+                "style coverage\n"
+                "==============\n"
+                "\n" ));
+
+    for ( ss = 0; AF_STYLE_CLASSES_GET[ss]; ss++ )
+    {
+      AF_StyleClass  style_class = AF_STYLE_CLASSES_GET[ss];
+      FT_UInt        count       = 0;
+      FT_Long        idx;
+
+
+      FT_TRACE4(( "%s:\n", af_style_names[style_class->style] ));
+
+      for ( idx = 0; idx < globals->glyph_count; idx++ )
+      {
+        if ( ( gstyles[idx] & AF_STYLE_MASK ) == style_class->style )
+        {
+          if ( !( count % 10 ) )
+            FT_TRACE4(( " " ));
+
+          FT_TRACE4(( " %d", idx ));
+          count++;
+
+          if ( !( count % 10 ) )
+            FT_TRACE4(( "\n" ));
+        }
+      }
+
+      if ( !count )
+        FT_TRACE4(( "  (none)\n" ));
+      if ( count % 10 )
+        FT_TRACE4(( "\n" ));
+    }
+
+#endif /* FT_DEBUG_LEVEL_TRACE */
+
+d182 1
+a182 2
+                       AF_FaceGlobals  *aglobals,
+                       AF_Module        module )
+d186 1
+a186 1
+    AF_FaceGlobals  globals = NULL;
+d191 6
+a196 6
+    /* we allocate an AF_FaceGlobals structure together */
+    /* with the glyph_styles array                      */
+    if ( FT_ALLOC( globals,
+                   sizeof ( *globals ) +
+                     (FT_ULong)face->num_glyphs * sizeof ( FT_UShort ) ) )
+      goto Exit;
+d198 6
+a203 22
+    globals->face                      = face;
+    globals->glyph_count               = face->num_glyphs;
+    /* right after the globals structure come the glyph styles */
+    globals->glyph_styles              = (FT_UShort*)( globals + 1 );
+    globals->module                    = module;
+    globals->stem_darkening_for_ppem   = 0;
+    globals->darken_x                  = 0;
+    globals->darken_y                  = 0;
+    globals->standard_vertical_width   = 0;
+    globals->standard_horizontal_width = 0;
+    globals->scale_down_factor         = 0;
+
+#ifdef FT_CONFIG_OPTION_USE_HARFBUZZ
+    globals->hb_font = hb_ft_font_create( face, NULL );
+    globals->hb_buf  = hb_buffer_create();
+#endif
+
+    error = af_face_globals_compute_style_coverage( globals );
+    if ( error )
+    {
+      af_face_globals_free( globals );
+      globals = NULL;
+a204 2
+    else
+      globals->increase_x_height = AF_PROP_INCREASE_X_HEIGHT_MAX;
+a205 1
+  Exit:
+d220 1
+a220 1
+      for ( nn = 0; nn < AF_STYLE_MAX; nn++ )
+d224 1
+a224 4
+          AF_StyleClass          style_class =
+            AF_STYLE_CLASSES_GET[nn];
+          AF_WritingSystemClass  writing_system_class =
+            AF_WRITING_SYSTEM_CLASSES_GET[style_class->writing_system];
+d227 4
+a230 2
+          if ( writing_system_class->style_metrics_done )
+            writing_system_class->style_metrics_done( globals->metrics[nn] );
+d236 3
+a238 7
+#ifdef FT_CONFIG_OPTION_USE_HARFBUZZ
+      hb_font_destroy( globals->hb_font );
+      globals->hb_font = NULL;
+
+      hb_buffer_destroy( globals->hb_buf );
+      globals->hb_buf = NULL;
+#endif
+a239 2
+      /* no need to free `globals->glyph_styles'; */
+      /* it is part of the `globals' array        */
+d246 4
+a249 4
+  af_face_globals_get_metrics( AF_FaceGlobals    globals,
+                               FT_UInt           gindex,
+                               FT_UInt           options,
+                               AF_StyleMetrics  *ametrics )
+d251 7
+a257 7
+    AF_StyleMetrics  metrics = NULL;
+
+    AF_Style               style = (AF_Style)options;
+    AF_WritingSystemClass  writing_system_class;
+    AF_StyleClass          style_class;
+
+    FT_Error  error = FT_Err_Ok;
+d262 1
+a262 1
+      error = FT_THROW( Invalid_Argument );
+d266 7
+a272 9
+    /* if we have a forced style (via `options'), use it, */
+    /* otherwise look into `glyph_styles' array           */
+    if ( style == AF_STYLE_NONE_DFLT || style + 1 >= AF_STYLE_MAX )
+      style = (AF_Style)( globals->glyph_styles[gindex] &
+                          AF_STYLE_UNASSIGNED           );
+
+    style_class          = AF_STYLE_CLASSES_GET[style];
+    writing_system_class = AF_WRITING_SYSTEM_CLASSES_GET
+                             [style_class->writing_system];
+d274 2
+a275 2
+    metrics = globals->metrics[style];
+    if ( !metrics )
+d277 1
+a277 1
+      /* create the global metrics object if necessary */
+d281 1
+a281 1
+      if ( FT_ALLOC( metrics, writing_system_class->style_metrics_size ) )
+d284 1
+a284 2
+      metrics->style_class = style_class;
+      metrics->globals     = globals;
+d286 1
+a286 1
+      if ( writing_system_class->style_metrics_init )
+d288 1
+a288 2
+        error = writing_system_class->style_metrics_init( metrics,
+                                                          globals->face );
+d291 2
+a292 2
+          if ( writing_system_class->style_metrics_done )
+            writing_system_class->style_metrics_done( metrics );
+d299 1
+a299 1
+      globals->metrics[style] = metrics;
+d314 1
+a314 1
+      return (FT_Bool)( globals->glyph_styles[gindex] & AF_DIGIT );
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

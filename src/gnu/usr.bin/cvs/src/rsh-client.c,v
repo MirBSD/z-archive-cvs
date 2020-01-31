@@ -1,0 +1,469 @@
+head	1.7;
+access;
+symbols
+	MIRBSD_10:1.2.0.4
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2
+	cvs-1_12_13:1.1.101.3
+	cvs-1_12_12:1.1.101.2
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.7
+date	2017.08.11.20.41.40;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100598E15E742B1DCDA;
+
+1.6
+date	2017.03.26.15.54.10;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058D7E4193FE0FF0A;
+
+1.5
+date	2011.06.11.00.39.38;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004DF2B94660192B86;
+
+1.4
+date	2010.09.19.19.43.10;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004C9667C83946BB2E;
+
+1.3
+date	2010.09.16.20.56.11;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C928463526833A8;
+
+1.2
+date	2005.12.16.16.09.46;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043A2E6BF072740FB;
+
+1.1
+date	2005.03.06.15.17.57;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.03.06.15.17.57;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.04.19.20.33.19;	author tg;	state Exp;
+branches;
+next	1.1.101.3;
+
+1.1.101.3
+date	2005.12.05.21.43.45;	author tg;	state Exp;
+branches;
+next	;
+commitid	2cec4394b499b817;
+
+
+desc
+@@
+
+
+1.7
+log
+@fix CVE-2017-12836 (Debian #871810)
+@
+text
+@/* CVS rsh client stuff.
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2, or (at your option)
+   any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.  */
+
+#include <config.h>
+
+#include "cvs.h"
+#include "buffer.h"
+
+__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/rsh-client.c,v 1.4 2010/09/19 19:43:10 tg Exp $");
+
+#ifdef CLIENT_SUPPORT
+
+#include "rsh-client.h"
+
+#ifndef NO_EXT_METHOD
+
+/* Contact the server by starting it with rsh.  */
+
+/* Right now, we have two different definitions for this function,
+   depending on whether we start the rsh server using popenRW or not.
+   This isn't ideal, and the best thing would probably be to change
+   the OS/2 port to be more like the regular Unix client (i.e., by
+   implementing piped_child)... but I'm doing something else at the
+   moment, and wish to make only one change at a time.  -Karl */
+
+# ifdef START_RSH_WITH_POPEN_RW
+
+
+
+/* This is actually a crock -- it's OS/2-specific, for no one else
+   uses it.  If I get time, I want to make piped_child and all the
+   other stuff in os2/run.c work right.  In the meantime, this gets us
+   up and running, and that's most important. */
+void
+start_rsh_server (cvsroot_t *root, struct buffer **to_server_p,
+                  struct buffer **from_server_p)
+{
+    int pipes[2];
+    int child_pid;
+
+    /* If you're working through firewalls, you can set the
+       CVS_RSH environment variable to a script which uses rsh to
+       invoke another rsh on a proxy machine.  */
+    char *cvs_rsh = (root->cvs_rsh != NULL
+		     ? root->cvs_rsh : getenv ("CVS_RSH"));
+    char *cvs_server = (root->cvs_server != NULL
+			? root->cvs_server : getenv ("CVS_SERVER"));
+    int i = 0;
+    /* This needs to fit "rsh", "-b", "-l", "USER", "-p", port,
+       "--", "host", "cvs", "-R", "server", and NULL.
+       We leave some room to grow. */
+    char *rsh_argv[16];
+    char argvport[16];
+
+    if (!cvs_rsh || !*cvs_rsh)
+	/* People sometimes suggest or assume that this should default
+	   to "remsh" on systems like HPUX in which that is the
+	   system-supplied name for the rsh program.  However, that
+	   causes various problems (keep in mind that systems such as
+	   HPUX might have non-system-supplied versions of "rsh", like
+	   a Kerberized one, which one might want to use).  If we
+	   based the name on what is found in the PATH of the person
+	   who runs configure, that would make it harder to
+	   consistently produce the same result in the face of
+	   different people producing binary distributions.  If we
+	   based it on "remsh" always being the default for HPUX
+	   (e.g. based on uname), that might be slightly better but
+	   would require us to keep track of what the defaults are for
+	   each system type, and probably would cope poorly if the
+	   existence of remsh or rsh varies from OS version to OS
+	   version.  Therefore, it seems best to have the default
+	   remain "rsh", and tell HPUX users to specify remsh, for
+	   example in CVS_RSH or other such mechanisms to be devised,
+	   if that is what they want (the manual already tells them
+	   that).  */
+	cvs_rsh = RSH_DFLT;
+    if (!cvs_server || !*cvs_server)
+	cvs_server = "cvs";
+
+    /* The command line starts out with rsh. */
+    rsh_argv[i++] = cvs_rsh;
+
+#   ifdef RSH_NEEDS_BINARY_FLAG
+    /* "-b" for binary, under OS/2. */
+    rsh_argv[i++] = "-b";
+#   endif /* RSH_NEEDS_BINARY_FLAG */
+
+    /* Then we strcat more things on the end one by one. */
+    if (root->username != NULL)
+    {
+	rsh_argv[i++] = "-l";
+	rsh_argv[i++] = root->username;
+    }
+
+    if (root->method == extssh_method && root->port)
+    {
+	snprintf(argvport, sizeof(argvport), "%d", root->port);
+	rsh_argv[i++] = "-p";
+	rsh_argv[i++] = argvport;
+    }
+
+    /* Only non-option arguments from here. (CVE-2017-12836) */
+    rsh_argv[i++] = "--";
+
+    rsh_argv[i++] = root->hostname;
+    rsh_argv[i++] = cvs_server;
+    if (readonlyfs)
+	rsh_argv[i++] = "-R";
+    rsh_argv[i++] = "server";
+
+    /* Mark the end of the arg list. */
+    rsh_argv[i]   = NULL;
+
+    if (trace)
+    {
+	fprintf (stderr, " -> Starting server: ");
+	for (i = 0; rsh_argv[i]; i++)
+	    fprintf (stderr, "%s ", rsh_argv[i]);
+	putc ('\n', stderr);
+    }
+
+    /* Do the deed. */
+    child_pid = popenRW (rsh_argv, pipes);
+    if (child_pid < 0)
+	error (1, errno, "cannot start server via rsh");
+
+    /* Give caller the file descriptors in a form it can deal with. */
+    make_bufs_from_fds (pipes[0], pipes[1], child_pid, to_server_p,
+                        from_server_p, 0);
+}
+
+# else /* ! START_RSH_WITH_POPEN_RW */
+
+void
+start_rsh_server (cvsroot_t *root, struct buffer **to_server_p,
+                  struct buffer **from_server_p)
+{
+    /* If you're working through firewalls, you can set the
+       CVS_RSH environment variable to a script which uses rsh to
+       invoke another rsh on a proxy machine.  */
+    char *cvs_rsh = (root->cvs_rsh != NULL
+		     ? root->cvs_rsh : getenv ("CVS_RSH"));
+    char *cvs_server = (root->cvs_server != NULL
+			? root->cvs_server : getenv ("CVS_SERVER"));
+    char *command;
+    int tofd, fromfd;
+    int child_pid;
+
+    if (!cvs_rsh || !*cvs_rsh)
+	cvs_rsh = RSH_DFLT;
+    if (!cvs_server || !*cvs_server)
+	cvs_server = "cvs";
+
+    /* Pass the command to rsh as a single string.  This shouldn't
+     * affect most rsh servers at all, and will pacify some buggy
+     * versions of rsh that grab switches out of the middle of the
+     * command (they're calling the GNU getopt routines incorrectly).
+     *
+     * If you are running a very old (Nov 3, 1994, before 1.5)
+     * version of the server, you need to make sure that your .bashrc
+     * on the server machine does not set CVSROOT to something
+     * containing a colon (or better yet, upgrade the server).
+     */
+    command = Xasprintf ("%s%s server", cvs_server, readonlyfs ? " -R" : "");
+
+    {
+	char argvport[16];
+        char *argv[16];
+	char **p = argv;
+
+	*p++ = cvs_rsh;
+
+	/* If the login names differ between client and server
+	 * pass it on to rsh.
+	 */
+	if (root->username != NULL)
+	{
+	    *p++ = "-l";
+	    *p++ = root->username;
+	}
+
+	if (root->method == extssh_method && root->port)
+	{
+		snprintf(argvport, sizeof(argvport), "%d", root->port);
+		*p++ = "-p";
+		*p++ = argvport;
+	}
+
+	*p++ = "--";
+
+	*p++ = root->hostname;
+	*p++ = command;
+	*p++ = NULL;
+
+	if (trace)
+        {
+	    int i;
+
+            fprintf (stderr, " -> Starting server: ");
+	    for (i = 0; argv[i]; i++)
+	        fprintf (stderr, "%s ", argv[i]);
+	    putc ('\n', stderr);
+	}
+	child_pid = piped_child (argv, &tofd, &fromfd, true);
+
+	if (child_pid < 0)
+	    error (1, errno, "cannot start server via rsh");
+    }
+    free (command);
+
+    make_bufs_from_fds (tofd, fromfd, child_pid, root, to_server_p,
+                        from_server_p, 0);
+}
+
+# endif /* START_RSH_WITH_POPEN_RW */
+
+#endif /* NO_EXT_METHOD */
+
+#endif /* CLIENT_SUPPORT */
+@
+
+
+1.6
+log
+@avoid the testsuite creating spurious files in the home directory:
+ignore most environment variables when they’re set but empty, other
+than those who just need to be set:
+• CVS_PASSWORD (just triggers an error)
+• CVSREAD, CVSREADONLYFS (mere presence enables)
+@
+text
+@d58 3
+a60 2
+    /* This needs to fit "rsh", "-b", "-l", "USER", "-p", port, "host",
+       "cmd (w/ args)", and NULL.  We leave some room to grow. */
+d111 3
+d198 2
+@
+
+
+1.5
+log
+@accept port when using extssh connection method (Closes: #151882)
+@
+text
+@d63 1
+a63 1
+    if (!cvs_rsh)
+d85 1
+a85 1
+    if (!cvs_server)
+d154 1
+a154 1
+    if (!cvs_rsh)
+d156 1
+a156 1
+    if (!cvs_server)
+@
+
+
+1.4
+log
+@merge from ports/devel/cvs
+@
+text
+@d18 1
+a18 1
+__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_rsh-client_c,v 1.2 2010/09/15 20:57:03 tg Exp $");
+d58 1
+a58 1
+    /* This needs to fit "rsh", "-b", "-l", "USER", "host",
+d60 2
+a61 1
+    char *rsh_argv[10];
+d103 7
+d112 2
+d172 2
+a173 1
+        char *argv[10];
+d187 7
+@
+
+
+1.3
+log
+@begin attempting to synchronise with the port
+@
+text
+@@
+
+
+1.2
+log
+@Implement forwarding of "readonlyfs" (acquired by either cvs -R or
+export CVSREADONLYFS=1) to an :ext: server, after YEARS of cursing.
+@
+text
+@d18 2
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d121 2
+a122 1
+    make_bufs_from_fds (pipes[0], pipes[1], child_pid, to_server_p, from_server_p, 0);
+d148 5
+a152 6
+       affect most rsh servers at all, and will pacify some buggy
+       versions of rsh that grab switches out of the middle of the
+       command (they're calling the GNU getopt routines incorrectly).  */
+    command = xmalloc (strlen (cvs_server) + 8);
+
+    /* If you are running a very old (Nov 3, 1994, before 1.5)
+d155 3
+a157 2
+     * containing a colon (or better yet, upgrade the server).  */
+    sprintf (command, "%s server", cvs_server);
+d187 1
+a187 1
+	child_pid = piped_child (argv, &tofd, &fromfd);
+@
+
+
+1.1.101.1
+log
+@GNU CVS 1.12.11 with the following directories removed:
+- contrib/pam
+- emx
+- os2
+- tools
+- vms
+- windows-NT
+- zlib
+@
+text
+@@
+
+
+1.1.101.2
+log
+@GNU CVS 1.12.12 "should" fix security issues
+@
+text
+@d121 1
+a121 2
+    make_bufs_from_fds (pipes[0], pipes[1], child_pid, to_server_p,
+                        from_server_p, 0);
+d147 6
+a152 5
+     * affect most rsh servers at all, and will pacify some buggy
+     * versions of rsh that grab switches out of the middle of the
+     * command (they're calling the GNU getopt routines incorrectly).
+     *
+     * If you are running a very old (Nov 3, 1994, before 1.5)
+d155 2
+a156 3
+     * containing a colon (or better yet, upgrade the server).
+     */
+    command = Xasprintf ("%s server", cvs_server);
+@
+
+
+1.1.101.3
+log
+@Import current version of GNU CVS, in the hope to actually fix bugs...
+@
+text
+@d187 1
+a187 1
+	child_pid = piped_child (argv, &tofd, &fromfd, true);
+@
+
+

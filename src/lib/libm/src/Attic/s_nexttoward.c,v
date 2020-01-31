@@ -1,0 +1,170 @@
+head	1.3;
+access;
+symbols
+	cvs-201110182115:1.1.3.1 netbsd:1.1.3;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2014.02.09.23.23.35;	author tg;	state dead;
+branches;
+next	1.2;
+commitid	10052F80DE85DB1E595;
+
+1.2
+date	2011.10.18.20.18.54;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E9DDF4606CD9B54;
+
+1.1
+date	2011.10.18.19.20.58;	author bsiegert;	state Exp;
+branches
+	1.1.3.1;
+next	;
+commitid	1004E9DD18376042FF5;
+
+1.1.3.1
+date	2011.10.18.19.20.58;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004E9DD18376042FF5;
+
+
+desc
+@@
+
+
+1.3
+log
+@mop up after “long double” removal
+
+no library major bump, as code using these cannot have worked right anyway
+since we don’t even have a defined API for “long double”
+@
+text
+@/*	$NetBSD: s_nexttoward.c,v 1.1 2010/09/15 16:12:05 christos Exp $	*/
+
+/* @@(#)s_nextafter.c 5.1 93/09/24 */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+
+#include <sys/cdefs.h>
+__RCSID("$NetBSD: s_nexttoward.c,v 1.1 2010/09/15 16:12:05 christos Exp $");
+
+/*
+ * We assume that a long double has a 15-bit exponent.  On systems
+ * where long double is the same as double, nexttoward() is an alias
+ * for nextafter(), so we don't use this routine.
+ */
+#include <float.h>
+
+#include <machine/ieee.h>
+#include "math.h"
+#include "math_private.h"
+
+#ifdef __HAVE_LONG_DOUBLE
+#if LDBL_MAX_EXP != 0x4000
+#error "Unsupported long double format"
+#endif
+
+/*
+ * The nexttoward() function is equivalent to nextafter() function,
+ * except that the second parameter shall have type long double and
+ * the functions shall return y converted to the type of the function
+ * if x equals y.
+ *
+ * Special cases: XXX
+ */
+double
+nexttoward(double x, long double y)
+{
+	union ieee_ext_u uy;
+	volatile double t;
+	int32_t hx, ix;
+	uint32_t lx;
+
+	EXTRACT_WORDS(hx, lx, x);
+	ix = hx & 0x7fffffff;			/* |x| */
+	uy.extu_ld = y;
+
+	if (((ix >= 0x7ff00000) && ((ix - 0x7ff00000) | lx) != 0) ||
+	    (uy.extu_exp == 0x7fff &&
+		((uy.extu_frach & ~LDBL_NBIT) | uy.extu_fracl) != 0))
+		return x+y;			/* x or y is nan */
+
+	if (x == y)
+		return (double)y;		/* x=y, return y */
+
+	if (x == 0.0) {
+		INSERT_WORDS(x, uy.extu_sign<<31, 1);	/* return +-minsubnormal */
+		t = x*x;
+		if (t == x)
+			return t;
+		else
+			return x;		/* raise underflow flag */
+	}
+
+	if ((hx > 0.0) ^ (x < y)) {		/* x -= ulp */
+		if (lx == 0) hx -= 1;
+		lx -= 1;
+	} else {				/* x += ulp */
+		lx += 1;
+		if (lx == 0) hx += 1;
+	}
+	ix = hx & 0x7ff00000;
+	if (ix >= 0x7ff00000) return x+x;	/* overflow  */
+	if (ix <  0x00100000) {			/* underflow */
+		t = x*x;
+		if (t != x) {			/* raise underflow flag */
+			INSERT_WORDS(y, hx, lx);
+			return y;
+		}
+	}
+	INSERT_WORDS(x, hx, lx);
+
+	return x;
+}
+#else /* !__HAVE_LONG_DOUBLE */
+#ifdef __strong_alias
+__strong_alias(nexttoward,nextafter);
+#endif
+#endif /* !__HAVE_LONG_DOUBLE */
+@
+
+
+1.2
+log
+@more long double stuff
+@
+text
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d29 1
+d91 5
+@
+
+
+1.1.3.1
+log
+@Import current libm from NetBSD, with the directories complex, noieee_src, arch/!i387 removed.
+
+The idea is to get fmin and fmax, which are needed by some newer software.
+@
+text
+@@

@@ -1,0 +1,317 @@
+head	1.3;
+access;
+symbols
+	MIRBSD_10:1.1.101.2.0.4
+	MIRBSD_10_BASE:1.1.101.2
+	MIRBSD_9_BASE:1.1.101.2
+	MIRBSD_8:1.1.101.2.0.2
+	MIRBSD_8_BASE:1.1.101.2
+	cvs-1_12_13:1.1.101.2
+	cvs-1_12_12:1.1.101.2
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2010.09.19.19.43.03;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C9667C83946BB2E;
+
+1.2
+date	2010.09.16.20.56.03;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004C928463526833A8;
+
+1.1
+date	2005.03.06.15.17.55;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.03.06.15.17.55;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.04.19.20.33.18;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge from ports/devel/cvs
+@
+text
+@/*
+ * Copyright (C) 1986-2005 The Free Software Foundation, Inc.
+ *
+ * Portions Copyright (C) 1998-2005 Derek Price, Ximbiot <http://ximbiot.com>,
+ *                                  and others.
+ *
+ * Portions Copyright (C) 1993 david d zuhn
+ * 
+ * Written by david d `zoo' zuhn while at Cygnus Support
+ * 
+ * You may distribute under the terms of the GNU General Public License as
+ * specified in the README file that comes with the CVS source distribution.
+ *
+ */
+
+
+#include "cvs.h"
+#include "getline.h"
+
+__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_cvsrc_c,v 1.2 2010/09/15 23:41:21 tg Exp $");
+
+/* this file is to be found in the user's home directory */
+
+#ifndef	CVSRC_FILENAME
+#define	CVSRC_FILENAME	".cvsrc"
+#endif
+char cvsrc[] = CVSRC_FILENAME;
+
+#define	GROW	10
+
+/* Read cvsrc, processing options matching CMDNAME ("cvs" for global
+   options, and update *ARGC and *ARGV accordingly.  */
+
+void
+read_cvsrc (int *argc, char ***argv, const char *cmdname)
+{
+    char *homedir;
+    char *homeinit;
+    FILE *cvsrcfile;
+
+    char *line;
+    int line_length;
+    size_t line_chars_allocated;
+
+    char *optstart;
+    int white_len = 0;
+
+    int command_len;
+    int found = 0;
+
+    int i;
+
+    int new_argc;
+    int max_new_argv;
+    char **new_argv;
+
+    /* old_argc and old_argv hold the values returned from the
+       previous invocation of read_cvsrc and are used to free the
+       allocated memory.  The first invocation of read_cvsrc gets argv
+       from the system, this memory must not be free'd.  */
+    static int old_argc = 0;
+    static char **old_argv = NULL;
+
+    /* don't do anything if argc is -1, since that implies "help" mode */
+    if (*argc == -1)
+	return;
+
+    /* determine filename for ~/.cvsrc */
+
+    homedir = get_homedir ();
+    /* If we can't find a home directory, ignore ~/.cvsrc.  This may
+       make tracking down problems a bit of a pain, but on the other
+       hand it might be obnoxious to complain when CVS will function
+       just fine without .cvsrc (and many users won't even know what
+       .cvsrc is).  */
+    if (!homedir)
+	return;
+
+    homeinit = strcat_filename_onto_homedir (homedir, cvsrc);
+
+    /* if it can't be read, there's no point to continuing */
+
+    if (!isreadable (homeinit))
+    {
+	free (homeinit);
+	return;
+    }
+
+    /* now scan the file until we find the line for the command in question */
+
+    line = NULL;
+    line_chars_allocated = 0;
+    command_len = strlen (cmdname);
+    cvsrcfile = xfopen (homeinit, "r");
+    while ((line_length = getline (&line, &line_chars_allocated, cvsrcfile))
+	   >= 0)
+    {
+	/* skip over comment lines */
+	if (line[0] == '#')
+	    continue;
+
+	while (isspace(line[white_len]))
+		++white_len;
+
+	/* stop if we match the current command */
+	if (!strncmp (line + white_len, cmdname, command_len)
+	    && isspace ((unsigned char) *(line + white_len + command_len)))
+	{
+	    found = 1;
+	    break;
+	}
+    }
+
+    if (line_length < 0 && !feof (cvsrcfile))
+	error (0, errno, "cannot read %s", homeinit);
+
+    fclose (cvsrcfile);
+
+    /* setup the new options list */
+
+    new_argc = 1;
+    max_new_argv = (*argc) + GROW;
+    new_argv = xnmalloc (max_new_argv, sizeof (char *));
+    new_argv[0] = xstrdup ((*argv)[0]);
+
+    if (found)
+    {
+	/* skip over command in the options line */
+	for (optstart = strtok (line + white_len + command_len, "\t \n");
+	     optstart;
+	     optstart = strtok (NULL, "\t \n"))
+	{
+	    new_argv [new_argc++] = xstrdup (optstart);
+	  
+	    if (new_argc >= max_new_argv)
+	    {
+		max_new_argv += GROW;
+		new_argv = xnrealloc (new_argv, max_new_argv, sizeof (char *));
+	    }
+	}
+    }
+
+    if (line != NULL)
+	free (line);
+
+    /* now copy the remaining arguments */
+  
+    if (new_argc + *argc > max_new_argv)
+    {
+	max_new_argv = new_argc + *argc;
+	new_argv = xnrealloc (new_argv, max_new_argv, sizeof (char *));
+    }
+    for (i = 1; i < *argc; i++)
+	new_argv [new_argc++] = xstrdup ((*argv)[i]);
+
+    if (old_argv != NULL)
+    {
+	/* Free the memory which was allocated in the previous
+           read_cvsrc call.  */
+	free_names (&old_argc, old_argv);
+    }
+
+    old_argc = *argc = new_argc;
+    old_argv = *argv = new_argv;
+
+    free (homeinit);
+    return;
+}
+@
+
+
+1.2
+log
+@begin attempting to synchronise with the port
+@
+text
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 6
+a7 1
+ * Copyright (c) 1993 david d zuhn
+d20 2
+d46 1
+d94 1
+a94 1
+    cvsrcfile = open_file (homeinit, "r");
+d102 3
+d106 2
+a107 2
+	if (!strncmp (line, cmdname, command_len)
+	    && isspace ((unsigned char) *(line + command_len)))
+d123 1
+a123 1
+    new_argv = (char **) xmalloc (max_new_argv * sizeof (char*));
+d129 1
+a129 1
+	for (optstart = strtok (line + command_len, "\t \n");
+d138 1
+a138 1
+		new_argv = (char **) xrealloc (new_argv, max_new_argv * sizeof (char*));
+d151 1
+a151 1
+	new_argv = (char **) xrealloc (new_argv, max_new_argv * sizeof (char*));
+d153 1
+a153 2
+    for (i=1; i < *argc; i++)
+    {
+a154 1
+    }
+@
+
+
+1.1.101.1
+log
+@GNU CVS 1.12.11 with the following directories removed:
+- contrib/pam
+- emx
+- os2
+- tools
+- vms
+- windows-NT
+- zlib
+@
+text
+@@
+
+
+1.1.101.2
+log
+@GNU CVS 1.12.12 "should" fix security issues
+@
+text
+@d2 1
+a2 6
+ * Copyright (C) 1986-2005 The Free Software Foundation, Inc.
+ *
+ * Portions Copyright (C) 1998-2005 Derek Price, Ximbiot <http://ximbiot.com>,
+ *                                  and others.
+ *
+ * Portions Copyright (C) 1993 david d zuhn
+d86 1
+a86 1
+    cvsrcfile = xfopen (homeinit, "r");
+d112 1
+a112 1
+    new_argv = xnmalloc (max_new_argv, sizeof (char *));
+d127 1
+a127 1
+		new_argv = xnrealloc (new_argv, max_new_argv, sizeof (char *));
+d140 1
+a140 1
+	new_argv = xnrealloc (new_argv, max_new_argv, sizeof (char *));
+d142 2
+a143 1
+    for (i = 1; i < *argc; i++)
+d145 1
+@
+

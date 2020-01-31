@@ -1,0 +1,993 @@
+head	1.2;
+branch	1.1.1;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.3
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2007.06.10.22.17.46;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100466C788306D0D1AC;
+
+1.1
+date	2005.02.05.17.27.36;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.27.36;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2007.06.10.19.05.02;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	100466C4B6E3AD919D6;
+
+1.1.1.3
+date	2008.03.20.21.45.37;	author tg;	state Exp;
+branches;
+next	;
+commitid	10047E2DB0C3FBE0316;
+
+
+desc
+@@
+
+
+1.2
+log
+@at this point, I'm no longer interested in what I merge,
+I just want to build a fscking hkernel
+
+this should probably go to the otherbsd vendor branch, but what the hey
+@
+text
+@/*	$OpenBSD: tvtwo.c,v 1.13 2006/08/14 12:24:30 miod Exp $	*/
+/*
+ * Copyright (c) 2003, 2006, Miodrag Vallat.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ */
+
+/*
+ * Driver for the Parallax XVideo and PowerVideo graphics boards.
+ *
+ * Some details about these board are available at:
+ * http://www.jlw.com/~woolsey/parallax/support/developers/xvideotech.html
+ */
+
+/*
+ * The Parallax XVideo series frame buffers are 8/24-bit accelerated
+ * frame buffers, with hardware MPEG capabilities using a CCube chipset.
+ */
+
+/*
+ * Currently, this driver can only handle the 8-bit and 24-bit planes of the
+ * frame buffer, in an unaccelerated mode.
+ *
+ * TODO:
+ * - nvram handling
+ * - use the accelerator
+ * - interface to the c^3
+ */
+
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/buf.h>
+#include <sys/device.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/conf.h>
+
+#include <uvm/uvm_extern.h>
+
+#include <machine/autoconf.h>
+#include <machine/pmap.h>
+#include <machine/cpu.h>
+#include <machine/conf.h>
+
+#include <dev/wscons/wsconsio.h>
+#include <dev/wscons/wsdisplayvar.h>
+#include <dev/rasops/rasops.h>
+#include <machine/fbvar.h>
+
+#include <sparc/dev/sbusvar.h>
+
+/*
+ * The memory layout of the board is as follows:
+ *
+ *	PROM0		000000 - 00ffff
+ *	overlay plane	010000 - 037fff
+ *	registers	040000 - 0404d0
+ *	CCube		050000 - 05ffff
+ *	8-bit plane	080000 - 17ffff
+ *	24-bit plane	200000 - 6fffff
+ *	PROM1		7f0000 - 7fffff
+ *
+ * Older XVideo provide two sets of SBus registers:
+ *	R0		040000 - 040800
+ *	R1		080000 - 17d200
+ * While the more recent revisions provide only one register:
+ *	R0		000000 - 7fffff
+ *
+ * We currently refuse to attach to the old version because mapping
+ * things requires us to play with the sbus register ranges, and I
+ * don't want to play this game without the hardware at hand -- miod
+ */
+
+#define	PX_PROM0_OFFSET		0x000000
+#define	PX_OVERLAY_OFFSET	0x010000
+#define	PX_REG_OFFSET		0x040000
+#define	PX_CCUBE_OFFSET		0x050000
+#define	PX_PLANE8_OFFSET	0x080000
+#define	PX_PLANE24_OFFSET	0x200000
+#define	PX_PROM1_OFFSET		0x7f0000
+
+/*
+ * Partial registers layout
+ */
+
+#define	PX_REG_DISPKLUDGE	0x00b8	/* write only */
+#define	DISPKLUDGE_DEFAULT	0xc41f
+#define	DISPKLUDGE_BLANK	(1 << 12)
+#define	DISPKLUDGE_SYNC		(1 << 13)
+
+#define	PX_REG_BT463_RED	0x0480
+#define	PX_REG_BT463_GREEN	0x0490
+#define	PX_REG_BT463_BLUE	0x04a0
+#define	PX_REG_BT463_ALL	0x04b0
+
+#define	PX_REG_SIZE		0x04d0
+
+
+/* per-display variables */
+struct tvtwo_softc {
+	struct	sunfb	sc_sunfb;	/* common base device */
+	struct	rom_reg sc_phys;
+
+	volatile u_int8_t *sc_m8;
+	volatile u_int8_t *sc_m24;
+	volatile u_int8_t *sc_regs;
+};
+
+int	tvtwo_ioctl(void *, u_long, caddr_t, int, struct proc *);
+paddr_t	tvtwo_mmap(void *, off_t, int);
+void	tvtwo_burner(void *, u_int, u_int);
+
+struct wsdisplay_accessops tvtwo_accessops = {
+	tvtwo_ioctl,
+	tvtwo_mmap,
+	NULL,	/* alloc_screen */
+	NULL,	/* free_screen */
+	NULL,	/* show_screen */
+	NULL,	/* load_font */
+	NULL,	/* scrollback */
+	NULL,	/* getchar */
+	tvtwo_burner,
+	NULL	/* pollc */
+};
+
+void	tvtwo_directcmap(struct tvtwo_softc *);
+static __inline__
+void	tvtwo_ramdac_wraddr(struct tvtwo_softc *, u_int32_t);
+void	tvtwo_reset(struct tvtwo_softc *, u_int);
+void	tvtwo_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
+
+int	tvtwomatch(struct device *, void *, void *);
+void	tvtwoattach(struct device *, struct device *, void *);
+
+struct cfattach tvtwo_ca = {
+	sizeof(struct tvtwo_softc), tvtwomatch, tvtwoattach
+};
+
+struct cfdriver tvtwo_cd = {
+	NULL, "tvtwo", DV_DULL
+};
+
+/*
+ * Default frame buffer resolution, depending upon the "freqcode"
+ */
+#define	NFREQCODE	5
+const int defwidth[NFREQCODE] = { 1152, 1152, 1152, 1024, 640 };
+const int defheight[NFREQCODE] = { 900, 900, 900, 768, 480 };
+
+/*
+ * Match an XVideo or PowerVideo card.
+ */
+int
+tvtwomatch(struct device *parent, void *vcf, void *aux)
+{
+	struct confargs *ca = aux;
+	struct romaux *ra = &ca->ca_ra;
+
+	if (strcmp(ra->ra_name, "PGI,tvtwo") == 0 ||
+	    strcmp(ra->ra_name, "PGI,tvthree") == 0)
+		return (1);
+
+	return (0);
+}
+
+void
+tvtwoattach(struct device *parent, struct device *self, void *args)
+{
+	struct tvtwo_softc *sc = (struct tvtwo_softc *)self;
+	struct confargs *ca = args;
+	int node, width, height, freqcode;
+	int isconsole;
+	char *freqstring;
+
+	node = ca->ca_ra.ra_node;
+
+	printf(": %s", getpropstring(node, "model"));
+	printf(", revision %s\n", getpropstring(node, "revision"));
+
+	/* We do not handle older boards yet. */
+	if (ca->ca_ra.ra_nreg != 1) {
+		printf("%s: old-style boards with %d registers are not supported\n"
+		    "%s: please report this to <sparc@@openbsd.org>\n",
+		    self->dv_xname, ca->ca_ra.ra_nreg,
+		    self->dv_xname);
+		return;
+	}
+
+	isconsole = node == fbnode;
+
+	/* Map registers. */
+	sc->sc_regs = mapiodev(ca->ca_ra.ra_reg, PX_REG_OFFSET, PX_REG_SIZE);
+
+	/* Compute framebuffer size. */
+	freqstring = getpropstring(node, "freqcode");
+	freqcode = (int)*freqstring;
+	if (freqcode == 'g') {
+		width = height = 1024;
+	} else {
+		if (freqcode < '1' || freqcode > NFREQCODE + '0')
+			freqcode = 0;
+		else
+			freqcode -= '1';
+		width = defwidth[freqcode];
+		height = defheight[freqcode];
+	}
+
+	width = getpropint(node, "hres", width);
+	height = getpropint(node, "vres", height);
+
+	/*
+	 * Since the depth property is usually missing, we could do
+	 * fb_setsize(&sc->sc_sunfb, 8, width, height, node, ca->ca_bustype);
+	 * but for safety in case it would exist and be set to 32, do it
+	 * manually...
+	 */
+	sc->sc_sunfb.sf_depth = 8;
+	sc->sc_sunfb.sf_width = width;
+	sc->sc_sunfb.sf_height = height;
+	sc->sc_sunfb.sf_linebytes = width >= 1024 ? width : 1024;
+	sc->sc_sunfb.sf_fbsize = sc->sc_sunfb.sf_linebytes * height;
+
+	/* Map the frame buffer memory area we're interested in. */
+	sc->sc_phys = ca->ca_ra.ra_reg[0];
+	sc->sc_m8 = mapiodev(ca->ca_ra.ra_reg,
+	    PX_PLANE8_OFFSET, round_page(sc->sc_sunfb.sf_fbsize));
+	sc->sc_m24 = mapiodev(ca->ca_ra.ra_reg,
+	    PX_PLANE24_OFFSET, round_page(4 * sc->sc_sunfb.sf_fbsize));
+
+	/* Enable video. */
+	tvtwo_burner(sc, 1, 0);
+
+	sc->sc_sunfb.sf_ro.ri_hw = sc;
+	sc->sc_sunfb.sf_ro.ri_bits = (u_char *)sc->sc_m8;
+
+	/*
+	 * If the framebuffer width is under 1024, we will switch from
+	 * the PROM font to the more adequate 8x16 font here.
+	 */
+	fbwscons_init(&sc->sc_sunfb,
+	    isconsole && (width >= 1024) ? RI_CLEARMARGINS : RI_CLEAR);
+	fbwscons_setcolormap(&sc->sc_sunfb, tvtwo_setcolor);
+
+	if (isconsole) {
+		fbwscons_console_init(&sc->sc_sunfb,
+		    width >= 1024 ? -1 : 0);
+	}
+
+	printf("%s: %dx%d\n", self->dv_xname,
+	    sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
+
+	fbwscons_attach(&sc->sc_sunfb, &tvtwo_accessops, isconsole);
+}
+
+int
+tvtwo_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
+{
+	struct tvtwo_softc *sc = dev;
+	struct wsdisplay_fbinfo *wdf;
+
+	/*
+	 * Note that, although the emulation (text) mode is running in a
+	 * 8-bit plane, we advertize the frame buffer as 32-bit.
+	 */
+	switch (cmd) {
+	case WSDISPLAYIO_GTYPE:
+		*(u_int *)data = WSDISPLAY_TYPE_SUN24;
+		break;
+	case WSDISPLAYIO_GINFO:
+		wdf = (struct wsdisplay_fbinfo *)data;
+		wdf->height = sc->sc_sunfb.sf_height;
+		wdf->width = sc->sc_sunfb.sf_width;
+		wdf->depth = 32;
+		wdf->cmsize = 0;
+		break;
+	case WSDISPLAYIO_LINEBYTES:
+		*(u_int *)data = sc->sc_sunfb.sf_linebytes * 4;
+		break;
+
+	case WSDISPLAYIO_GETCMAP:
+	case WSDISPLAYIO_PUTCMAP:
+		break;
+
+	case WSDISPLAYIO_SMODE:
+		if (*(int *)data == WSDISPLAYIO_MODE_EMUL) {
+			/* Back from X11 to text mode */
+			tvtwo_reset(sc, 8);
+		} else {
+			/* Starting X11, initialize 32-bit mode */
+			tvtwo_reset(sc, 32);
+		}
+		break;
+
+	case WSDISPLAYIO_SVIDEO:
+	case WSDISPLAYIO_GVIDEO:
+		break;
+
+	case WSDISPLAYIO_GCURPOS:
+	case WSDISPLAYIO_SCURPOS:
+	case WSDISPLAYIO_GCURMAX:
+	case WSDISPLAYIO_GCURSOR:
+	case WSDISPLAYIO_SCURSOR:
+	default:
+		return (-1);
+	}
+
+	return (0);
+}
+
+paddr_t
+tvtwo_mmap(void *v, off_t offset, int prot)
+{
+	struct tvtwo_softc *sc = v;
+
+	if (offset & PGOFSET)
+		return (-1);
+
+	/* Allow mapping as a dumb framebuffer from offset 0 */
+	if (offset >= 0 && offset < sc->sc_sunfb.sf_fbsize * 4) {
+		return (REG2PHYS(&sc->sc_phys,
+		    PX_PLANE24_OFFSET + offset) | PMAP_NC);
+	}
+
+	return (-1);
+}
+
+void
+tvtwo_burner(void *v, u_int on, u_int flags)
+{
+	struct tvtwo_softc *sc = v;
+	u_int32_t dispkludge;
+
+	if (on)
+		dispkludge = DISPKLUDGE_DEFAULT & ~DISPKLUDGE_BLANK;
+	else {
+		dispkludge = DISPKLUDGE_DEFAULT | DISPKLUDGE_BLANK;
+		if (flags & WSDISPLAY_BURN_VBLANK)
+			dispkludge |= DISPKLUDGE_SYNC;
+	}
+
+	*(volatile u_int32_t *)(sc->sc_regs + PX_REG_DISPKLUDGE) =
+	    dispkludge;
+}
+
+void
+tvtwo_reset(struct tvtwo_softc *sc, u_int depth)
+{
+	if (depth == 32) {
+		/* Initialize a direct color map. */
+		tvtwo_directcmap(sc);
+	} else {
+		fbwscons_setcolormap(&sc->sc_sunfb, tvtwo_setcolor);
+	}
+}
+
+/*
+ * Simple Bt463 programming routines.
+ */
+
+static __inline__ void
+tvtwo_ramdac_wraddr(struct tvtwo_softc *sc, u_int32_t addr)
+{
+	volatile u_int32_t *dac = (u_int32_t *)(sc->sc_regs + PX_REG_BT463_RED);
+
+	dac[0] = (addr & 0xff);		/* lo addr */
+	dac[1] = ((addr >> 8) & 0xff);	/* hi addr */
+}
+
+void
+tvtwo_directcmap(struct tvtwo_softc *sc)
+{
+	volatile u_int32_t *dac = (u_int32_t *)(sc->sc_regs + PX_REG_BT463_RED);
+	u_int32_t c;
+
+	tvtwo_ramdac_wraddr(sc, 0);
+	for (c = 0; c < 256; c++) {
+		dac[3] = c;	/* R */
+		dac[3] = c;	/* G */
+		dac[3] = c;	/* B */
+	}
+}
+
+void
+tvtwo_setcolor(void *v, u_int index, u_int8_t r, u_int8_t g, u_int8_t b)
+{
+	struct tvtwo_softc *sc = v;
+	volatile u_int32_t *dac = (u_int32_t *)(sc->sc_regs + PX_REG_BT463_RED);
+
+	tvtwo_ramdac_wraddr(sc, index);
+	dac[3] = r;
+	dac[3] = g;
+	dac[3] = b;
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: tvtwo.c,v 1.3 2003/06/28 17:05:33 miod Exp $	*/
+d3 1
+a3 1
+ * Copyright (c) 2003, Miodrag Vallat.
+d42 2
+a43 2
+ * Currently, this driver can only handle the 24-bit plane of the frame
+ * buffer, in an unaccelerated mode.
+a55 1
+#include <sys/malloc.h>
+a56 1
+#include <sys/tty.h>
+a67 1
+#include <dev/wscons/wscons_raster.h>
+d76 7
+a82 7
+ *	 PROM0		000000 - 00ffff
+ *	 overlay plane	010000 - 037fff
+ *	 registers	040000 - 0404d0
+ *	 CCube		050000 - 05ffff
+ *	 8-bit plane	080000 - 17ffff
+ *	 24-bit plane	200000 - 6fffff
+ *	 PROM1		7f0000 - 7fffff
+d84 9
+a92 4
+ * All of this is mapped using only one register (except for older models
+ * which are not currently supported).
+ * At PROM initialization, the board will be in 24-bit mode, so no specific
+ * initialization is necessary.
+d96 1
+a96 1
+#define	PX_OVERAY_OFFSET	0x010000
+d110 1
+d112 4
+a115 1
+#define	PX_REG_BT463		0x0480
+a122 1
+	struct	sbusdev sc_sd;		/* sbus device */
+d125 2
+a127 6
+
+	int	sc_nscreens;
+};
+
+struct wsscreen_descr tvtwo_stdscreen = {
+	"std",
+d130 3
+a132 21
+const struct wsscreen_descr *tvtwo_scrlist[] = {
+	&tvtwo_stdscreen,
+};
+
+struct wsscreen_list tvtwo_screenlist = {
+	sizeof(tvtwo_scrlist) / sizeof(struct wsscreen_descr *),
+	    tvtwo_scrlist
+};
+
+int tvtwo_ioctl(void *, u_long, caddr_t, int, struct proc *);
+int tvtwo_alloc_screen(void *, const struct wsscreen_descr *, void **,
+    int *, int *, long *);
+void tvtwo_free_screen(void *, void *);
+int tvtwo_show_screen(void *, void *, int, void (*cb)(void *, int, int),
+    void *);
+paddr_t tvtwo_mmap(void *, off_t, int);
+void tvtwo_burner(void *, u_int, u_int);
+
+static __inline__ void tvtwo_ramdac_wraddr(struct tvtwo_softc *sc,
+    u_int32_t addr);
+void tvtwo_initcmap(struct tvtwo_softc *);
+d137 3
+a139 3
+	tvtwo_alloc_screen,
+	tvtwo_free_screen,
+	tvtwo_show_screen,
+d144 1
+d147 8
+a154 2
+int tvtwomatch(struct device *, void *, void *);
+void tvtwoattach(struct device *, struct device *, void *);
+d167 3
+a169 2
+const int defwidth[] = { 1152, 1152, 1152, 1024, 640, 1024 };
+const int defheight[] = { 900, 900, 900, 768, 480, 1024 };
+d180 3
+a182 2
+	if (strcmp(ra->ra_name, "PGI,tvtwo") != 0)
+		return (0);
+d184 1
+a184 1
+	return (1);
+a186 3
+/*
+ * Attach a display.
+ */
+a191 1
+	struct wsemuldisplaydev_attach_args waa;
+d201 1
+a201 1
+	/* We do not know how to handle older boards. */
+d203 4
+a206 2
+		printf("%s: old-style boards with %d registers are not supported\n",
+		    self->dv_xname, ca->ca_ra.ra_nreg);
+d218 25
+a242 11
+	if (freqcode == 'g')
+		freqcode = '6';
+	if (freqcode < '1' || freqcode > '6')
+		freqcode = 0;
+	else
+		freqcode -= '1';
+
+	width = getpropint(node, "hres", defwidth[freqcode]);
+	height = getpropint(node, "vres", defheight[freqcode]);
+	fb_setsize(&sc->sc_sunfb, 32, width, height,
+	    node, ca->ca_bustype);
+d246 4
+a249 2
+	sc->sc_sunfb.sf_ro.ri_bits = mapiodev(ca->ca_ra.ra_reg,
+	    PX_PLANE24_OFFSET, round_page(sc->sc_sunfb.sf_fbsize));
+d251 2
+a252 2
+	/* Initialize a direct color map. */
+	tvtwo_initcmap(sc);
+d255 1
+a255 6
+	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
+
+	tvtwo_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
+	tvtwo_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
+	tvtwo_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
+	tvtwo_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
+d257 7
+a263 2
+	printf("%s: %dx%d\n", self->dv_xname,
+	    sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
+d267 1
+a267 1
+		    &tvtwo_stdscreen, -1, NULL);
+d270 2
+a271 1
+	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
+d273 1
+a273 5
+	waa.console = isconsole;
+	waa.scrdata = &tvtwo_screenlist;
+	waa.accessops = &tvtwo_accessops;
+	waa.accesscookie = sc;
+	config_found(self, &waa, wsemuldisplaydevprint);
+d282 4
+d294 1
+a294 1
+		wdf->depth = sc->sc_sunfb.sf_depth;
+d298 1
+a298 1
+		*(u_int *)data = sc->sc_sunfb.sf_linebytes;
+d305 10
+d317 2
+a330 4
+/*
+ * Return the address that would map the given device at the given
+ * offset, allowing for the given protection, or return -1 for error.
+ */
+d340 1
+a340 1
+	if (offset >= 0 && offset < sc->sc_sunfb.sf_fbsize) {
+d348 2
+a349 3
+int
+tvtwo_alloc_screen(void *v, const struct wsscreen_descr *type,
+    void **cookiep, int *curxp, int *curyp, long *attrp)
+d352 1
+d354 7
+a360 2
+	if (sc->sc_nscreens > 0)
+		return (ENOMEM);
+d362 2
+a363 7
+	*cookiep = &sc->sc_sunfb.sf_ro;
+	*curyp = 0;
+	*curxp = 0;
+	sc->sc_sunfb.sf_ro.ri_ops.alloc_attr(&sc->sc_sunfb.sf_ro,
+	     0, 0, 0, attrp);
+	sc->sc_nscreens++;
+	return (0);
+d367 1
+a367 1
+tvtwo_free_screen(void *v, void *cookie)
+d369 6
+a374 10
+	struct tvtwo_softc *sc = v;
+
+	sc->sc_nscreens--;
+}
+
+int
+tvtwo_show_screen(void *v, void *cookie, int waitok,
+    void (*cb)(void *, int, int), void *cbarg)
+{
+	return (0);
+d384 1
+a384 1
+	volatile u_int32_t *dac = (u_int32_t *)(sc->sc_regs + PX_REG_BT463);
+d391 1
+a391 1
+tvtwo_initcmap(struct tvtwo_softc *sc)
+d393 1
+a393 1
+	volatile u_int32_t *dac = (u_int32_t *)(sc->sc_regs + PX_REG_BT463);
+d405 1
+a405 1
+tvtwo_burner(void *v, u_int on, u_int flags)
+d408 1
+a408 2
+	volatile u_int32_t *dispkludge =
+	    (u_int32_t *)(sc->sc_regs + PX_REG_DISPKLUDGE);
+d410 4
+a413 4
+	if (on)
+		*dispkludge = DISPKLUDGE_DEFAULT & ~DISPKLUDGE_BLANK;
+	else
+		*dispkludge = DISPKLUDGE_DEFAULT | DISPKLUDGE_BLANK;
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@<dev/wscons/wscons_raster.h> is long gone
+@
+text
+@d70 1
+@
+
+
+1.1.1.3
+log
+@merge OpenBSD rev 1.15 with miod@@’s patch for my tvtwo(4)
+@
+text
+@d1 1
+a1 2
+/*	$OpenBSD: tvtwo.c,v 1.15 2008/03/15 21:10:34 miod Exp $	*/
+
+d3 1
+a3 1
+ * Copyright (c) 2003, 2006, 2008, Miodrag Vallat.
+d32 2
+a33 2
+ * Some details about these board used to be available at:
+ *   http://www.jlw.com/~woolsey/parallax/support/developers/xvideotech.html
+d42 2
+a43 2
+ * Currently, this driver can only handle the 8-bit and 24-bit planes of the
+ * frame buffer, in an unaccelerated mode.
+d56 1
+d58 1
+d78 12
+a89 7
+ *	PROM0		000000 - 00ffff
+ *	overlay plane	010000 - 037fff
+ *	registers	040000 - 0404d0
+ *	CCube		050000 - 05ffff
+ *	8-bit plane	080000 - 17ffff
+ *	24-bit plane	200000 - 6fffff
+ *	PROM1		7f0000 - 7fffff
+d93 1
+a93 1
+#define	PX_OVERLAY_OFFSET	0x010000
+a99 2
+#define	PX_MAP_SIZE		0x800000
+
+d104 5
+a108 9
+#define	PX_REG_DISPKLUGE	0x00b8	/* write only */
+#define	DISPKLUGE_DEFAULT	0xc41f
+#define	DISPKLUGE_BLANK		(1 << 12)
+#define	DISPKLUGE_SYNC		(1 << 13)
+
+#define	PX_REG_BT463_RED	0x0480
+#define	PX_REG_BT463_GREEN	0x0490
+#define	PX_REG_BT463_BLUE	0x04a0
+#define	PX_REG_BT463_ALL	0x04b0
+d116 1
+a118 2
+	volatile u_int8_t *sc_m8;
+	volatile u_int8_t *sc_m24;
+d120 15
+d137 12
+a148 3
+int	tvtwo_ioctl(void *, u_long, caddr_t, int, struct proc *);
+paddr_t	tvtwo_mmap(void *, off_t, int);
+void	tvtwo_burner(void *, u_int, u_int);
+d153 3
+a155 3
+	NULL,	/* alloc_screen */
+	NULL,	/* free_screen */
+	NULL,	/* show_screen */
+a159 1
+	NULL	/* pollc */
+d162 2
+a163 8
+void	tvtwo_directcmap(struct tvtwo_softc *);
+static __inline__
+void	tvtwo_ramdac_wraddr(struct tvtwo_softc *, u_int32_t);
+void	tvtwo_reset(struct tvtwo_softc *, u_int);
+void	tvtwo_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
+
+int	tvtwomatch(struct device *, void *, void *);
+void	tvtwoattach(struct device *, struct device *, void *);
+d176 2
+a177 3
+#define	NFREQCODE	5
+const int defwidth[NFREQCODE] = { 1152, 1152, 1152, 1024, 640 };
+const int defheight[NFREQCODE] = { 900, 900, 900, 768, 480 };
+d188 2
+a189 3
+	if (strcmp(ra->ra_name, "PGI,tvtwo") == 0 ||
+	    strcmp(ra->ra_name, "PGI,tvthree") == 0)
+		return (1);
+d191 1
+a191 1
+	return (0);
+d194 3
+d202 1
+d205 1
+a205 1
+	char *freqstring, *revision;
+d210 7
+a216 18
+	revision = getpropstring(node, "revision");
+	if (*revision != '\0')
+		printf(", revision %s", revision);
+
+	/*
+	 * Older XVideo provide two sets of SBus registers:
+	 *	R0		040000 - 040800
+	 *	R1		080000 - 17d200
+	 * While the more recent revisions provide only one register:
+	 *	R0		000000 - 7fffff
+	 *
+	 * We'll simply ``rewrite'' R0 on older boards and handle them as
+	 * recent boards.
+	 */
+	if (ca->ca_ra.ra_nreg > 1) {
+		ca->ca_ra.ra_paddr =
+		    (void *)((vaddr_t)ca->ca_ra.ra_paddr - PX_REG_OFFSET);
+		ca->ca_ra.ra_len = PX_MAP_SIZE;
+d224 1
+a224 5
+	/*
+	 * Compute framebuffer size.
+	 * Older boards do not have the ``freqcode'' property and are
+	 * restricted to 1152x900.
+	 */
+d226 12
+a237 34
+	if (*freqstring != '\0') {
+		freqcode = (int)*freqstring;
+		if (freqcode == 'g') {
+			width = height = 1024;
+		} else {
+			if (freqcode < '1' || freqcode > NFREQCODE + '0')
+				freqcode = 0;
+			else
+				freqcode -= '1';
+			width = defwidth[freqcode];
+			height = defheight[freqcode];
+
+			/* in case our table is wrong or incomplete... */
+			width = getpropint(node, "hres", width);
+			height = getpropint(node, "vres", height);
+		}
+	} else {
+		width = 1152;
+		height = 900;
+	}
+
+	/*
+	 * Since the depth property is missing, we could do
+	 * fb_setsize(&sc->sc_sunfb, 8, width, height, node, ca->ca_bustype);
+	 * but for safety in case it would exist and be set to 32, do it
+	 * manually...
+	 */
+	sc->sc_sunfb.sf_depth = 8;
+	sc->sc_sunfb.sf_width = width;
+	sc->sc_sunfb.sf_height = height;
+	sc->sc_sunfb.sf_linebytes = width >= 1024 ? width : 1024;
+	sc->sc_sunfb.sf_fbsize = sc->sc_sunfb.sf_linebytes * height;
+
+	printf(", %dx%d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
+d241 2
+a242 4
+	sc->sc_m8 = mapiodev(ca->ca_ra.ra_reg,
+	    PX_PLANE8_OFFSET, round_page(sc->sc_sunfb.sf_fbsize));
+	sc->sc_m24 = mapiodev(ca->ca_ra.ra_reg,
+	    PX_PLANE24_OFFSET, round_page(4 * sc->sc_sunfb.sf_fbsize));
+d244 2
+a245 2
+	/* Enable video. */
+	tvtwo_burner(sc, 1, 0);
+d248 6
+a253 1
+	sc->sc_sunfb.sf_ro.ri_bits = (u_char *)sc->sc_m8;
+d255 2
+a256 7
+	/*
+	 * If the framebuffer width is under 1024, we will switch from
+	 * the PROM font to the more adequate 8x16 font here.
+	 */
+	fbwscons_init(&sc->sc_sunfb,
+	    isconsole && (width >= 1024) ? RI_CLEARMARGINS : RI_CLEAR);
+	fbwscons_setcolormap(&sc->sc_sunfb, tvtwo_setcolor);
+d260 1
+a260 1
+		    width >= 1024 ? -1 : 0);
+d263 7
+a269 1
+	fbwscons_attach(&sc->sc_sunfb, &tvtwo_accessops, isconsole);
+a277 4
+	/*
+	 * Note that, although the emulation (text) mode is running in a
+	 * 8-bit plane, we advertize the frame buffer as 32-bit.
+	 */
+d286 1
+a286 1
+		wdf->depth = 32;
+a288 3
+	case WSDISPLAYIO_GETSUPPORTEDDEPTH:
+		*(u_int *)data = WSDISPLAYIO_DEPTH_24_32;
+		break;
+d290 1
+a290 1
+		*(u_int *)data = sc->sc_sunfb.sf_linebytes * 4;
+a296 10
+	case WSDISPLAYIO_SMODE:
+		if (*(int *)data == WSDISPLAYIO_MODE_EMUL) {
+			/* Back from X11 to text mode */
+			tvtwo_reset(sc, 8);
+		} else {
+			/* Starting X11, initialize 32-bit mode */
+			tvtwo_reset(sc, 32);
+		}
+		break;
+
+a298 2
+		break;
+
+d311 4
+d324 1
+a324 1
+	if (offset >= 0 && offset < sc->sc_sunfb.sf_fbsize * 4) {
+d332 3
+a334 2
+void
+tvtwo_burner(void *v, u_int on, u_int flags)
+a336 1
+	u_int32_t dispkluge;
+d338 2
+a339 7
+	if (on)
+		dispkluge = DISPKLUGE_DEFAULT & ~DISPKLUGE_BLANK;
+	else {
+		dispkluge = DISPKLUGE_DEFAULT | DISPKLUGE_BLANK;
+		if (flags & WSDISPLAY_BURN_VBLANK)
+			dispkluge |= DISPKLUGE_SYNC;
+	}
+d341 7
+a347 1
+	*(volatile u_int32_t *)(sc->sc_regs + PX_REG_DISPKLUGE) = dispkluge;
+d351 1
+a351 1
+tvtwo_reset(struct tvtwo_softc *sc, u_int depth)
+d353 10
+a362 6
+	if (depth == 32) {
+		/* Initialize a direct color map. */
+		tvtwo_directcmap(sc);
+	} else {
+		fbwscons_setcolormap(&sc->sc_sunfb, tvtwo_setcolor);
+	}
+d372 1
+a372 1
+	volatile u_int32_t *dac = (u_int32_t *)(sc->sc_regs + PX_REG_BT463_RED);
+d379 1
+a379 1
+tvtwo_directcmap(struct tvtwo_softc *sc)
+d381 1
+a381 1
+	volatile u_int32_t *dac = (u_int32_t *)(sc->sc_regs + PX_REG_BT463_RED);
+d393 1
+a393 1
+tvtwo_setcolor(void *v, u_int index, u_int8_t r, u_int8_t g, u_int8_t b)
+d396 2
+a397 1
+	volatile u_int32_t *dac = (u_int32_t *)(sc->sc_regs + PX_REG_BT463_RED);
+d399 4
+a402 4
+	tvtwo_ramdac_wraddr(sc, index);
+	dac[3] = r;
+	dac[3] = g;
+	dac[3] = b;
+@
+
+

@@ -1,0 +1,4642 @@
+head	1.6;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.04.15.19.22.19;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.19.48.34;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520152445E05B912;
+
+1.4
+date	2008.06.12.20.54.53;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.05.12;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.25.11;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.29;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.37.34;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.56;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.26;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.22;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.09;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ttobjs.c                                                               */
+/*                                                                         */
+/*    Objects manager (body).                                              */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+#include FT_INTERNAL_STREAM_H
+#include FT_TRUETYPE_TAGS_H
+#include FT_INTERNAL_SFNT_H
+#include FT_TRUETYPE_DRIVER_H
+
+#include "ttgload.h"
+#include "ttpload.h"
+
+#include "tterrors.h"
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+#include "ttinterp.h"
+#endif
+
+#ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
+#include "ttgxvar.h"
+#endif
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_ttobjs
+
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*                       GLYPH ZONE FUNCTIONS                            */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_glyphzone_done                                                  */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Deallocate a glyph zone.                                           */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    zone :: A pointer to the target glyph zone.                        */
+  /*                                                                       */
+  FT_LOCAL_DEF( void )
+  tt_glyphzone_done( TT_GlyphZone  zone )
+  {
+    FT_Memory  memory = zone->memory;
+
+
+    if ( memory )
+    {
+      FT_FREE( zone->contours );
+      FT_FREE( zone->tags );
+      FT_FREE( zone->cur );
+      FT_FREE( zone->org );
+      FT_FREE( zone->orus );
+
+      zone->max_points   = zone->n_points   = 0;
+      zone->max_contours = zone->n_contours = 0;
+      zone->memory       = NULL;
+    }
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_glyphzone_new                                                   */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Allocate a new glyph zone.                                         */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory      :: A handle to the current memory object.              */
+  /*                                                                       */
+  /*    maxPoints   :: The capacity of glyph zone in points.               */
+  /*                                                                       */
+  /*    maxContours :: The capacity of glyph zone in contours.             */
+  /*                                                                       */
+  /* <Output>                                                              */
+  /*    zone        :: A pointer to the target glyph zone record.          */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_glyphzone_new( FT_Memory     memory,
+                    FT_UShort     maxPoints,
+                    FT_Short      maxContours,
+                    TT_GlyphZone  zone )
+  {
+    FT_Error  error;
+
+
+    FT_ZERO( zone );
+    zone->memory = memory;
+
+    if ( FT_NEW_ARRAY( zone->org,      maxPoints   ) ||
+         FT_NEW_ARRAY( zone->cur,      maxPoints   ) ||
+         FT_NEW_ARRAY( zone->orus,     maxPoints   ) ||
+         FT_NEW_ARRAY( zone->tags,     maxPoints   ) ||
+         FT_NEW_ARRAY( zone->contours, maxContours ) )
+    {
+      tt_glyphzone_done( zone );
+    }
+    else
+    {
+      zone->max_points   = maxPoints;
+      zone->max_contours = maxContours;
+    }
+
+    return error;
+  }
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+
+
+  /* Compare the face with a list of well-known `tricky' fonts. */
+  /* This list shall be expanded as we find more of them.       */
+
+  static FT_Bool
+  tt_check_trickyness_family( FT_String*  name )
+  {
+
+#define TRICK_NAMES_MAX_CHARACTERS  19
+#define TRICK_NAMES_COUNT            9
+
+    static const char trick_names[TRICK_NAMES_COUNT]
+                                 [TRICK_NAMES_MAX_CHARACTERS + 1] =
+    {
+      "DFKaiSho-SB",        /* dfkaisb.ttf */
+      "DFKaiShu",
+      "DFKai-SB",           /* kaiu.ttf */
+      "HuaTianKaiTi?",      /* htkt2.ttf */
+      "HuaTianSongTi?",     /* htst3.ttf */
+      "Ming(for ISO10646)", /* hkscsiic.ttf & iicore.ttf */
+      "MingLiU",            /* mingliu.ttf & mingliu.ttc */
+      "PMingLiU",           /* mingliu.ttc */
+      "MingLi43",           /* mingli.ttf */
+    };
+
+    int  nn;
+
+
+    for ( nn = 0; nn < TRICK_NAMES_COUNT; nn++ )
+      if ( ft_strstr( name, trick_names[nn] ) )
+        return TRUE;
+
+    return FALSE;
+  }
+
+
+  /* XXX: This function should be in the `sfnt' module. */
+
+  /* Some PDF generators clear the checksums in the TrueType header table. */
+  /* For example, Quartz ContextPDF clears all entries, or Bullzip PDF     */
+  /* Printer clears the entries for subsetted subtables.  We thus have to  */
+  /* recalculate the checksums  where necessary.                           */
+
+  static FT_UInt32
+  tt_synth_sfnt_checksum( FT_Stream  stream,
+                          FT_ULong   length )
+  {
+    FT_Error   error;
+    FT_UInt32  checksum = 0;
+    FT_UInt    i;
+
+
+    if ( FT_FRAME_ENTER( length ) )
+      return 0;
+
+    for ( ; length > 3; length -= 4 )
+      checksum += (FT_UInt32)FT_GET_ULONG();
+
+    for ( i = 3; length > 0; length--, i-- )
+      checksum += (FT_UInt32)FT_GET_BYTE() << ( i * 8 );
+
+    FT_FRAME_EXIT();
+
+    return checksum;
+  }
+
+
+  /* XXX: This function should be in the `sfnt' module. */
+
+  static FT_ULong
+  tt_get_sfnt_checksum( TT_Face    face,
+                        FT_UShort  i )
+  {
+#if 0 /* if we believe the written value, use following part. */
+    if ( face->dir_tables[i].CheckSum )
+      return face->dir_tables[i].CheckSum;
+#endif
+
+    if ( !face->goto_table )
+      return 0;
+
+    if ( face->goto_table( face,
+                           face->dir_tables[i].Tag,
+                           face->root.stream,
+                           NULL ) )
+      return 0;
+
+    return (FT_ULong)tt_synth_sfnt_checksum( face->root.stream,
+                                             face->dir_tables[i].Length );
+  }
+
+
+  typedef struct tt_sfnt_id_rec_
+  {
+    FT_ULong  CheckSum;
+    FT_ULong  Length;
+
+  } tt_sfnt_id_rec;
+
+
+  static FT_Bool
+  tt_check_trickyness_sfnt_ids( TT_Face  face )
+  {
+#define TRICK_SFNT_IDS_PER_FACE   3
+#define TRICK_SFNT_IDS_NUM_FACES  18
+
+    static const tt_sfnt_id_rec sfnt_id[TRICK_SFNT_IDS_NUM_FACES]
+                                       [TRICK_SFNT_IDS_PER_FACE] = {
+
+#define TRICK_SFNT_ID_cvt   0
+#define TRICK_SFNT_ID_fpgm  1
+#define TRICK_SFNT_ID_prep  2
+
+      { /* MingLiU 1995 */
+        { 0x05BCF058UL, 0x000002E4UL }, /* cvt  */
+        { 0x28233BF1UL, 0x000087C4UL }, /* fpgm */
+        { 0xA344A1EAUL, 0x000001E1UL }  /* prep */
+      },
+      { /* MingLiU 1996- */
+        { 0x05BCF058UL, 0x000002E4UL }, /* cvt  */
+        { 0x28233BF1UL, 0x000087C4UL }, /* fpgm */
+        { 0xA344A1EBUL, 0x000001E1UL }  /* prep */
+      },
+      { /* DFKaiShu */
+        { 0x11E5EAD4UL, 0x00000350UL }, /* cvt  */
+        { 0x5A30CA3BUL, 0x00009063UL }, /* fpgm */
+        { 0x13A42602UL, 0x0000007EUL }  /* prep */
+      },
+      { /* DFKaiShu2 */
+        { 0x11E5EAD4UL, 0x00000350UL }, /* cvt  */
+        { 0xA6E78C01UL, 0x00008998UL }, /* fpgm */
+        { 0x13A42602UL, 0x0000007EUL }  /* prep */
+      },
+      { /* HuaTianKaiTi */
+        { 0xFFFBFFFCUL, 0x00000008UL }, /* cvt  */
+        { 0x9C9E48B8UL, 0x0000BEA2UL }, /* fpgm */
+        { 0x70020112UL, 0x00000008UL }  /* prep */
+      },
+      { /* HuaTianSongTi */
+        { 0xFFFBFFFCUL, 0x00000008UL }, /* cvt  */
+        { 0x0A5A0483UL, 0x00017C39UL }, /* fpgm */
+        { 0x70020112UL, 0x00000008UL }  /* prep */
+      },
+      { /* NEC fadpop7.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x40C92555UL, 0x000000E5UL }, /* fpgm */
+        { 0xA39B58E3UL, 0x0000117CUL }  /* prep */
+      },
+      { /* NEC fadrei5.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x33C41652UL, 0x000000E5UL }, /* fpgm */
+        { 0x26D6C52AUL, 0x00000F6AUL }  /* prep */
+      },
+      { /* NEC fangot7.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x6DB1651DUL, 0x0000019DUL }, /* fpgm */
+        { 0x6C6E4B03UL, 0x00002492UL }  /* prep */
+      },
+      { /* NEC fangyo5.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x40C92555UL, 0x000000E5UL }, /* fpgm */
+        { 0xDE51FAD0UL, 0x0000117CUL }  /* prep */
+      },
+      { /* NEC fankyo5.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x85E47664UL, 0x000000E5UL }, /* fpgm */
+        { 0xA6C62831UL, 0x00001CAAUL }  /* prep */
+      },
+      { /* NEC fanrgo5.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x2D891CFDUL, 0x0000019DUL }, /* fpgm */
+        { 0xA0604633UL, 0x00001DE8UL }  /* prep */
+      },
+      { /* NEC fangot5.ttc */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x40AA774CUL, 0x000001CBUL }, /* fpgm */
+        { 0x9B5CAA96UL, 0x00001F9AUL }  /* prep */
+      },
+      { /* NEC fanmin3.ttc */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x0D3DE9CBUL, 0x00000141UL }, /* fpgm */
+        { 0xD4127766UL, 0x00002280UL }  /* prep */
+      },
+      { /* NEC FA-Gothic, 1996 */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x4A692698UL, 0x000001F0UL }, /* fpgm */
+        { 0x340D4346UL, 0x00001FCAUL }  /* prep */
+      },
+      { /* NEC FA-Minchou, 1996 */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0xCD34C604UL, 0x00000166UL }, /* fpgm */
+        { 0x6CF31046UL, 0x000022B0UL }  /* prep */
+      },
+      { /* NEC FA-RoundGothicB, 1996 */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x5DA75315UL, 0x0000019DUL }, /* fpgm */
+        { 0x40745A5FUL, 0x000022E0UL }  /* prep */
+      },
+      { /* NEC FA-RoundGothicM, 1996 */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0xF055FC48UL, 0x000001C2UL }, /* fpgm */
+        { 0x3900DED3UL, 0x00001E18UL }  /* prep */
+      }
+    };
+
+    FT_ULong   checksum;
+    int        num_matched_ids[TRICK_SFNT_IDS_NUM_FACES];
+    FT_Bool    has_cvt, has_fpgm, has_prep;
+    FT_UShort  i;
+    int        j, k;
+
+
+    FT_MEM_SET( num_matched_ids, 0,
+                sizeof ( int ) * TRICK_SFNT_IDS_NUM_FACES );
+    has_cvt  = FALSE;
+    has_fpgm = FALSE;
+    has_prep = FALSE;
+
+    for ( i = 0; i < face->num_tables; i++ )
+    {
+      checksum = 0;
+
+      switch( face->dir_tables[i].Tag )
+      {
+      case TTAG_cvt:
+        k = TRICK_SFNT_ID_cvt;
+        has_cvt  = TRUE;
+        break;
+
+      case TTAG_fpgm:
+        k = TRICK_SFNT_ID_fpgm;
+        has_fpgm = TRUE;
+        break;
+
+      case TTAG_prep:
+        k = TRICK_SFNT_ID_prep;
+        has_prep = TRUE;
+        break;
+
+      default:
+        continue;
+      }
+
+      for ( j = 0; j < TRICK_SFNT_IDS_NUM_FACES; j++ )
+        if ( face->dir_tables[i].Length == sfnt_id[j][k].Length )
+        {
+          if ( !checksum )
+            checksum = tt_get_sfnt_checksum( face, i );
+
+          if ( sfnt_id[j][k].CheckSum == checksum )
+            num_matched_ids[j]++;
+
+          if ( num_matched_ids[j] == TRICK_SFNT_IDS_PER_FACE )
+            return TRUE;
+        }
+    }
+
+    for ( j = 0; j < TRICK_SFNT_IDS_NUM_FACES; j++ )
+    {
+      if ( !has_cvt  && !sfnt_id[j][TRICK_SFNT_ID_cvt].Length )
+        num_matched_ids[j]++;
+      if ( !has_fpgm && !sfnt_id[j][TRICK_SFNT_ID_fpgm].Length )
+        num_matched_ids[j]++;
+      if ( !has_prep && !sfnt_id[j][TRICK_SFNT_ID_prep].Length )
+        num_matched_ids[j]++;
+      if ( num_matched_ids[j] == TRICK_SFNT_IDS_PER_FACE )
+        return TRUE;
+    }
+
+    return FALSE;
+  }
+
+
+  static FT_Bool
+  tt_check_trickyness( FT_Face  face )
+  {
+    if ( !face )
+      return FALSE;
+
+    /* For first, check the face name for quick check. */
+    if ( face->family_name                               &&
+         tt_check_trickyness_family( face->family_name ) )
+      return TRUE;
+
+    /* Type42 fonts may lack `name' tables, we thus try to identify */
+    /* tricky fonts by checking the checksums of Type42-persistent  */
+    /* sfnt tables (`cvt', `fpgm', and `prep').                     */
+    if ( tt_check_trickyness_sfnt_ids( (TT_Face)face ) )
+      return TRUE;
+
+    return FALSE;
+  }
+
+
+  /* Check whether `.notdef' is the only glyph in the `loca' table. */
+  static FT_Bool
+  tt_check_single_notdef( FT_Face  ttface )
+  {
+    FT_Bool   result = FALSE;
+
+    TT_Face   face = (TT_Face)ttface;
+    FT_UInt   asize;
+    FT_ULong  i;
+    FT_ULong  glyph_index = 0;
+    FT_UInt   count       = 0;
+
+
+    for( i = 0; i < face->num_locations; i++ )
+    {
+      tt_face_get_location( face, i, &asize );
+      if ( asize > 0 )
+      {
+        count += 1;
+        if ( count > 1 )
+          break;
+        glyph_index = i;
+      }
+    }
+
+    /* Only have a single outline. */
+    if ( count == 1 )
+    {
+      if ( glyph_index == 0 )
+        result = TRUE;
+      else
+      {
+        /* FIXME: Need to test glyphname == .notdef ? */
+        FT_Error error;
+        char buf[8];
+
+
+        error = FT_Get_Glyph_Name( ttface, glyph_index, buf, 8 );
+        if ( !error                                            &&
+             buf[0] == '.' && !ft_strncmp( buf, ".notdef", 8 ) )
+          result = TRUE;
+      }
+    }
+
+    return result;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_face_init                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Initialize a given TrueType face object.                           */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    stream     :: The source font stream.                              */
+  /*                                                                       */
+  /*    face_index :: The index of the TrueType font, if we are opening a  */
+  /*                  collection, in bits 0-15.  The numbered instance     */
+  /*                  index~+~1 of a GX (sub)font, if applicable, in bits  */
+  /*                  16-30.                                               */
+  /*                                                                       */
+  /*    num_params :: Number of additional generic parameters.  Ignored.   */
+  /*                                                                       */
+  /*    params     :: Additional generic parameters.  Ignored.             */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    face       :: The newly built face object.                         */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_face_init( FT_Stream      stream,
+                FT_Face        ttface,      /* TT_Face */
+                FT_Int         face_index,
+                FT_Int         num_params,
+                FT_Parameter*  params )
+  {
+    FT_Error      error;
+    FT_Library    library;
+    SFNT_Service  sfnt;
+    TT_Face       face = (TT_Face)ttface;
+
+
+    FT_TRACE2(( "TTF driver\n" ));
+
+    library = ttface->driver->root.library;
+
+    sfnt = (SFNT_Service)FT_Get_Module_Interface( library, "sfnt" );
+    if ( !sfnt )
+    {
+      FT_ERROR(( "tt_face_init: cannot access `sfnt' module\n" ));
+      error = FT_THROW( Missing_Module );
+      goto Exit;
+    }
+
+    /* create input stream from resource */
+    if ( FT_STREAM_SEEK( 0 ) )
+      goto Exit;
+
+    /* check that we have a valid TrueType file */
+    error = sfnt->init_face( stream, face, face_index, num_params, params );
+
+    /* Stream may have changed. */
+    stream = face->root.stream;
+
+    if ( error )
+      goto Exit;
+
+    /* We must also be able to accept Mac/GX fonts, as well as OT ones. */
+    /* The 0x00020000 tag is completely undocumented; some fonts from   */
+    /* Arphic made for Chinese Windows 3.1 have this.                   */
+    if ( face->format_tag != 0x00010000L &&    /* MS fonts  */
+         face->format_tag != 0x00020000L &&    /* CJK fonts for Win 3.1 */
+         face->format_tag != TTAG_true   )     /* Mac fonts */
+    {
+      FT_TRACE2(( "  not a TTF font\n" ));
+      goto Bad_Format;
+    }
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    ttface->face_flags |= FT_FACE_FLAG_HINTER;
+#endif
+
+    /* If we are performing a simple font format check, exit immediately. */
+    if ( face_index < 0 )
+      return FT_Err_Ok;
+
+    /* Load font directory */
+    error = sfnt->load_face( stream, face, face_index, num_params, params );
+    if ( error )
+      goto Exit;
+
+    if ( tt_check_trickyness( ttface ) )
+      ttface->face_flags |= FT_FACE_FLAG_TRICKY;
+
+    error = tt_face_load_hdmx( face, stream );
+    if ( error )
+      goto Exit;
+
+    if ( FT_IS_SCALABLE( ttface ) )
+    {
+#ifdef FT_CONFIG_OPTION_INCREMENTAL
+      if ( !ttface->internal->incremental_interface )
+#endif
+      {
+        error = tt_face_load_loca( face, stream );
+
+        /* having a (non-zero) `glyf' table without */
+        /* a `loca' table is not valid              */
+        if ( face->glyf_len && FT_ERR_EQ( error, Table_Missing ) )
+          goto Exit;
+        if ( error )
+          goto Exit;
+      }
+
+      /* `fpgm', `cvt', and `prep' are optional */
+      error = tt_face_load_cvt( face, stream );
+      if ( error && FT_ERR_NEQ( error, Table_Missing ) )
+        goto Exit;
+
+      error = tt_face_load_fpgm( face, stream );
+      if ( error && FT_ERR_NEQ( error, Table_Missing ) )
+        goto Exit;
+
+      error = tt_face_load_prep( face, stream );
+      if ( error && FT_ERR_NEQ( error, Table_Missing ) )
+        goto Exit;
+
+      /* Check the scalable flag based on `loca'. */
+#ifdef FT_CONFIG_OPTION_INCREMENTAL
+      if ( !ttface->internal->incremental_interface )
+#endif
+      {
+        if ( ttface->num_fixed_sizes          &&
+             face->glyph_locations            &&
+             tt_check_single_notdef( ttface ) )
+        {
+          FT_TRACE5(( "tt_face_init:"
+                      " Only the `.notdef' glyph has an outline.\n"
+                      "             "
+                      " Resetting scalable flag to FALSE.\n" ));
+
+          ttface->face_flags &= ~FT_FACE_FLAG_SCALABLE;
+        }
+      }
+    }
+
+#ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
+
+    {
+      FT_Int  instance_index = face_index >> 16;
+
+
+      if ( FT_HAS_MULTIPLE_MASTERS( ttface ) &&
+           instance_index > 0                )
+      {
+        error = TT_Get_MM_Var( face, NULL );
+        if ( error )
+          goto Exit;
+
+        if ( face->blend->mmvar->namedstyle )
+        {
+          FT_Memory  memory = ttface->memory;
+
+          FT_Var_Named_Style*  named_style;
+          FT_String*           style_name;
+
+
+          /* in `face_index', the instance index starts with value 1 */
+          named_style = face->blend->mmvar->namedstyle + instance_index - 1;
+          error = sfnt->get_name( face,
+                                  (FT_UShort)named_style->strid,
+                                  &style_name );
+          if ( error )
+            goto Exit;
+
+          /* set style name; if already set, replace it */
+          if ( face->root.style_name )
+            FT_FREE( face->root.style_name );
+          face->root.style_name = style_name;
+
+          /* finally, select the named instance */
+          error = TT_Set_Var_Design( face,
+                                     face->blend->mmvar->num_axis,
+                                     named_style->coords );
+          if ( error )
+            goto Exit;
+        }
+      }
+    }
+
+#endif /* TT_CONFIG_OPTION_GX_VAR_SUPPORT */
+
+    /* initialize standard glyph loading routines */
+    TT_Init_Glyph_Loading( face );
+
+  Exit:
+    return error;
+
+  Bad_Format:
+    error = FT_THROW( Unknown_File_Format );
+    goto Exit;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_face_done                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Finalize a given face object.                                      */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    face :: A pointer to the face object to destroy.                   */
+  /*                                                                       */
+  FT_LOCAL_DEF( void )
+  tt_face_done( FT_Face  ttface )           /* TT_Face */
+  {
+    TT_Face       face = (TT_Face)ttface;
+    FT_Memory     memory;
+    FT_Stream     stream;
+    SFNT_Service  sfnt;
+
+
+    if ( !face )
+      return;
+
+    memory = ttface->memory;
+    stream = ttface->stream;
+    sfnt   = (SFNT_Service)face->sfnt;
+
+    /* for `extended TrueType formats' (i.e. compressed versions) */
+    if ( face->extra.finalizer )
+      face->extra.finalizer( face->extra.data );
+
+    if ( sfnt )
+      sfnt->done_face( face );
+
+    /* freeing the locations table */
+    tt_face_done_loca( face );
+
+    tt_face_free_hdmx( face );
+
+    /* freeing the CVT */
+    FT_FREE( face->cvt );
+    face->cvt_size = 0;
+
+    /* freeing the programs */
+    FT_FRAME_RELEASE( face->font_program );
+    FT_FRAME_RELEASE( face->cvt_program );
+    face->font_program_size = 0;
+    face->cvt_program_size  = 0;
+
+#ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
+    tt_done_blend( face );
+    face->blend = NULL;
+#endif
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*                           SIZE  FUNCTIONS                             */
+  /*                                                                       */
+  /*************************************************************************/
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_run_fpgm                                                   */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Run the font program.                                              */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    size     :: A handle to the size object.                           */
+  /*                                                                       */
+  /*    pedantic :: Set if bytecode execution should be pedantic.          */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_run_fpgm( TT_Size  size,
+                    FT_Bool  pedantic )
+  {
+    TT_Face         face = (TT_Face)size->root.face;
+    TT_ExecContext  exec;
+    FT_Error        error;
+
+
+    exec = size->context;
+
+    error = TT_Load_Context( exec, face, size );
+    if ( error )
+      return error;
+
+    exec->callTop = 0;
+    exec->top     = 0;
+
+    exec->period    = 64;
+    exec->phase     = 0;
+    exec->threshold = 0;
+
+    exec->instruction_trap = FALSE;
+    exec->F_dot_P          = 0x4000L;
+
+    exec->pedantic_hinting = pedantic;
+
+    {
+      FT_Size_Metrics*  metrics    = &exec->metrics;
+      TT_Size_Metrics*  tt_metrics = &exec->tt_metrics;
+
+
+      metrics->x_ppem   = 0;
+      metrics->y_ppem   = 0;
+      metrics->x_scale  = 0;
+      metrics->y_scale  = 0;
+
+      tt_metrics->ppem  = 0;
+      tt_metrics->scale = 0;
+      tt_metrics->ratio = 0x10000L;
+    }
+
+    /* allow font program execution */
+    TT_Set_CodeRange( exec,
+                      tt_coderange_font,
+                      face->font_program,
+                      (FT_Long)face->font_program_size );
+
+    /* disable CVT and glyph programs coderange */
+    TT_Clear_CodeRange( exec, tt_coderange_cvt );
+    TT_Clear_CodeRange( exec, tt_coderange_glyph );
+
+    if ( face->font_program_size > 0 )
+    {
+      TT_Goto_CodeRange( exec, tt_coderange_font, 0 );
+
+      FT_TRACE4(( "Executing `fpgm' table.\n" ));
+      error = face->interpreter( exec );
+    }
+    else
+      error = FT_Err_Ok;
+
+    size->bytecode_ready = error;
+
+    if ( !error )
+      TT_Save_Context( exec, size );
+
+    return error;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_run_prep                                                   */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Run the control value program.                                     */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    size     :: A handle to the size object.                           */
+  /*                                                                       */
+  /*    pedantic :: Set if bytecode execution should be pedantic.          */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_run_prep( TT_Size  size,
+                    FT_Bool  pedantic )
+  {
+    TT_Face         face = (TT_Face)size->root.face;
+    TT_ExecContext  exec;
+    FT_Error        error;
+
+
+    exec = size->context;
+
+    error = TT_Load_Context( exec, face, size );
+    if ( error )
+      return error;
+
+    exec->callTop = 0;
+    exec->top     = 0;
+
+    exec->instruction_trap = FALSE;
+
+    exec->pedantic_hinting = pedantic;
+
+    TT_Set_CodeRange( exec,
+                      tt_coderange_cvt,
+                      face->cvt_program,
+                      (FT_Long)face->cvt_program_size );
+
+    TT_Clear_CodeRange( exec, tt_coderange_glyph );
+
+    if ( face->cvt_program_size > 0 )
+    {
+      TT_Goto_CodeRange( exec, tt_coderange_cvt, 0 );
+
+      FT_TRACE4(( "Executing `prep' table.\n" ));
+
+      error = face->interpreter( exec );
+    }
+    else
+      error = FT_Err_Ok;
+
+    size->cvt_ready = error;
+
+    /* UNDOCUMENTED!  The MS rasterizer doesn't allow the following */
+    /* graphics state variables to be modified by the CVT program.  */
+
+    exec->GS.dualVector.x = 0x4000;
+    exec->GS.dualVector.y = 0;
+    exec->GS.projVector.x = 0x4000;
+    exec->GS.projVector.y = 0x0;
+    exec->GS.freeVector.x = 0x4000;
+    exec->GS.freeVector.y = 0x0;
+
+    exec->GS.rp0 = 0;
+    exec->GS.rp1 = 0;
+    exec->GS.rp2 = 0;
+
+    exec->GS.gep0 = 1;
+    exec->GS.gep1 = 1;
+    exec->GS.gep2 = 1;
+
+    exec->GS.loop = 1;
+
+    /* save as default graphics state */
+    size->GS = exec->GS;
+
+    TT_Save_Context( exec, size );
+
+    return error;
+  }
+
+
+  static void
+  tt_size_done_bytecode( FT_Size  ftsize )
+  {
+    TT_Size    size   = (TT_Size)ftsize;
+    TT_Face    face   = (TT_Face)ftsize->face;
+    FT_Memory  memory = face->root.memory;
+
+    if ( size->context )
+    {
+      TT_Done_Context( size->context );
+      size->context = NULL;
+    }
+
+    FT_FREE( size->cvt );
+    size->cvt_size = 0;
+
+    /* free storage area */
+    FT_FREE( size->storage );
+    size->storage_size = 0;
+
+    /* twilight zone */
+    tt_glyphzone_done( &size->twilight );
+
+    FT_FREE( size->function_defs );
+    FT_FREE( size->instruction_defs );
+
+    size->num_function_defs    = 0;
+    size->max_function_defs    = 0;
+    size->num_instruction_defs = 0;
+    size->max_instruction_defs = 0;
+
+    size->max_func = 0;
+    size->max_ins  = 0;
+
+    size->bytecode_ready = -1;
+    size->cvt_ready      = -1;
+  }
+
+
+  /* Initialize bytecode-related fields in the size object.       */
+  /* We do this only if bytecode interpretation is really needed. */
+  static FT_Error
+  tt_size_init_bytecode( FT_Size  ftsize,
+                         FT_Bool  pedantic )
+  {
+    FT_Error   error;
+    TT_Size    size = (TT_Size)ftsize;
+    TT_Face    face = (TT_Face)ftsize->face;
+    FT_Memory  memory = face->root.memory;
+
+    FT_UShort       n_twilight;
+    TT_MaxProfile*  maxp = &face->max_profile;
+
+
+    /* clean up bytecode related data */
+    FT_FREE( size->function_defs );
+    FT_FREE( size->instruction_defs );
+    FT_FREE( size->cvt );
+    FT_FREE( size->storage );
+
+    if ( size->context )
+      TT_Done_Context( size->context );
+    tt_glyphzone_done( &size->twilight );
+
+    size->bytecode_ready = -1;
+    size->cvt_ready      = -1;
+
+    size->context = TT_New_Context( (TT_Driver)face->root.driver );
+
+    size->max_function_defs    = maxp->maxFunctionDefs;
+    size->max_instruction_defs = maxp->maxInstructionDefs;
+
+    size->num_function_defs    = 0;
+    size->num_instruction_defs = 0;
+
+    size->max_func = 0;
+    size->max_ins  = 0;
+
+    size->cvt_size     = face->cvt_size;
+    size->storage_size = maxp->maxStorage;
+
+    /* Set default metrics */
+    {
+      TT_Size_Metrics*  metrics = &size->ttmetrics;
+
+
+      metrics->rotated   = FALSE;
+      metrics->stretched = FALSE;
+
+      /* set default engine compensation */
+      metrics->compensations[0] = 0;   /* gray     */
+      metrics->compensations[1] = 0;   /* black    */
+      metrics->compensations[2] = 0;   /* white    */
+      metrics->compensations[3] = 0;   /* reserved */
+    }
+
+    /* allocate function defs, instruction defs, cvt, and storage area */
+    if ( FT_NEW_ARRAY( size->function_defs,    size->max_function_defs    ) ||
+         FT_NEW_ARRAY( size->instruction_defs, size->max_instruction_defs ) ||
+         FT_NEW_ARRAY( size->cvt,              size->cvt_size             ) ||
+         FT_NEW_ARRAY( size->storage,          size->storage_size         ) )
+      goto Exit;
+
+    /* reserve twilight zone */
+    n_twilight = maxp->maxTwilightPoints;
+
+    /* there are 4 phantom points (do we need this?) */
+    n_twilight += 4;
+
+    error = tt_glyphzone_new( memory, n_twilight, 0, &size->twilight );
+    if ( error )
+      goto Exit;
+
+    size->twilight.n_points = n_twilight;
+
+    size->GS = tt_default_graphics_state;
+
+    /* set `face->interpreter' according to the debug hook present */
+    {
+      FT_Library  library = face->root.driver->root.library;
+
+
+      face->interpreter = (TT_Interpreter)
+                            library->debug_hooks[FT_DEBUG_HOOK_TRUETYPE];
+      if ( !face->interpreter )
+        face->interpreter = (TT_Interpreter)TT_RunIns;
+    }
+
+    /* Fine, now run the font program! */
+
+    /* In case of an error while executing `fpgm', we intentionally don't */
+    /* clean up immediately – bugs in the `fpgm' are so fundamental that  */
+    /* all following hinting calls should fail.  Additionally, `fpgm' is  */
+    /* to be executed just once; calling it again is completely useless   */
+    /* and might even lead to extremely slow behaviour if it is malformed */
+    /* (containing an infinite loop, for example).                        */
+    error = tt_size_run_fpgm( size, pedantic );
+    return error;
+
+  Exit:
+    if ( error )
+      tt_size_done_bytecode( ftsize );
+
+    return error;
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_ready_bytecode( TT_Size  size,
+                          FT_Bool  pedantic )
+  {
+    FT_Error  error = FT_Err_Ok;
+
+
+    if ( size->bytecode_ready < 0 )
+      error = tt_size_init_bytecode( (FT_Size)size, pedantic );
+
+    if ( error || size->bytecode_ready )
+      goto Exit;
+
+    /* rescale CVT when needed */
+    if ( size->cvt_ready < 0 )
+    {
+      FT_UInt  i;
+      TT_Face  face = (TT_Face)size->root.face;
+
+
+      /* Scale the cvt values to the new ppem.          */
+      /* We use by default the y ppem to scale the CVT. */
+      for ( i = 0; i < size->cvt_size; i++ )
+        size->cvt[i] = FT_MulFix( face->cvt[i], size->ttmetrics.scale );
+
+      /* all twilight points are originally zero */
+      for ( i = 0; i < (FT_UInt)size->twilight.n_points; i++ )
+      {
+        size->twilight.org[i].x = 0;
+        size->twilight.org[i].y = 0;
+        size->twilight.cur[i].x = 0;
+        size->twilight.cur[i].y = 0;
+      }
+
+      /* clear storage area */
+      for ( i = 0; i < (FT_UInt)size->storage_size; i++ )
+        size->storage[i] = 0;
+
+      size->GS = tt_default_graphics_state;
+
+      error = tt_size_run_prep( size, pedantic );
+    }
+
+  Exit:
+    return error;
+  }
+
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_init                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Initialize a new TrueType size object.                             */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    size :: A handle to the size object.                               */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_init( FT_Size  ttsize )           /* TT_Size */
+  {
+    TT_Size   size  = (TT_Size)ttsize;
+    FT_Error  error = FT_Err_Ok;
+
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    size->bytecode_ready = -1;
+    size->cvt_ready      = -1;
+#endif
+
+    size->ttmetrics.valid = FALSE;
+    size->strike_index    = 0xFFFFFFFFUL;
+
+    return error;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_done                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The TrueType size object finalizer.                                */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    size :: A handle to the target size object.                        */
+  /*                                                                       */
+  FT_LOCAL_DEF( void )
+  tt_size_done( FT_Size  ttsize )           /* TT_Size */
+  {
+    TT_Size  size = (TT_Size)ttsize;
+
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    tt_size_done_bytecode( ttsize );
+#endif
+
+    size->ttmetrics.valid = FALSE;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_reset                                                      */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Reset a TrueType size when resolutions and character dimensions    */
+  /*    have been changed.                                                 */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    size :: A handle to the target size object.                        */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_reset( TT_Size  size )
+  {
+    TT_Face           face;
+    FT_Error          error = FT_Err_Ok;
+    FT_Size_Metrics*  metrics;
+
+
+    size->ttmetrics.valid = FALSE;
+
+    face = (TT_Face)size->root.face;
+
+    metrics = &size->metrics;
+
+    /* copy the result from base layer */
+    *metrics = size->root.metrics;
+
+    if ( metrics->x_ppem < 1 || metrics->y_ppem < 1 )
+      return FT_THROW( Invalid_PPem );
+
+    /* This bit flag, if set, indicates that the ppems must be       */
+    /* rounded to integers.  Nearly all TrueType fonts have this bit */
+    /* set, as hinting won't work really well otherwise.             */
+    /*                                                               */
+    if ( face->header.Flags & 8 )
+    {
+      metrics->x_scale = FT_DivFix( metrics->x_ppem << 6,
+                                    face->root.units_per_EM );
+      metrics->y_scale = FT_DivFix( metrics->y_ppem << 6,
+                                    face->root.units_per_EM );
+
+      metrics->ascender =
+        FT_PIX_ROUND( FT_MulFix( face->root.ascender, metrics->y_scale ) );
+      metrics->descender =
+        FT_PIX_ROUND( FT_MulFix( face->root.descender, metrics->y_scale ) );
+      metrics->height =
+        FT_PIX_ROUND( FT_MulFix( face->root.height, metrics->y_scale ) );
+      metrics->max_advance =
+        FT_PIX_ROUND( FT_MulFix( face->root.max_advance_width,
+                                 metrics->x_scale ) );
+    }
+
+    /* compute new transformation */
+    if ( metrics->x_ppem >= metrics->y_ppem )
+    {
+      size->ttmetrics.scale   = metrics->x_scale;
+      size->ttmetrics.ppem    = metrics->x_ppem;
+      size->ttmetrics.x_ratio = 0x10000L;
+      size->ttmetrics.y_ratio = FT_DivFix( metrics->y_ppem,
+                                           metrics->x_ppem );
+    }
+    else
+    {
+      size->ttmetrics.scale   = metrics->y_scale;
+      size->ttmetrics.ppem    = metrics->y_ppem;
+      size->ttmetrics.x_ratio = FT_DivFix( metrics->x_ppem,
+                                           metrics->y_ppem );
+      size->ttmetrics.y_ratio = 0x10000L;
+    }
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    size->cvt_ready = -1;
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+
+    if ( !error )
+      size->ttmetrics.valid = TRUE;
+
+    return error;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_driver_init                                                     */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Initialize a given TrueType driver object.                         */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    driver :: A handle to the target driver object.                    */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_driver_init( FT_Module  ttdriver )     /* TT_Driver */
+  {
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+
+    TT_Driver  driver = (TT_Driver)ttdriver;
+
+    driver->interpreter_version = TT_INTERPRETER_VERSION_35;
+#ifdef TT_SUPPORT_SUBPIXEL_HINTING_INFINALITY
+    driver->interpreter_version = TT_INTERPRETER_VERSION_38;
+#endif
+#ifdef TT_SUPPORT_SUBPIXEL_HINTING_MINIMAL
+    driver->interpreter_version = TT_INTERPRETER_VERSION_40;
+#endif
+
+#else /* !TT_USE_BYTECODE_INTERPRETER */
+
+    FT_UNUSED( ttdriver );
+
+#endif /* !TT_USE_BYTECODE_INTERPRETER */
+
+    return FT_Err_Ok;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_driver_done                                                     */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Finalize a given TrueType driver.                                  */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    driver :: A handle to the target TrueType driver.                  */
+  /*                                                                       */
+  FT_LOCAL_DEF( void )
+  tt_driver_done( FT_Module  ttdriver )     /* TT_Driver */
+  {
+    FT_UNUSED( ttdriver );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_slot_init                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Initialize a new slot object.                                      */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    slot :: A handle to the slot object.                               */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_slot_init( FT_GlyphSlot  slot )
+  {
+    return FT_GlyphLoader_CreateExtra( slot->internal->loader );
+  }
+
+
+/* END */
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 by */
+d24 1
+a34 4
+#ifdef TT_CONFIG_OPTION_UNPATENTED_HINTING
+#include FT_TRUETYPE_UNPATENTED_H
+#endif
+
+d120 1
+a120 1
+    FT_MEM_ZERO( zone, sizeof ( *zone ) );
+d146 1
+a146 1
+  tt_check_trickyness( FT_String*  name )
+d148 6
+a153 3
+#define TRICK_NAMES_MAX_CHARACTERS  16
+#define TRICK_NAMES_COUNT 7
+    static const char trick_names[TRICK_NAMES_COUNT][TRICK_NAMES_MAX_CHARACTERS+1] =
+d155 1
+a155 1
+      "DFKaiSho-SB",     /* dfkaisb.ttf */
+d157 7
+a163 5
+      "DFKai-SB",        /* kaiu.ttf */
+      "HuaTianSongTi?",  /* htst3.ttf */
+      "MingLiU",         /* mingliu.ttf & mingliu.ttc */
+      "PMingLiU",        /* mingliu.ttc */
+      "MingLi43",        /* mingli.ttf */
+d165 1
+a168 5
+    if ( !name )
+      return FALSE;
+
+    /* Note that we only check the face name at the moment; it might */
+    /* be worth to do more checks for a few special cases.           */
+d177 306
+d494 4
+a497 1
+  /*    face_index :: The index of the font face in the resource.          */
+d522 2
+d525 2
+a526 1
+    sfnt    = (SFNT_Service)FT_Get_Module_Interface( library, "sfnt" );
+d528 5
+a532 1
+      goto Bad_Format;
+d540 4
+d554 1
+a554 1
+      FT_TRACE2(( "[not a valid TTF font]\n" ));
+d564 1
+a564 1
+      return TT_Err_Ok;
+d571 1
+a571 1
+    if ( tt_check_trickyness( ttface->family_name ) )
+a579 1
+
+a580 1
+
+d582 2
+a584 6
+      if ( !error )
+        error = tt_face_load_cvt( face, stream );
+      if ( !error )
+        error = tt_face_load_fpgm( face, stream );
+      if ( !error )
+        error = tt_face_load_prep( face, stream );
+d586 12
+a597 1
+#else
+d599 7
+a605 8
+      if ( !error )
+        error = tt_face_load_loca( face, stream );
+      if ( !error )
+        error = tt_face_load_cvt( face, stream );
+      if ( !error )
+        error = tt_face_load_fpgm( face, stream );
+      if ( !error )
+        error = tt_face_load_prep( face, stream );
+d607 3
+d611 9
+d621 3
+d626 1
+a626 2
+#if defined( TT_CONFIG_OPTION_UNPATENTED_HINTING    ) && \
+    !defined( TT_CONFIG_OPTION_BYTECODE_INTERPRETER )
+d629 1
+a629 2
+      FT_Bool  unpatented_hinting;
+      int      i;
+d632 36
+a667 10
+      /* Determine whether unpatented hinting is to be used for this face. */
+      unpatented_hinting = FT_BOOL
+        ( library->debug_hooks[FT_DEBUG_HOOK_UNPATENTED_HINTING] != NULL );
+
+      for ( i = 0; i < num_params && !face->unpatented_hinting; i++ )
+        if ( params[i].tag == FT_PARAM_TAG_UNPATENTED_HINTING )
+          unpatented_hinting = TRUE;
+
+      if ( !unpatented_hinting )
+        ttface->internal->ignore_unpatented_hinter = TRUE;
+d670 1
+a670 2
+#endif /* TT_CONFIG_OPTION_UNPATENTED_HINTING &&
+          !TT_CONFIG_OPTION_BYTECODE_INTERPRETER */
+d679 1
+a679 1
+    error = TT_Err_Unknown_File_Format;
+d734 1
+a734 1
+    tt_done_blend( memory, face->blend );
+d757 3
+a759 1
+  /*    size :: A handle to the size object.                               */
+d765 2
+a766 1
+  tt_size_run_fpgm( TT_Size  size )
+d773 1
+a773 5
+    /* debugging instances have their own context */
+    if ( size->debug )
+      exec = size->context;
+    else
+      exec = ( (TT_Driver)FT_FACE_DRIVER( face ) )->context;
+d775 3
+a777 2
+    if ( !exec )
+      return TT_Err_Could_Not_Find_Context;
+d779 2
+a780 4
+    TT_Load_Context( exec, face, size );
+
+    exec->callTop   = 0;
+    exec->top       = 0;
+d787 3
+a789 1
+    exec->F_dot_P = 0x10000L;
+d810 1
+a810 1
+                      face->font_program_size );
+d818 1
+a818 1
+      error = TT_Goto_CodeRange( exec, tt_coderange_font, 0 );
+d820 2
+a821 2
+      if ( !error )
+        error = face->interpreter( exec );
+d824 3
+a826 1
+      error = TT_Err_Ok;
+d844 3
+a846 1
+  /*    size :: A handle to the size object.                               */
+d852 2
+a853 1
+  tt_size_run_prep( TT_Size  size )
+d860 1
+a860 5
+    /* debugging instances have their own context */
+    if ( size->debug )
+      exec = size->context;
+    else
+      exec = ( (TT_Driver)FT_FACE_DRIVER( face ) )->context;
+d862 3
+a864 4
+    if ( !exec )
+      return TT_Err_Could_Not_Find_Context;
+
+    TT_Load_Context( exec, face, size );
+d871 2
+d876 1
+a876 1
+                      face->cvt_program_size );
+d882 3
+a884 1
+      error = TT_Goto_CodeRange( exec, tt_coderange_cvt, 0 );
+d886 1
+a886 2
+      if ( !error && !size->debug )
+        error = face->interpreter( exec );
+d889 23
+a911 1
+      error = TT_Err_Ok;
+a920 4
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+d929 1
+a929 2
+
+    if ( size->debug )
+d931 1
+a931 1
+      /* the debug context must be deleted by the debugger itself */
+a932 1
+      size->debug   = FALSE;
+d956 2
+a957 2
+    size->bytecode_ready = 0;
+    size->cvt_ready      = 0;
+d964 2
+a965 1
+  tt_size_init_bytecode( FT_Size  ftsize )
+a970 1
+    FT_Int     i;
+d976 14
+a989 2
+    size->bytecode_ready = 1;
+    size->cvt_ready      = 0;
+d1011 5
+a1015 3
+      /* set default compensation (all 0) */
+      for ( i = 0; i < 4; i++ )
+        metrics->compensations[i] = 0;
+d1051 9
+a1059 1
+    error = tt_size_run_fpgm( size );
+d1070 2
+a1071 1
+  tt_size_ready_bytecode( TT_Size  size )
+d1073 1
+a1073 1
+    FT_Error  error = TT_Err_Ok;
+d1076 5
+a1080 6
+    if ( !size->bytecode_ready )
+    {
+      error = tt_size_init_bytecode( (FT_Size)size );
+      if ( error )
+        goto Exit;
+    }
+d1083 1
+a1083 1
+    if ( !size->cvt_ready )
+d1109 1
+a1109 3
+      error = tt_size_run_prep( size );
+      if ( !error )
+        size->cvt_ready = 1;
+d1137 2
+a1138 1
+    FT_Error  error = TT_Err_Ok;
+d1141 2
+a1142 2
+    size->bytecode_ready = 0;
+    size->cvt_ready      = 0;
+d1170 1
+a1170 2
+    if ( size->bytecode_ready )
+      tt_size_done_bytecode( ttsize );
+d1193 1
+a1193 1
+    FT_Error          error = TT_Err_Ok;
+d1207 1
+a1207 1
+      return TT_Err_Invalid_PPem;
+d1237 1
+a1237 2
+      size->ttmetrics.y_ratio = FT_MulDiv( metrics->y_ppem,
+                                           0x10000L,
+d1244 1
+a1244 2
+      size->ttmetrics.x_ratio = FT_MulDiv( metrics->x_ppem,
+                                           0x10000L,
+d1250 1
+a1250 1
+    size->cvt_ready = 0;
+d1282 7
+d1290 1
+a1290 4
+    if ( !TT_New_Context( driver ) )
+      return TT_Err_Could_Not_Find_Context;
+
+#else
+d1294 1
+a1294 1
+#endif
+d1296 1
+a1296 1
+    return TT_Err_Ok;
+a1313 11
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    TT_Driver  driver = (TT_Driver)ttdriver;
+
+
+    /* destroy the execution context */
+    if ( driver->context )
+    {
+      TT_Done_Context( driver->context );
+      driver->context = NULL;
+    }
+#else
+a1314 2
+#endif
+
+@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006, 2007 by             */
+a20 1
+#include FT_INTERNAL_CALC_H
+a21 1
+#include FT_TRUETYPE_IDS_H
+d145 34
+d215 1
+a215 1
+    library = face->root.driver->root.library;
+d241 1
+a241 1
+    face->root.face_flags |= FT_FACE_FLAG_HINTER;
+d253 3
+d260 1
+a260 1
+    if ( face->root.face_flags & FT_FACE_FLAG_SCALABLE )
+d265 1
+a265 1
+      if ( !face->root.internal->incremental_interface )
+a304 2
+      /* Compare the face with a list of well-known `tricky' fonts. */
+      /* This list shall be expanded as we find more of them.       */
+d306 1
+a306 29
+      {
+        static const char* const  trick_names[] =
+        {
+          "DFKaiSho-SB",     /* dfkaisb.ttf */
+          "DFKai-SB",        /* kaiu.ttf */
+          "HuaTianSongTi?",  /* htst3.ttf */
+          "MingLiU",         /* mingliu.ttf & mingliu.ttc */
+          "PMingLiU",        /* mingliu.ttc */
+          "MingLi43",        /* mingli.ttf */
+          NULL
+        };
+        int  nn;
+
+
+        /* Note that we only check the face name at the moment; it might */
+        /* be worth to do more checks for a few special cases.           */
+        for ( nn = 0; trick_names[nn] != NULL; nn++ )
+        {
+          if ( ttface->family_name                               &&
+               ft_strstr( ttface->family_name, trick_names[nn] ) )
+          {
+            unpatented_hinting = 1;
+            break;
+          }
+        }
+      }
+
+      ttface->internal->ignore_unpatented_hinter =
+        FT_BOOL( !unpatented_hinting );
+d338 5
+a342 3
+    TT_Face       face   = (TT_Face)ttface;
+    FT_Memory     memory = face->root.memory;
+    FT_Stream     stream = face->root.stream;
+d344 2
+a345 1
+    SFNT_Service  sfnt   = (SFNT_Service)face->sfnt;
+d347 3
+d614 1
+a614 2
+      FT_Size_Metrics*  metrics  = &size->metrics;
+      TT_Size_Metrics*  metrics2 = &size->ttmetrics;
+a615 2
+      metrics->x_ppem = 0;
+      metrics->y_ppem = 0;
+d617 2
+a618 2
+      metrics2->rotated   = FALSE;
+      metrics2->stretched = FALSE;
+d622 1
+a622 1
+        metrics2->compensations[i] = 0;
+d685 1
+a685 1
+      TT_Face  face = (TT_Face) size->root.face;
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d233 5
+a237 3
+        error = tt_face_load_cvt( face, stream )  ||
+                tt_face_load_fpgm( face, stream ) ||
+                tt_face_load_prep( face, stream );
+d242 7
+a248 4
+        error = tt_face_load_loca( face, stream ) ||
+                tt_face_load_cvt( face, stream )  ||
+                tt_face_load_fpgm( face, stream ) ||
+                tt_face_load_prep( face, stream );
+d702 1
+a702 1
+          size->cvt_ready = 1;
+d704 1
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006 by                   */
+d32 1
+a32 1
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+d54 1
+a54 1
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+d86 1
+d130 1
+d144 1
+a144 1
+#endif /* TT_CONFIG_OPTION_BYTECODE_INTERPRETER */
+d208 1
+a208 1
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+d249 2
+a250 1
+#ifdef TT_CONFIG_OPTION_UNPATENTED_HINTING
+d252 3
+a254 3
+    /* Determine whether unpatented hinting is to be used for this face. */
+    face->unpatented_hinting = FT_BOOL
+       ( library->debug_hooks[ FT_DEBUG_HOOK_UNPATENTED_HINTING ] != NULL );
+a255 2
+    {
+      int  i;
+d257 3
+d263 34
+a296 1
+          face->unpatented_hinting = TRUE;
+d299 2
+a300 1
+#endif /* TT_CONFIG_OPTION_UNPATENTED_HINTING */
+d370 1
+a370 1
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+d520 1
+a520 1
+#endif /* TT_CONFIG_OPTION_BYTECODE_INTERPRETER */
+d523 4
+a526 16
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_init                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Initialize a new TrueType size object.                             */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    size :: A handle to the size object.                               */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_init( FT_Size  ttsize )           /* TT_Size */
+d528 36
+a563 2
+    TT_Size   size  = (TT_Size)ttsize;
+    FT_Error  error = TT_Err_Ok;
+a564 1
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+d566 8
+a573 1
+    TT_Face    face   = (TT_Face)size->root.face;
+d581 3
+d598 1
+a598 1
+      FT_Size_Metrics*  metrics  = &size->root.metrics;
+a600 1
+
+d617 1
+a617 5
+    {
+      tt_size_done( ttsize );
+
+      return error;
+    }
+d627 1
+a627 5
+    {
+      tt_size_done( ttsize );
+
+      return error;
+    }
+d647 1
+d649 4
+a652 1
+      tt_size_done( ttsize );
+d654 76
+a729 1
+#endif /* TT_CONFIG_OPTION_BYTECODE_INTERPRETER */
+d752 1
+a752 13
+    TT_Size    size = (TT_Size)ttsize;
+
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+
+    FT_Memory  memory = size->root.face->memory;
+
+
+    if ( size->debug )
+    {
+      /* the debug context must be deleted by the debugger itself */
+      size->context = NULL;
+      size->debug   = FALSE;
+    }
+a753 20
+    FT_FREE( size->cvt );
+    size->cvt_size = 0;
+
+    /* free storage area */
+    FT_FREE( size->storage );
+    size->storage_size = 0;
+
+    /* twilight zone */
+    tt_glyphzone_done( &size->twilight );
+
+    FT_FREE( size->function_defs );
+    FT_FREE( size->instruction_defs );
+
+    size->num_function_defs    = 0;
+    size->max_function_defs    = 0;
+    size->num_instruction_defs = 0;
+    size->max_instruction_defs = 0;
+
+    size->max_func = 0;
+    size->max_ins  = 0;
+d755 3
+d838 3
+a840 31
+
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+
+    {
+      FT_UInt  i;
+
+
+      /* Scale the cvt values to the new ppem.          */
+      /* We use by default the y ppem to scale the CVT. */
+      for ( i = 0; i < size->cvt_size; i++ )
+        size->cvt[i] = FT_MulFix( face->cvt[i], size->ttmetrics.scale );
+
+      /* All twilight points are originally zero */
+      for ( i = 0; i < (FT_UInt)size->twilight.n_points; i++ )
+      {
+        size->twilight.org[i].x = 0;
+        size->twilight.org[i].y = 0;
+        size->twilight.cur[i].x = 0;
+        size->twilight.cur[i].y = 0;
+      }
+
+      /* clear storage area */
+      for ( i = 0; i < (FT_UInt)size->storage_size; i++ )
+        size->storage[i] = 0;
+
+      size->GS = tt_default_graphics_state;
+
+      error = tt_size_run_prep( size );
+    }
+
+#endif /* TT_CONFIG_OPTION_BYTECODE_INTERPRETER */
+d867 1
+a867 1
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+d899 1
+a899 1
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003 by                                     */
+d40 4
+d69 1
+a69 1
+  /*    Deallocates a glyph zone.                                          */
+d100 1
+a100 1
+  /*    Allocates a new glyph zone.                                        */
+a123 3
+    if ( maxPoints > 0 )
+      maxPoints += 2;
+
+d127 4
+a130 4
+    if ( FT_NEW_ARRAY( zone->org,      maxPoints * 2 ) ||
+         FT_NEW_ARRAY( zone->cur,      maxPoints * 2 ) ||
+         FT_NEW_ARRAY( zone->tags,     maxPoints     ) ||
+         FT_NEW_ARRAY( zone->contours, maxContours   ) )
+d134 5
+d151 1
+a151 1
+  /*    Initializes a given TrueType face object.                          */
+d170 1
+a170 1
+                TT_Face        face,
+d178 1
+d195 3
+a197 1
+    /* We must also be able to accept Mac/GX fonts, as well as OT ones */
+d199 1
+d206 5
+a210 1
+    /* If we are performing a simple font format check, exit immediately */
+d219 4
+d231 3
+a233 2
+        error = tt_face_load_cvt( face, stream ) ||
+                tt_face_load_fpgm( face, stream );
+d240 2
+a241 1
+                tt_face_load_fpgm( face, stream );
+d282 1
+a282 1
+  /*    Finalizes a given face object.                                     */
+d288 1
+a288 1
+  tt_face_done( TT_Face  face )
+d290 1
+d305 3
+a307 2
+    FT_FREE( face->glyph_locations );
+    face->num_locations = 0;
+d318 5
+d332 152
+d491 1
+a491 1
+  /*    Initializes a new TrueType size object.                            */
+d500 1
+a500 1
+  tt_size_init( TT_Size  size )
+d502 1
+a504 1
+
+a510 1
+    TT_ExecContext  exec;
+a514 2
+    size->ttmetrics.valid = FALSE;
+
+d549 2
+d552 2
+a553 1
+      goto Fail_Memory;
+d557 4
+d563 5
+a567 1
+      goto Fail_Memory;
+d571 2
+d584 2
+a585 5
+    /* Fine, now execute the font program! */
+    exec = size->context;
+    /* size objects used during debugging have their own context */
+    if ( !size->debug )
+      exec = TT_New_Context( face );
+d587 2
+a588 64
+    if ( !exec )
+    {
+      error = TT_Err_Could_Not_Find_Context;
+      goto Fail_Memory;
+    }
+
+    size->GS = tt_default_graphics_state;
+    TT_Load_Context( exec, face, size );
+
+    exec->callTop   = 0;
+    exec->top       = 0;
+
+    exec->period    = 64;
+    exec->phase     = 0;
+    exec->threshold = 0;
+
+    {
+      FT_Size_Metrics*  metrics    = &exec->metrics;
+      TT_Size_Metrics*  tt_metrics = &exec->tt_metrics;
+
+
+      metrics->x_ppem   = 0;
+      metrics->y_ppem   = 0;
+      metrics->x_scale  = 0;
+      metrics->y_scale  = 0;
+
+      tt_metrics->ppem  = 0;
+      tt_metrics->scale = 0;
+      tt_metrics->ratio = 0x10000L;
+    }
+
+    exec->instruction_trap = FALSE;
+
+    exec->cvtSize = size->cvt_size;
+    exec->cvt     = size->cvt;
+
+    exec->F_dot_P = 0x10000L;
+
+    /* allow font program execution */
+    TT_Set_CodeRange( exec,
+                      tt_coderange_font,
+                      face->font_program,
+                      face->font_program_size );
+
+    /* disable CVT and glyph programs coderange */
+    TT_Clear_CodeRange( exec, tt_coderange_cvt );
+    TT_Clear_CodeRange( exec, tt_coderange_glyph );
+
+    if ( face->font_program_size > 0 )
+    {
+      error = TT_Goto_CodeRange( exec, tt_coderange_font, 0 );
+      if ( !error )
+        error = face->interpreter( exec );
+
+      if ( error )
+        goto Fail_Exec;
+    }
+    else
+      error = TT_Err_Ok;
+
+    TT_Save_Context( exec, size );
+
+    if ( !size->debug )
+      TT_Done_Context( exec );
+d593 1
+a593 3
+    return error;
+
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+a594 7
+  Fail_Exec:
+    if ( !size->debug )
+      TT_Done_Context( exec );
+
+  Fail_Memory:
+
+    tt_size_done( size );
+a595 3
+
+#endif /* TT_CONFIG_OPTION_BYTECODE_INTERPRETER */
+
+d611 1
+a611 1
+  tt_size_done( TT_Size  size )
+d613 1
+d657 1
+a657 1
+  /*    Reset_Outline_Size                                                 */
+d660 2
+a661 2
+  /*    Resets a TrueType outline size when resolutions and character      */
+  /*    dimensions have been changed.                                      */
+d666 2
+a667 2
+  static FT_Error
+  Reset_Outline_Size( TT_Size  size )
+a670 1
+
+d674 1
+a674 2
+    if ( size->ttmetrics.valid )
+      return TT_Err_Ok;
+d680 3
+d686 22
+a727 16
+    /* Compute root ascender, descender, text height, and max_advance */
+    metrics->ascender =
+      FT_PIX_ROUND( FT_MulFix( face->root.ascender, metrics->y_scale ) );
+    metrics->descender =
+      FT_PIX_ROUND( FT_MulFix( face->root.descender, metrics->y_scale ) );
+    metrics->height =
+      FT_PIX_ROUND( FT_MulFix( face->root.height, metrics->y_scale ) );
+    metrics->max_advance =
+      FT_PIX_ROUND( FT_MulFix( face->root.max_advance_width,
+                               metrics->x_scale ) );
+
+
+#ifdef TT_CONFIG_OPTION_EMBEDDED_BITMAPS
+    /* set to `invalid' by default */
+    size->strike_index = 0xFFFFU;
+#endif
+d732 1
+a732 2
+      TT_ExecContext  exec;
+      FT_UInt         i, j;
+d741 1
+a741 1
+      for ( j = 0; j < (FT_UInt)size->twilight.n_points; j++ )
+d743 4
+a746 4
+        size->twilight.org[j].x = 0;
+        size->twilight.org[j].y = 0;
+        size->twilight.cur[j].x = 0;
+        size->twilight.cur[j].y = 0;
+d755 1
+a755 45
+      /* get execution context and run prep program */
+      if ( size->debug )
+        exec = size->context;
+      else
+        exec = TT_New_Context( face );
+      /* debugging instances have their own context */
+
+      if ( !exec )
+        return TT_Err_Could_Not_Find_Context;
+
+      TT_Load_Context( exec, face, size );
+
+      TT_Set_CodeRange( exec,
+                        tt_coderange_cvt,
+                        face->cvt_program,
+                        face->cvt_program_size );
+
+      TT_Clear_CodeRange( exec, tt_coderange_glyph );
+
+      exec->instruction_trap = FALSE;
+
+      exec->top     = 0;
+      exec->callTop = 0;
+
+      if ( face->cvt_program_size > 0 )
+      {
+        error = TT_Goto_CodeRange( exec, tt_coderange_cvt, 0 );
+        if ( error )
+          goto End;
+
+        if ( !size->debug )
+          error = face->interpreter( exec );
+      }
+      else
+        error = TT_Err_Ok;
+
+      size->GS = exec->GS;
+      /* save default graphics state */
+
+    End:
+      TT_Save_Context( exec, size );
+
+      if ( !size->debug )
+        TT_Done_Context( exec );
+      /* debugging instances keep their context */
+a766 2
+#ifdef TT_CONFIG_OPTION_EMBEDDED_BITMAPS
+
+d770 1
+a770 1
+  /*    Reset_SBit_Size                                                    */
+d773 1
+a773 2
+  /*    Resets a TrueType sbit size when resolutions and character         */
+  /*    dimensions have been changed.                                      */
+d776 4
+a779 1
+  /*    size :: A handle to the target size object.                        */
+d781 2
+a782 2
+  static FT_Error
+  Reset_SBit_Size( TT_Size  size )
+a783 2
+    TT_Face           face;
+    FT_Error          error = TT_Err_Ok;
+d785 1
+a785 4
+    FT_ULong          strike_index;
+    FT_Size_Metrics*  metrics;
+    FT_Size_Metrics*  sbit_metrics;
+    SFNT_Service      sfnt;
+d787 1
+a788 1
+    metrics = &size->metrics;
+d790 2
+a791 2
+    if ( size->strike_index != 0xFFFFU )
+      return TT_Err_Ok;
+d793 1
+a793 2
+    face = (TT_Face)size->root.face;
+    sfnt = (SFNT_Service)face->sfnt;
+d795 1
+a795 1
+    sbit_metrics = &size->strike_metrics;
+a796 18
+    error = sfnt->set_sbit_strike( face,
+                                   metrics->x_ppem, metrics->y_ppem,
+                                   &strike_index );
+
+    if ( !error )
+    {
+      TT_SBit_Strike  strike = face->sbit_strikes + strike_index;
+
+
+      sbit_metrics->x_ppem = metrics->x_ppem;
+      sbit_metrics->y_ppem = metrics->y_ppem;
+#if 0
+      /*
+       * sbit_metrics->?_scale
+       * are not used now.
+       */
+      sbit_metrics->x_scale = 1 << 16;
+      sbit_metrics->y_scale = 1 << 16;
+d799 1
+a799 27
+      sbit_metrics->ascender  = strike->hori.ascender << 6;
+      sbit_metrics->descender = strike->hori.descender << 6;
+
+      /* XXX: Is this correct? */
+      sbit_metrics->height = sbit_metrics->ascender -
+                             sbit_metrics->descender;
+
+      /* XXX: Is this correct? */
+      sbit_metrics->max_advance = ( strike->hori.min_origin_SB  +
+                                    strike->hori.max_width      +
+                                    strike->hori.min_advance_SB ) << 6;
+
+      size->strike_index = (FT_UInt)strike_index;
+    }
+    else
+    {
+      size->strike_index = 0xFFFFU;
+
+      sbit_metrics->x_ppem      = 0;
+      sbit_metrics->y_ppem      = 0;
+      sbit_metrics->ascender    = 0;
+      sbit_metrics->descender   = 0;
+      sbit_metrics->height      = 0;
+      sbit_metrics->max_advance = 0;
+    }
+
+    return error;
+a801 2
+#endif /* TT_CONFIG_OPTION_EMBEDDED_BITMAPS */
+
+d806 1
+a806 1
+  /*    tt_size_reset                                                      */
+d809 1
+a809 2
+  /*    Resets a TrueType size when resolutions and character dimensions   */
+  /*    have been changed.                                                 */
+d812 1
+a812 1
+  /*    size :: A handle to the target size object.                        */
+d814 2
+a815 2
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_reset( TT_Size  size )
+d817 2
+a818 2
+    FT_Face   face;
+    FT_Error  error = TT_Err_Ok;
+d821 2
+a822 3
+    face = size->root.face;
+
+    if ( face->face_flags & FT_FACE_FLAG_SCALABLE )
+d824 2
+a825 5
+      if ( !size->ttmetrics.valid )
+        error = Reset_Outline_Size( size );
+
+      if ( error )
+        return error;
+d827 3
+a830 17
+#ifdef TT_CONFIG_OPTION_EMBEDDED_BITMAPS
+
+    if ( face->face_flags & FT_FACE_FLAG_FIXED_SIZES )
+    {
+      if ( size->strike_index == 0xFFFFU )
+        error = Reset_SBit_Size( size );
+
+      if ( !error && !( face->face_flags & FT_FACE_FLAG_SCALABLE ) )
+        size->root.metrics = size->strike_metrics;
+    }
+
+#endif /* TT_CONFIG_OPTION_EMBEDDED_BITMAPS */
+
+    if ( face->face_flags & FT_FACE_FLAG_SCALABLE )
+      return TT_Err_Ok;
+    else
+      return error;
+d837 1
+a837 1
+  /*    tt_driver_init                                                     */
+d840 1
+a840 1
+  /*    Initializes a given TrueType driver object.                        */
+d842 2
+a843 2
+  /* <Input>                                                               */
+  /*    driver :: A handle to the target driver object.                    */
+d849 1
+a849 25
+  tt_driver_init( TT_Driver  driver )
+  {
+    FT_Error  error;
+
+
+    /* set `extra' in glyph loader */
+    error = FT_GlyphLoader_CreateExtra( FT_DRIVER( driver )->glyph_loader );
+
+    return error;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_driver_done                                                     */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Finalizes a given TrueType driver.                                 */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    driver :: A handle to the target TrueType driver.                  */
+  /*                                                                       */
+  FT_LOCAL_DEF( void )
+  tt_driver_done( TT_Driver  driver )
+d851 1
+a851 12
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+
+    /* destroy the execution context */
+    if ( driver->context )
+    {
+      TT_Destroy_Context( driver->context, driver->root.root.memory );
+      driver->context = NULL;
+    }
+#else
+    FT_UNUSED( driver );
+#endif
+
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006, 2007 by             */
+d32 1
+a32 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+a39 4
+#ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
+#include "ttgxvar.h"
+#endif
+
+d50 1
+a50 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+d65 1
+a65 1
+  /*    Deallocate a glyph zone.                                           */
+a81 1
+      FT_FREE( zone->orus );
+d96 1
+a96 1
+  /*    Allocate a new glyph zone.                                         */
+d120 3
+d126 4
+a129 5
+    if ( FT_NEW_ARRAY( zone->org,      maxPoints   ) ||
+         FT_NEW_ARRAY( zone->cur,      maxPoints   ) ||
+         FT_NEW_ARRAY( zone->orus,     maxPoints   ) ||
+         FT_NEW_ARRAY( zone->tags,     maxPoints   ) ||
+         FT_NEW_ARRAY( zone->contours, maxContours ) )
+a132 5
+    else
+    {
+      zone->max_points   = maxPoints;
+      zone->max_contours = maxContours;
+    }
+d136 1
+a136 1
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+d145 1
+a145 1
+  /*    Initialize a given TrueType face object.                           */
+d164 1
+a164 1
+                FT_Face        ttface,      /* TT_Face */
+a171 1
+    TT_Face       face = (TT_Face)ttface;
+d188 1
+a188 3
+    /* We must also be able to accept Mac/GX fonts, as well as OT ones. */
+    /* The 0x00020000 tag is completely undocumented; some fonts from   */
+    /* Arphic made for Chinese Windows 3.1 have this.                   */
+a189 1
+         face->format_tag != 0x00020000L &&    /* CJK fonts for Win 3.1 */
+d196 1
+a196 5
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    face->root.face_flags |= FT_FACE_FLAG_HINTER;
+#endif
+
+    /* If we are performing a simple font format check, exit immediately. */
+a204 4
+    error = tt_face_load_hdmx( face, stream );
+    if ( error )
+      goto Exit;
+
+d213 2
+a214 3
+        error = tt_face_load_cvt( face, stream )  ||
+                tt_face_load_fpgm( face, stream ) ||
+                tt_face_load_prep( face, stream );
+d221 1
+a221 2
+                tt_face_load_fpgm( face, stream ) ||
+                tt_face_load_prep( face, stream );
+d227 5
+a231 2
+#if defined( TT_CONFIG_OPTION_UNPATENTED_HINTING    ) && \
+    !defined( TT_CONFIG_OPTION_BYTECODE_INTERPRETER )
+d234 1
+a234 2
+      FT_Bool  unpatented_hinting;
+      int      i;
+a236 4
+      /* Determine whether unpatented hinting is to be used for this face. */
+      unpatented_hinting = FT_BOOL
+        ( library->debug_hooks[FT_DEBUG_HOOK_UNPATENTED_HINTING] != NULL );
+
+d239 1
+a239 34
+          unpatented_hinting = TRUE;
+
+      /* Compare the face with a list of well-known `tricky' fonts. */
+      /* This list shall be expanded as we find more of them.       */
+      if ( !unpatented_hinting )
+      {
+        static const char* const  trick_names[] =
+        {
+          "DFKaiSho-SB",     /* dfkaisb.ttf */
+          "DFKai-SB",        /* kaiu.ttf */
+          "HuaTianSongTi?",  /* htst3.ttf */
+          "MingLiU",         /* mingliu.ttf & mingliu.ttc */
+          "PMingLiU",        /* mingliu.ttc */
+          "MingLi43",        /* mingli.ttf */
+          NULL
+        };
+        int  nn;
+
+
+        /* Note that we only check the face name at the moment; it might */
+        /* be worth to do more checks for a few special cases.           */
+        for ( nn = 0; trick_names[nn] != NULL; nn++ )
+        {
+          if ( ttface->family_name                               &&
+               ft_strstr( ttface->family_name, trick_names[nn] ) )
+          {
+            unpatented_hinting = 1;
+            break;
+          }
+        }
+      }
+
+      ttface->internal->ignore_unpatented_hinter =
+        FT_BOOL( !unpatented_hinting );
+d242 1
+a242 2
+#endif /* TT_CONFIG_OPTION_UNPATENTED_HINTING &&
+          !TT_CONFIG_OPTION_BYTECODE_INTERPRETER */
+d262 1
+a262 1
+  /*    Finalize a given face object.                                      */
+d268 1
+a268 1
+  tt_face_done( FT_Face  ttface )           /* TT_Face */
+a269 1
+    TT_Face       face   = (TT_Face)ttface;
+d284 2
+a285 3
+    tt_face_done_loca( face );
+
+    tt_face_free_hdmx( face );
+a295 5
+
+#ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
+    tt_done_blend( memory, face->blend );
+    face->blend = NULL;
+#endif
+a304 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+d309 1
+a309 1
+  /*    tt_size_run_fpgm                                                   */
+d312 1
+a312 1
+  /*    Run the font program.                                              */
+d314 1
+a314 1
+  /* <Input>                                                               */
+d321 1
+a321 1
+  tt_size_run_fpgm( TT_Size  size )
+d323 9
+a331 1
+    TT_Face         face = (TT_Face)size->root.face;
+d333 5
+a337 1
+    FT_Error        error;
+d339 2
+d342 58
+a399 5
+    /* debugging instances have their own context */
+    if ( size->debug )
+      exec = size->context;
+    else
+      exec = ( (TT_Driver)FT_FACE_DRIVER( face ) )->context;
+d402 4
+a405 1
+      return TT_Err_Could_Not_Find_Context;
+d407 1
+a416 3
+    exec->instruction_trap = FALSE;
+    exec->F_dot_P = 0x10000L;
+
+d432 7
+a451 1
+
+d454 3
+d461 17
+a477 2
+    if ( !error )
+      TT_Save_Context( exec, size );
+d479 1
+d481 3
+d490 1
+a490 1
+  /*    tt_size_run_prep                                                   */
+d493 1
+a493 1
+  /*    Run the control value program.                                     */
+d496 1
+a496 1
+  /*    size :: A handle to the size object.                               */
+d498 2
+a499 5
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_run_prep( TT_Size  size )
+a500 3
+    TT_Face         face = (TT_Face)size->root.face;
+    TT_ExecContext  exec;
+    FT_Error        error;
+d502 1
+d504 1
+a504 52
+    /* debugging instances have their own context */
+    if ( size->debug )
+      exec = size->context;
+    else
+      exec = ( (TT_Driver)FT_FACE_DRIVER( face ) )->context;
+
+    if ( !exec )
+      return TT_Err_Could_Not_Find_Context;
+
+    TT_Load_Context( exec, face, size );
+
+    exec->callTop = 0;
+    exec->top     = 0;
+
+    exec->instruction_trap = FALSE;
+
+    TT_Set_CodeRange( exec,
+                      tt_coderange_cvt,
+                      face->cvt_program,
+                      face->cvt_program_size );
+
+    TT_Clear_CodeRange( exec, tt_coderange_glyph );
+
+    if ( face->cvt_program_size > 0 )
+    {
+      error = TT_Goto_CodeRange( exec, tt_coderange_cvt, 0 );
+
+      if ( !error && !size->debug )
+        error = face->interpreter( exec );
+    }
+    else
+      error = TT_Err_Ok;
+
+    /* save as default graphics state */
+    size->GS = exec->GS;
+
+    TT_Save_Context( exec, size );
+
+    return error;
+  }
+
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+
+  static void
+  tt_size_done_bytecode( FT_Size  ftsize )
+  {
+    TT_Size    size   = (TT_Size)ftsize;
+    TT_Face    face   = (TT_Face)ftsize->face;
+    FT_Memory  memory = face->root.memory;
+d535 3
+a537 2
+    size->bytecode_ready = 0;
+    size->cvt_ready      = 0;
+d541 12
+a552 2
+  /* Initialize bytecode-related fields in the size object.       */
+  /* We do this only if bytecode interpretation is really needed. */
+d554 1
+a554 1
+  tt_size_init_bytecode( FT_Size  ftsize )
+d556 2
+a557 5
+    FT_Error   error;
+    TT_Size    size = (TT_Size)ftsize;
+    TT_Face    face = (TT_Face)ftsize->face;
+    FT_Memory  memory = face->root.memory;
+    FT_Int     i;
+d559 1
+a559 2
+    FT_UShort       n_twilight;
+    TT_MaxProfile*  maxp = &face->max_profile;
+d562 2
+a563 2
+    size->bytecode_ready = 1;
+    size->cvt_ready      = 0;
+d565 1
+a565 2
+    size->max_function_defs    = maxp->maxFunctionDefs;
+    size->max_instruction_defs = maxp->maxInstructionDefs;
+d567 1
+a567 2
+    size->num_function_defs    = 0;
+    size->num_instruction_defs = 0;
+d569 2
+a570 2
+    size->max_func = 0;
+    size->max_ins  = 0;
+d572 2
+a573 4
+    size->cvt_size     = face->cvt_size;
+    size->storage_size = maxp->maxStorage;
+
+    /* Set default metrics */
+d575 6
+a580 12
+      FT_Size_Metrics*  metrics  = &size->metrics;
+      TT_Size_Metrics*  metrics2 = &size->ttmetrics;
+
+      metrics->x_ppem = 0;
+      metrics->y_ppem = 0;
+
+      metrics2->rotated   = FALSE;
+      metrics2->stretched = FALSE;
+
+      /* set default compensation (all 0) */
+      for ( i = 0; i < 4; i++ )
+        metrics2->compensations[i] = 0;
+d582 1
+a582 23
+
+    /* allocate function defs, instruction defs, cvt, and storage area */
+    if ( FT_NEW_ARRAY( size->function_defs,    size->max_function_defs    ) ||
+         FT_NEW_ARRAY( size->instruction_defs, size->max_instruction_defs ) ||
+         FT_NEW_ARRAY( size->cvt,              size->cvt_size             ) ||
+         FT_NEW_ARRAY( size->storage,          size->storage_size         ) )
+      goto Exit;
+
+    /* reserve twilight zone */
+    n_twilight = maxp->maxTwilightPoints;
+
+    /* there are 4 phantom points (do we need this?) */
+    n_twilight += 4;
+
+    error = tt_glyphzone_new( memory, n_twilight, 0, &size->twilight );
+    if ( error )
+      goto Exit;
+
+    size->twilight.n_points = n_twilight;
+
+    size->GS = tt_default_graphics_state;
+
+    /* set `face->interpreter' according to the debug hook present */
+d584 6
+a589 7
+      FT_Library  library = face->root.driver->root.library;
+
+
+      face->interpreter = (TT_Interpreter)
+                            library->debug_hooks[FT_DEBUG_HOOK_TRUETYPE];
+      if ( !face->interpreter )
+        face->interpreter = (TT_Interpreter)TT_RunIns;
+d592 10
+a601 2
+    /* Fine, now run the font program! */
+    error = tt_size_run_fpgm( size );
+a602 3
+  Exit:
+    if ( error )
+      tt_size_done_bytecode( ftsize );
+d604 4
+a607 2
+    return error;
+  }
+d609 1
+a610 15
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_ready_bytecode( TT_Size  size )
+  {
+    FT_Error  error = TT_Err_Ok;
+
+
+    if ( !size->bytecode_ready )
+    {
+      error = tt_size_init_bytecode( (FT_Size)size );
+      if ( error )
+        goto Exit;
+    }
+
+    /* rescale CVT when needed */
+    if ( !size->cvt_ready )
+d612 2
+a613 2
+      FT_UInt  i;
+      TT_Face  face = (TT_Face) size->root.face;
+d621 2
+a622 2
+      /* all twilight points are originally zero */
+      for ( i = 0; i < (FT_UInt)size->twilight.n_points; i++ )
+d624 4
+a627 4
+        size->twilight.org[i].x = 0;
+        size->twilight.org[i].y = 0;
+        size->twilight.cur[i].x = 0;
+        size->twilight.cur[i].y = 0;
+d636 35
+a670 7
+      error = tt_size_run_prep( size );
+      if ( !error )
+          size->cvt_ready = 1;
+    }
+  Exit:
+    return error;
+  }
+d672 2
+a673 1
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+d675 2
+d678 4
+a681 19
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_init                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Initialize a new TrueType size object.                             */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    size :: A handle to the size object.                               */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_init( FT_Size  ttsize )           /* TT_Size */
+  {
+    TT_Size   size  = (TT_Size)ttsize;
+    FT_Error  error = TT_Err_Ok;
+d683 1
+a683 4
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    size->bytecode_ready = 0;
+    size->cvt_ready      = 0;
+#endif
+d685 2
+a686 2
+    size->ttmetrics.valid = FALSE;
+    size->strike_index    = 0xFFFFFFFFUL;
+d692 2
+d697 1
+a697 1
+  /*    tt_size_done                                                       */
+d700 2
+a701 1
+  /*    The TrueType size object finalizer.                                */
+d706 2
+a707 2
+  FT_LOCAL_DEF( void )
+  tt_size_done( FT_Size  ttsize )           /* TT_Size */
+d709 7
+a715 1
+    TT_Size  size = (TT_Size)ttsize;
+d718 28
+a745 3
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    if ( size->bytecode_ready )
+      tt_size_done_bytecode( ttsize );
+d748 27
+a774 1
+    size->ttmetrics.valid = FALSE;
+d777 2
+d786 1
+a786 1
+  /*    Reset a TrueType size when resolutions and character dimensions    */
+d795 2
+a796 3
+    TT_Face           face;
+    FT_Error          error = TT_Err_Ok;
+    FT_Size_Metrics*  metrics;
+d799 1
+a799 1
+    size->ttmetrics.valid = FALSE;
+d801 4
+a804 1
+    face = (TT_Face)size->root.face;
+d806 3
+a808 1
+    metrics = &size->metrics;
+d810 1
+a810 2
+    /* copy the result from base layer */
+    *metrics = size->root.metrics;
+d812 4
+a815 2
+    if ( metrics->x_ppem < 1 || metrics->y_ppem < 1 )
+      return TT_Err_Invalid_PPem;
+d817 2
+a818 20
+    /* This bit flag, if set, indicates that the ppems must be       */
+    /* rounded to integers.  Nearly all TrueType fonts have this bit */
+    /* set, as hinting won't work really well otherwise.             */
+    /*                                                               */
+    if ( face->header.Flags & 8 )
+    {
+      metrics->x_scale = FT_DivFix( metrics->x_ppem << 6,
+                                    face->root.units_per_EM );
+      metrics->y_scale = FT_DivFix( metrics->y_ppem << 6,
+                                    face->root.units_per_EM );
+
+      metrics->ascender =
+        FT_PIX_ROUND( FT_MulFix( face->root.ascender, metrics->y_scale ) );
+      metrics->descender =
+        FT_PIX_ROUND( FT_MulFix( face->root.descender, metrics->y_scale ) );
+      metrics->height =
+        FT_PIX_ROUND( FT_MulFix( face->root.height, metrics->y_scale ) );
+      metrics->max_advance =
+        FT_PIX_ROUND( FT_MulFix( face->root.max_advance_width,
+                                 metrics->x_scale ) );
+d821 4
+a824 10
+    /* compute new transformation */
+    if ( metrics->x_ppem >= metrics->y_ppem )
+    {
+      size->ttmetrics.scale   = metrics->x_scale;
+      size->ttmetrics.ppem    = metrics->x_ppem;
+      size->ttmetrics.x_ratio = 0x10000L;
+      size->ttmetrics.y_ratio = FT_MulDiv( metrics->y_ppem,
+                                           0x10000L,
+                                           metrics->x_ppem );
+    }
+d826 1
+a826 17
+    {
+      size->ttmetrics.scale   = metrics->y_scale;
+      size->ttmetrics.ppem    = metrics->y_ppem;
+      size->ttmetrics.x_ratio = FT_MulDiv( metrics->x_ppem,
+                                           0x10000L,
+                                           metrics->y_ppem );
+      size->ttmetrics.y_ratio = 0x10000L;
+    }
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    size->cvt_ready = 0;
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+
+    if ( !error )
+      size->ttmetrics.valid = TRUE;
+
+    return error;
+d836 1
+a836 1
+  /*    Initialize a given TrueType driver object.                         */
+d845 1
+a845 1
+  tt_driver_init( FT_Module  ttdriver )     /* TT_Driver */
+d847 1
+a848 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+d850 2
+a851 1
+    TT_Driver  driver = (TT_Driver)ttdriver;
+d853 1
+a853 11
+
+    if ( !TT_New_Context( driver ) )
+      return TT_Err_Could_Not_Find_Context;
+
+#else
+
+    FT_UNUSED( ttdriver );
+
+#endif
+
+    return TT_Err_Ok;
+d863 1
+a863 1
+  /*    Finalize a given TrueType driver.                                  */
+d869 1
+a869 1
+  tt_driver_done( FT_Module  ttdriver )     /* TT_Driver */
+d871 1
+a871 3
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    TT_Driver  driver = (TT_Driver)ttdriver;
+
+d876 1
+a876 1
+      TT_Done_Context( driver->context );
+d880 1
+a880 1
+    FT_UNUSED( ttdriver );
+a885 21
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_slot_init                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Initialize a new slot object.                                      */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    slot :: A handle to the slot object.                               */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_slot_init( FT_GlyphSlot  slot )
+  {
+    return FT_GlyphLoader_CreateExtra( slot->internal->loader );
+  }
+
+
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d233 3
+a235 5
+        error = tt_face_load_cvt( face, stream );
+      if ( !error )
+        error = tt_face_load_fpgm( face, stream );
+      if ( !error )
+        error = tt_face_load_prep( face, stream );
+d240 4
+a243 7
+        error = tt_face_load_loca( face, stream );
+      if ( !error )
+        error = tt_face_load_cvt( face, stream );
+      if ( !error )
+        error = tt_face_load_fpgm( face, stream );
+      if ( !error )
+        error = tt_face_load_prep( face, stream );
+d697 1
+a697 1
+        size->cvt_ready = 1;
+a698 1
+
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006 by                   */
+a39 4
+#ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
+#include "ttgxvar.h"
+#endif
+
+d65 1
+a65 1
+  /*    Deallocate a glyph zone.                                           */
+d96 1
+a96 1
+  /*    Allocate a new glyph zone.                                         */
+d120 3
+d126 4
+a129 4
+    if ( FT_NEW_ARRAY( zone->org,      maxPoints   ) ||
+         FT_NEW_ARRAY( zone->cur,      maxPoints   ) ||
+         FT_NEW_ARRAY( zone->tags,     maxPoints   ) ||
+         FT_NEW_ARRAY( zone->contours, maxContours ) )
+a132 5
+    else
+    {
+      zone->max_points   = maxPoints;
+      zone->max_contours = maxContours;
+    }
+d145 1
+a145 1
+  /*    Initialize a given TrueType face object.                           */
+d164 1
+a164 1
+                FT_Face        ttface,      /* TT_Face */
+a171 1
+    TT_Face       face = (TT_Face)ttface;
+d188 1
+a188 3
+    /* We must also be able to accept Mac/GX fonts, as well as OT ones. */
+    /* The 0x00020000 tag is completely undocumented; some fonts from   */
+    /* Arphic made for Chinese Windows 3.1 have this.                   */
+a189 1
+         face->format_tag != 0x00020000L &&    /* CJK fonts for Win 3.1 */
+d196 1
+a196 5
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+    face->root.face_flags |= FT_FACE_FLAG_HINTER;
+#endif
+
+    /* If we are performing a simple font format check, exit immediately. */
+a204 4
+    error = tt_face_load_hdmx( face, stream );
+    if ( error )
+      goto Exit;
+
+d213 2
+a214 3
+        error = tt_face_load_cvt( face, stream )  ||
+                tt_face_load_fpgm( face, stream ) ||
+                tt_face_load_prep( face, stream );
+d221 1
+a221 2
+                tt_face_load_fpgm( face, stream ) ||
+                tt_face_load_prep( face, stream );
+d262 1
+a262 1
+  /*    Finalize a given face object.                                      */
+d268 1
+a268 1
+  tt_face_done( FT_Face  ttface )           /* TT_Face */
+a269 1
+    TT_Face       face   = (TT_Face)ttface;
+d284 2
+a285 3
+    tt_face_done_loca( face );
+
+    tt_face_free_hdmx( face );
+a295 5
+
+#ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
+    tt_done_blend( memory, face->blend );
+    face->blend = NULL;
+#endif
+a304 152
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_run_fpgm                                                   */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Run the font program.                                              */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    size :: A handle to the size object.                               */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_run_fpgm( TT_Size  size )
+  {
+    TT_Face         face = (TT_Face)size->root.face;
+    TT_ExecContext  exec;
+    FT_Error        error;
+
+
+    /* debugging instances have their own context */
+    if ( size->debug )
+      exec = size->context;
+    else
+      exec = ( (TT_Driver)FT_FACE_DRIVER( face ) )->context;
+
+    if ( !exec )
+      return TT_Err_Could_Not_Find_Context;
+
+    TT_Load_Context( exec, face, size );
+
+    exec->callTop   = 0;
+    exec->top       = 0;
+
+    exec->period    = 64;
+    exec->phase     = 0;
+    exec->threshold = 0;
+
+    exec->instruction_trap = FALSE;
+    exec->F_dot_P = 0x10000L;
+
+    {
+      FT_Size_Metrics*  metrics    = &exec->metrics;
+      TT_Size_Metrics*  tt_metrics = &exec->tt_metrics;
+
+
+      metrics->x_ppem   = 0;
+      metrics->y_ppem   = 0;
+      metrics->x_scale  = 0;
+      metrics->y_scale  = 0;
+
+      tt_metrics->ppem  = 0;
+      tt_metrics->scale = 0;
+      tt_metrics->ratio = 0x10000L;
+    }
+
+    /* allow font program execution */
+    TT_Set_CodeRange( exec,
+                      tt_coderange_font,
+                      face->font_program,
+                      face->font_program_size );
+
+    /* disable CVT and glyph programs coderange */
+    TT_Clear_CodeRange( exec, tt_coderange_cvt );
+    TT_Clear_CodeRange( exec, tt_coderange_glyph );
+
+    if ( face->font_program_size > 0 )
+    {
+      error = TT_Goto_CodeRange( exec, tt_coderange_font, 0 );
+
+      if ( !error )
+        error = face->interpreter( exec );
+    }
+    else
+      error = TT_Err_Ok;
+
+    if ( !error )
+      TT_Save_Context( exec, size );
+
+    return error;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_run_prep                                                   */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Run the control value program.                                     */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    size :: A handle to the size object.                               */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_run_prep( TT_Size  size )
+  {
+    TT_Face         face = (TT_Face)size->root.face;
+    TT_ExecContext  exec;
+    FT_Error        error;
+
+
+    /* debugging instances have their own context */
+    if ( size->debug )
+      exec = size->context;
+    else
+      exec = ( (TT_Driver)FT_FACE_DRIVER( face ) )->context;
+
+    if ( !exec )
+      return TT_Err_Could_Not_Find_Context;
+
+    TT_Load_Context( exec, face, size );
+
+    exec->callTop = 0;
+    exec->top     = 0;
+
+    exec->instruction_trap = FALSE;
+
+    TT_Set_CodeRange( exec,
+                      tt_coderange_cvt,
+                      face->cvt_program,
+                      face->cvt_program_size );
+
+    TT_Clear_CodeRange( exec, tt_coderange_glyph );
+
+    if ( face->cvt_program_size > 0 )
+    {
+      error = TT_Goto_CodeRange( exec, tt_coderange_cvt, 0 );
+
+      if ( !error && !size->debug )
+        error = face->interpreter( exec );
+    }
+    else
+      error = TT_Err_Ok;
+
+    /* save as default graphics state */
+    size->GS = exec->GS;
+
+    TT_Save_Context( exec, size );
+
+    return error;
+  }
+
+#endif /* TT_CONFIG_OPTION_BYTECODE_INTERPRETER */
+
+d312 1
+a312 1
+  /*    Initialize a new TrueType size object.                             */
+d321 1
+a321 1
+  tt_size_init( FT_Size  ttsize )           /* TT_Size */
+a322 1
+    TT_Size   size  = (TT_Size)ttsize;
+d325 1
+d332 1
+d337 2
+a372 2
+    {
+      tt_size_done( ttsize );
+d374 1
+a374 2
+      return error;
+    }
+a377 4
+
+    /* there are 4 phantom points (do we need this?) */
+    n_twilight += 4;
+
+d380 1
+a380 5
+    {
+      tt_size_done( ttsize );
+
+      return error;
+    }
+a383 2
+    size->GS = tt_default_graphics_state;
+
+d395 5
+a399 2
+    /* Fine, now run the font program! */
+    error = tt_size_run_fpgm( size );
+d401 64
+a464 2
+    if ( error )
+      tt_size_done( ttsize );
+d469 3
+a471 1
+    size->strike_index    = 0xFFFFFFFFUL;
+d473 7
+d481 3
+d499 1
+a499 1
+  tt_size_done( FT_Size  ttsize )           /* TT_Size */
+a500 1
+    TT_Size    size = (TT_Size)ttsize;
+d544 1
+a544 1
+  /*    tt_size_reset                                                      */
+d547 2
+a548 2
+  /*    Reset a TrueType size when resolutions and character dimensions    */
+  /*    have been changed.                                                 */
+d553 2
+a554 2
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_reset( TT_Size  size )
+d558 1
+d562 2
+a563 1
+    size->ttmetrics.valid = FALSE;
+a568 3
+    /* copy the result from base layer */
+    *metrics = size->root.metrics;
+
+a571 22
+    /* This bit flag, if set, indicates that the ppems must be       */
+    /* rounded to integers.  Nearly all TrueType fonts have this bit */
+    /* set, as hinting won't work really well otherwise.             */
+    /*                                                               */
+    if ( face->header.Flags & 8 )
+    {
+      metrics->x_scale = FT_DivFix( metrics->x_ppem << 6,
+                                    face->root.units_per_EM );
+      metrics->y_scale = FT_DivFix( metrics->y_ppem << 6,
+                                    face->root.units_per_EM );
+
+      metrics->ascender =
+        FT_PIX_ROUND( FT_MulFix( face->root.ascender, metrics->y_scale ) );
+      metrics->descender =
+        FT_PIX_ROUND( FT_MulFix( face->root.descender, metrics->y_scale ) );
+      metrics->height =
+        FT_PIX_ROUND( FT_MulFix( face->root.height, metrics->y_scale ) );
+      metrics->max_advance =
+        FT_PIX_ROUND( FT_MulFix( face->root.max_advance_width,
+                                 metrics->x_scale ) );
+    }
+
+d592 16
+d612 2
+a613 1
+      FT_UInt  i;
+d622 1
+a622 1
+      for ( i = 0; i < (FT_UInt)size->twilight.n_points; i++ )
+d624 4
+a627 4
+        size->twilight.org[i].x = 0;
+        size->twilight.org[i].y = 0;
+        size->twilight.cur[i].x = 0;
+        size->twilight.cur[i].y = 0;
+d636 45
+a680 1
+      error = tt_size_run_prep( size );
+d692 2
+d697 1
+a697 1
+  /*    tt_driver_init                                                     */
+d700 2
+a701 1
+  /*    Initialize a given TrueType driver object.                         */
+d704 1
+a704 4
+  /*    driver :: A handle to the target driver object.                    */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+d706 2
+a707 2
+  FT_LOCAL_DEF( FT_Error )
+  tt_driver_init( FT_Module  ttdriver )     /* TT_Driver */
+d709 8
+d718 4
+a721 1
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+d723 2
+a724 1
+    TT_Driver  driver = (TT_Driver)ttdriver;
+d726 1
+d728 3
+a730 2
+    if ( !TT_New_Context( driver ) )
+      return TT_Err_Could_Not_Find_Context;
+d732 3
+a734 1
+#else
+a735 1
+    FT_UNUSED( ttdriver );
+d737 9
+d748 27
+a774 1
+    return TT_Err_Ok;
+d777 2
+d783 1
+a783 1
+  /*    tt_driver_done                                                     */
+d786 2
+a787 1
+  /*    Finalize a given TrueType driver.                                  */
+d790 1
+a790 1
+  /*    driver :: A handle to the target TrueType driver.                  */
+d792 2
+a793 2
+  FT_LOCAL_DEF( void )
+  tt_driver_done( FT_Module  ttdriver )     /* TT_Driver */
+d795 14
+a808 2
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+    TT_Driver  driver = (TT_Driver)ttdriver;
+d810 1
+d812 1
+a812 2
+    /* destroy the execution context */
+    if ( driver->context )
+d814 5
+a818 2
+      TT_Done_Context( driver->context );
+      driver->context = NULL;
+a819 3
+#else
+    FT_UNUSED( ttdriver );
+#endif
+d821 6
+d833 1
+a833 1
+  /*    tt_slot_init                                                       */
+d836 1
+a836 1
+  /*    Initialize a new slot object.                                      */
+d838 2
+a839 2
+  /* <InOut>                                                               */
+  /*    slot :: A handle to the slot object.                               */
+d845 25
+a869 1
+  tt_slot_init( FT_GlyphSlot  slot )
+d871 12
+a882 1
+    return FT_GlyphLoader_CreateExtra( slot->internal->loader );
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 by */
+d21 1
+d23 1
+d32 1
+a32 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+d54 1
+a54 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+a85 1
+      FT_FREE( zone->orus );
+a128 1
+         FT_NEW_ARRAY( zone->orus,     maxPoints   ) ||
+d142 1
+a142 35
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+
+
+  /* Compare the face with a list of well-known `tricky' fonts. */
+  /* This list shall be expanded as we find more of them.       */
+
+  static FT_Bool
+  tt_check_trickyness( FT_String*  name )
+  {
+#define TRICK_NAMES_MAX_CHARACTERS  16
+#define TRICK_NAMES_COUNT 7
+    static const char trick_names[TRICK_NAMES_COUNT][TRICK_NAMES_MAX_CHARACTERS+1] =
+    {
+      "DFKaiSho-SB",     /* dfkaisb.ttf */
+      "DFKaiShu",
+      "DFKai-SB",        /* kaiu.ttf */
+      "HuaTianSongTi?",  /* htst3.ttf */
+      "MingLiU",         /* mingliu.ttf & mingliu.ttc */
+      "PMingLiU",        /* mingliu.ttc */
+      "MingLi43",        /* mingli.ttf */
+    };
+    int  nn;
+
+
+    if ( !name )
+      return FALSE;
+
+    /* Note that we only check the face name at the moment; it might */
+    /* be worth to do more checks for a few special cases.           */
+    for ( nn = 0; nn < TRICK_NAMES_COUNT; nn++ )
+      if ( ft_strstr( name, trick_names[nn] ) )
+        return TRUE;
+
+    return FALSE;
+  }
+d181 1
+a181 1
+    library = ttface->driver->root.library;
+d206 2
+a207 2
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    ttface->face_flags |= FT_FACE_FLAG_HINTER;
+a218 3
+    if ( tt_check_trickyness( ttface->family_name ) )
+      ttface->face_flags |= FT_FACE_FLAG_TRICKY;
+
+d223 1
+a223 1
+    if ( FT_IS_SCALABLE( ttface ) )
+d228 1
+a228 1
+      if ( !ttface->internal->incremental_interface )
+d231 3
+a233 5
+        error = tt_face_load_cvt( face, stream );
+      if ( !error )
+        error = tt_face_load_fpgm( face, stream );
+      if ( !error )
+        error = tt_face_load_prep( face, stream );
+d238 4
+a241 7
+        error = tt_face_load_loca( face, stream );
+      if ( !error )
+        error = tt_face_load_cvt( face, stream );
+      if ( !error )
+        error = tt_face_load_fpgm( face, stream );
+      if ( !error )
+        error = tt_face_load_prep( face, stream );
+d247 5
+a251 2
+#if defined( TT_CONFIG_OPTION_UNPATENTED_HINTING    ) && \
+    !defined( TT_CONFIG_OPTION_BYTECODE_INTERPRETER )
+d254 1
+a254 3
+      FT_Bool  unpatented_hinting;
+      int      i;
+
+a255 3
+      /* Determine whether unpatented hinting is to be used for this face. */
+      unpatented_hinting = FT_BOOL
+        ( library->debug_hooks[FT_DEBUG_HOOK_UNPATENTED_HINTING] != NULL );
+d259 1
+a259 4
+          unpatented_hinting = TRUE;
+
+      if ( !unpatented_hinting )
+        ttface->internal->ignore_unpatented_hinter = TRUE;
+d262 1
+a262 2
+#endif /* TT_CONFIG_OPTION_UNPATENTED_HINTING &&
+          !TT_CONFIG_OPTION_BYTECODE_INTERPRETER */
+d290 3
+a292 5
+    TT_Face       face = (TT_Face)ttface;
+    FT_Memory     memory;
+    FT_Stream     stream;
+    SFNT_Service  sfnt;
+
+d294 1
+a294 2
+    if ( !face )
+      return;
+a295 3
+    memory = ttface->memory;
+    stream = ttface->stream;
+    sfnt   = (SFNT_Service)face->sfnt;
+d332 1
+a332 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+d482 1
+a482 1
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+d485 16
+a500 4
+#ifdef TT_USE_BYTECODE_INTERPRETER
+
+  static void
+  tt_size_done_bytecode( FT_Size  ftsize )
+d502 2
+a503 21
+    TT_Size    size   = (TT_Size)ftsize;
+    TT_Face    face   = (TT_Face)ftsize->face;
+    FT_Memory  memory = face->root.memory;
+
+
+    if ( size->debug )
+    {
+      /* the debug context must be deleted by the debugger itself */
+      size->context = NULL;
+      size->debug   = FALSE;
+    }
+
+    FT_FREE( size->cvt );
+    size->cvt_size = 0;
+
+    /* free storage area */
+    FT_FREE( size->storage );
+    size->storage_size = 0;
+
+    /* twilight zone */
+    tt_glyphzone_done( &size->twilight );
+d505 1
+a505 2
+    FT_FREE( size->function_defs );
+    FT_FREE( size->instruction_defs );
+d507 1
+a507 21
+    size->num_function_defs    = 0;
+    size->max_function_defs    = 0;
+    size->num_instruction_defs = 0;
+    size->max_instruction_defs = 0;
+
+    size->max_func = 0;
+    size->max_ins  = 0;
+
+    size->bytecode_ready = 0;
+    size->cvt_ready      = 0;
+  }
+
+
+  /* Initialize bytecode-related fields in the size object.       */
+  /* We do this only if bytecode interpretation is really needed. */
+  static FT_Error
+  tt_size_init_bytecode( FT_Size  ftsize )
+  {
+    FT_Error   error;
+    TT_Size    size = (TT_Size)ftsize;
+    TT_Face    face = (TT_Face)ftsize->face;
+a514 3
+    size->bytecode_ready = 1;
+    size->cvt_ready      = 0;
+
+d529 2
+a530 1
+      TT_Size_Metrics*  metrics = &size->ttmetrics;
+d533 5
+a537 2
+      metrics->rotated   = FALSE;
+      metrics->stretched = FALSE;
+d541 1
+a541 1
+        metrics->compensations[i] = 0;
+d549 5
+a553 1
+      goto Exit;
+d563 5
+a567 1
+      goto Exit;
+a586 1
+  Exit:
+d588 1
+a588 10
+      tt_size_done_bytecode( ftsize );
+
+    return error;
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_ready_bytecode( TT_Size  size )
+  {
+    FT_Error  error = TT_Err_Ok;
+d590 1
+a590 71
+
+    if ( !size->bytecode_ready )
+    {
+      error = tt_size_init_bytecode( (FT_Size)size );
+      if ( error )
+        goto Exit;
+    }
+
+    /* rescale CVT when needed */
+    if ( !size->cvt_ready )
+    {
+      FT_UInt  i;
+      TT_Face  face = (TT_Face)size->root.face;
+
+
+      /* Scale the cvt values to the new ppem.          */
+      /* We use by default the y ppem to scale the CVT. */
+      for ( i = 0; i < size->cvt_size; i++ )
+        size->cvt[i] = FT_MulFix( face->cvt[i], size->ttmetrics.scale );
+
+      /* all twilight points are originally zero */
+      for ( i = 0; i < (FT_UInt)size->twilight.n_points; i++ )
+      {
+        size->twilight.org[i].x = 0;
+        size->twilight.org[i].y = 0;
+        size->twilight.cur[i].x = 0;
+        size->twilight.cur[i].y = 0;
+      }
+
+      /* clear storage area */
+      for ( i = 0; i < (FT_UInt)size->storage_size; i++ )
+        size->storage[i] = 0;
+
+      size->GS = tt_default_graphics_state;
+
+      error = tt_size_run_prep( size );
+      if ( !error )
+        size->cvt_ready = 1;
+    }
+
+  Exit:
+    return error;
+  }
+
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    tt_size_init                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Initialize a new TrueType size object.                             */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    size :: A handle to the size object.                               */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  FT_LOCAL_DEF( FT_Error )
+  tt_size_init( FT_Size  ttsize )           /* TT_Size */
+  {
+    TT_Size   size  = (TT_Size)ttsize;
+    FT_Error  error = TT_Err_Ok;
+
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    size->bytecode_ready = 0;
+    size->cvt_ready      = 0;
+#endif
+d613 1
+a613 1
+    TT_Size  size = (TT_Size)ttsize;
+d615 32
+a647 3
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    if ( size->bytecode_ready )
+      tt_size_done_bytecode( ttsize );
+d728 31
+a758 3
+#ifdef TT_USE_BYTECODE_INTERPRETER
+    size->cvt_ready = 0;
+#endif /* TT_USE_BYTECODE_INTERPRETER */
+d785 1
+a785 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+d817 1
+a817 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+a23 1
+#include FT_TRUETYPE_DRIVER_H
+d34 4
+d123 1
+a123 1
+    FT_ZERO( zone );
+d149 1
+a149 1
+  tt_check_trickyness_family( FT_String*  name )
+d151 3
+a153 6
+
+#define TRICK_NAMES_MAX_CHARACTERS  19
+#define TRICK_NAMES_COUNT            9
+
+    static const char trick_names[TRICK_NAMES_COUNT]
+                                 [TRICK_NAMES_MAX_CHARACTERS + 1] =
+d155 1
+a155 1
+      "DFKaiSho-SB",        /* dfkaisb.ttf */
+d157 5
+a161 7
+      "DFKai-SB",           /* kaiu.ttf */
+      "HuaTianKaiTi?",      /* htkt2.ttf */
+      "HuaTianSongTi?",     /* htst3.ttf */
+      "Ming(for ISO10646)", /* hkscsiic.ttf & iicore.ttf */
+      "MingLiU",            /* mingliu.ttf & mingliu.ttc */
+      "PMingLiU",           /* mingliu.ttc */
+      "MingLi43",           /* mingli.ttf */
+a162 1
+
+d166 5
+a178 306
+  /* XXX: This function should be in the `sfnt' module. */
+
+  /* Some PDF generators clear the checksums in the TrueType header table. */
+  /* For example, Quartz ContextPDF clears all entries, or Bullzip PDF     */
+  /* Printer clears the entries for subsetted subtables.  We thus have to  */
+  /* recalculate the checksums  where necessary.                           */
+
+  static FT_UInt32
+  tt_synth_sfnt_checksum( FT_Stream  stream,
+                          FT_ULong   length )
+  {
+    FT_Error   error;
+    FT_UInt32  checksum = 0;
+    FT_UInt    i;
+
+
+    if ( FT_FRAME_ENTER( length ) )
+      return 0;
+
+    for ( ; length > 3; length -= 4 )
+      checksum += (FT_UInt32)FT_GET_ULONG();
+
+    for ( i = 3; length > 0; length--, i-- )
+      checksum += (FT_UInt32)FT_GET_BYTE() << ( i * 8 );
+
+    FT_FRAME_EXIT();
+
+    return checksum;
+  }
+
+
+  /* XXX: This function should be in the `sfnt' module. */
+
+  static FT_ULong
+  tt_get_sfnt_checksum( TT_Face    face,
+                        FT_UShort  i )
+  {
+#if 0 /* if we believe the written value, use following part. */
+    if ( face->dir_tables[i].CheckSum )
+      return face->dir_tables[i].CheckSum;
+#endif
+
+    if ( !face->goto_table )
+      return 0;
+
+    if ( face->goto_table( face,
+                           face->dir_tables[i].Tag,
+                           face->root.stream,
+                           NULL ) )
+      return 0;
+
+    return (FT_ULong)tt_synth_sfnt_checksum( face->root.stream,
+                                             face->dir_tables[i].Length );
+  }
+
+
+  typedef struct tt_sfnt_id_rec_
+  {
+    FT_ULong  CheckSum;
+    FT_ULong  Length;
+
+  } tt_sfnt_id_rec;
+
+
+  static FT_Bool
+  tt_check_trickyness_sfnt_ids( TT_Face  face )
+  {
+#define TRICK_SFNT_IDS_PER_FACE   3
+#define TRICK_SFNT_IDS_NUM_FACES  18
+
+    static const tt_sfnt_id_rec sfnt_id[TRICK_SFNT_IDS_NUM_FACES]
+                                       [TRICK_SFNT_IDS_PER_FACE] = {
+
+#define TRICK_SFNT_ID_cvt   0
+#define TRICK_SFNT_ID_fpgm  1
+#define TRICK_SFNT_ID_prep  2
+
+      { /* MingLiU 1995 */
+        { 0x05BCF058UL, 0x000002E4UL }, /* cvt  */
+        { 0x28233BF1UL, 0x000087C4UL }, /* fpgm */
+        { 0xA344A1EAUL, 0x000001E1UL }  /* prep */
+      },
+      { /* MingLiU 1996- */
+        { 0x05BCF058UL, 0x000002E4UL }, /* cvt  */
+        { 0x28233BF1UL, 0x000087C4UL }, /* fpgm */
+        { 0xA344A1EBUL, 0x000001E1UL }  /* prep */
+      },
+      { /* DFKaiShu */
+        { 0x11E5EAD4UL, 0x00000350UL }, /* cvt  */
+        { 0x5A30CA3BUL, 0x00009063UL }, /* fpgm */
+        { 0x13A42602UL, 0x0000007EUL }  /* prep */
+      },
+      { /* DFKaiShu2 */
+        { 0x11E5EAD4UL, 0x00000350UL }, /* cvt  */
+        { 0xA6E78C01UL, 0x00008998UL }, /* fpgm */
+        { 0x13A42602UL, 0x0000007EUL }  /* prep */
+      },
+      { /* HuaTianKaiTi */
+        { 0xFFFBFFFCUL, 0x00000008UL }, /* cvt  */
+        { 0x9C9E48B8UL, 0x0000BEA2UL }, /* fpgm */
+        { 0x70020112UL, 0x00000008UL }  /* prep */
+      },
+      { /* HuaTianSongTi */
+        { 0xFFFBFFFCUL, 0x00000008UL }, /* cvt  */
+        { 0x0A5A0483UL, 0x00017C39UL }, /* fpgm */
+        { 0x70020112UL, 0x00000008UL }  /* prep */
+      },
+      { /* NEC fadpop7.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x40C92555UL, 0x000000E5UL }, /* fpgm */
+        { 0xA39B58E3UL, 0x0000117CUL }  /* prep */
+      },
+      { /* NEC fadrei5.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x33C41652UL, 0x000000E5UL }, /* fpgm */
+        { 0x26D6C52AUL, 0x00000F6AUL }  /* prep */
+      },
+      { /* NEC fangot7.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x6DB1651DUL, 0x0000019DUL }, /* fpgm */
+        { 0x6C6E4B03UL, 0x00002492UL }  /* prep */
+      },
+      { /* NEC fangyo5.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x40C92555UL, 0x000000E5UL }, /* fpgm */
+        { 0xDE51FAD0UL, 0x0000117CUL }  /* prep */
+      },
+      { /* NEC fankyo5.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x85E47664UL, 0x000000E5UL }, /* fpgm */
+        { 0xA6C62831UL, 0x00001CAAUL }  /* prep */
+      },
+      { /* NEC fanrgo5.ttf */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x2D891CFDUL, 0x0000019DUL }, /* fpgm */
+        { 0xA0604633UL, 0x00001DE8UL }  /* prep */
+      },
+      { /* NEC fangot5.ttc */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x40AA774CUL, 0x000001CBUL }, /* fpgm */
+        { 0x9B5CAA96UL, 0x00001F9AUL }  /* prep */
+      },
+      { /* NEC fanmin3.ttc */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x0D3DE9CBUL, 0x00000141UL }, /* fpgm */
+        { 0xD4127766UL, 0x00002280UL }  /* prep */
+      },
+      { /* NEC FA-Gothic, 1996 */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x4A692698UL, 0x000001F0UL }, /* fpgm */
+        { 0x340D4346UL, 0x00001FCAUL }  /* prep */
+      },
+      { /* NEC FA-Minchou, 1996 */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0xCD34C604UL, 0x00000166UL }, /* fpgm */
+        { 0x6CF31046UL, 0x000022B0UL }  /* prep */
+      },
+      { /* NEC FA-RoundGothicB, 1996 */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0x5DA75315UL, 0x0000019DUL }, /* fpgm */
+        { 0x40745A5FUL, 0x000022E0UL }  /* prep */
+      },
+      { /* NEC FA-RoundGothicM, 1996 */
+        { 0x00000000UL, 0x00000000UL }, /* cvt  */
+        { 0xF055FC48UL, 0x000001C2UL }, /* fpgm */
+        { 0x3900DED3UL, 0x00001E18UL }  /* prep */
+      }
+    };
+
+    FT_ULong   checksum;
+    int        num_matched_ids[TRICK_SFNT_IDS_NUM_FACES];
+    FT_Bool    has_cvt, has_fpgm, has_prep;
+    FT_UShort  i;
+    int        j, k;
+
+
+    FT_MEM_SET( num_matched_ids, 0,
+                sizeof ( int ) * TRICK_SFNT_IDS_NUM_FACES );
+    has_cvt  = FALSE;
+    has_fpgm = FALSE;
+    has_prep = FALSE;
+
+    for ( i = 0; i < face->num_tables; i++ )
+    {
+      checksum = 0;
+
+      switch( face->dir_tables[i].Tag )
+      {
+      case TTAG_cvt:
+        k = TRICK_SFNT_ID_cvt;
+        has_cvt  = TRUE;
+        break;
+
+      case TTAG_fpgm:
+        k = TRICK_SFNT_ID_fpgm;
+        has_fpgm = TRUE;
+        break;
+
+      case TTAG_prep:
+        k = TRICK_SFNT_ID_prep;
+        has_prep = TRUE;
+        break;
+
+      default:
+        continue;
+      }
+
+      for ( j = 0; j < TRICK_SFNT_IDS_NUM_FACES; j++ )
+        if ( face->dir_tables[i].Length == sfnt_id[j][k].Length )
+        {
+          if ( !checksum )
+            checksum = tt_get_sfnt_checksum( face, i );
+
+          if ( sfnt_id[j][k].CheckSum == checksum )
+            num_matched_ids[j]++;
+
+          if ( num_matched_ids[j] == TRICK_SFNT_IDS_PER_FACE )
+            return TRUE;
+        }
+    }
+
+    for ( j = 0; j < TRICK_SFNT_IDS_NUM_FACES; j++ )
+    {
+      if ( !has_cvt  && !sfnt_id[j][TRICK_SFNT_ID_cvt].Length )
+        num_matched_ids[j]++;
+      if ( !has_fpgm && !sfnt_id[j][TRICK_SFNT_ID_fpgm].Length )
+        num_matched_ids[j]++;
+      if ( !has_prep && !sfnt_id[j][TRICK_SFNT_ID_prep].Length )
+        num_matched_ids[j]++;
+      if ( num_matched_ids[j] == TRICK_SFNT_IDS_PER_FACE )
+        return TRUE;
+    }
+
+    return FALSE;
+  }
+
+
+  static FT_Bool
+  tt_check_trickyness( FT_Face  face )
+  {
+    if ( !face )
+      return FALSE;
+
+    /* For first, check the face name for quick check. */
+    if ( face->family_name                               &&
+         tt_check_trickyness_family( face->family_name ) )
+      return TRUE;
+
+    /* Type42 fonts may lack `name' tables, we thus try to identify */
+    /* tricky fonts by checking the checksums of Type42-persistent  */
+    /* sfnt tables (`cvt', `fpgm', and `prep').                     */
+    if ( tt_check_trickyness_sfnt_ids( (TT_Face)face ) )
+      return TRUE;
+
+    return FALSE;
+  }
+
+
+  /* Check whether `.notdef' is the only glyph in the `loca' table. */
+  static FT_Bool
+  tt_check_single_notdef( FT_Face  ttface )
+  {
+    FT_Bool   result = FALSE;
+
+    TT_Face   face = (TT_Face)ttface;
+    FT_UInt   asize;
+    FT_ULong  i;
+    FT_ULong  glyph_index = 0;
+    FT_UInt   count       = 0;
+
+
+    for( i = 0; i < face->num_locations; i++ )
+    {
+      tt_face_get_location( face, i, &asize );
+      if ( asize > 0 )
+      {
+        count += 1;
+        if ( count > 1 )
+          break;
+        glyph_index = i;
+      }
+    }
+
+    /* Only have a single outline. */
+    if ( count == 1 )
+    {
+      if ( glyph_index == 0 )
+        result = TRUE;
+      else
+      {
+        /* FIXME: Need to test glyphname == .notdef ? */
+        FT_Error error;
+        char buf[8];
+
+
+        error = FT_Get_Glyph_Name( ttface, glyph_index, buf, 8 );
+        if ( !error                                            &&
+             buf[0] == '.' && !ft_strncmp( buf, ".notdef", 8 ) )
+          result = TRUE;
+      }
+    }
+
+    return result;
+  }
+
+
+d190 1
+a190 4
+  /*    face_index :: The index of the TrueType font, if we are opening a  */
+  /*                  collection, in bits 0-15.  The numbered instance     */
+  /*                  index~+~1 of a GX (sub)font, if applicable, in bits  */
+  /*                  16-30.                                               */
+a214 2
+    FT_TRACE2(( "TTF driver\n" ));
+
+d216 1
+a216 2
+
+    sfnt = (SFNT_Service)FT_Get_Module_Interface( library, "sfnt" );
+d218 1
+a218 5
+    {
+      FT_ERROR(( "tt_face_init: cannot access `sfnt' module\n" ));
+      error = FT_THROW( Missing_Module );
+      goto Exit;
+    }
+a225 4
+
+    /* Stream may have changed. */
+    stream = face->root.stream;
+
+d236 1
+a236 1
+      FT_TRACE2(( "  not a TTF font\n" ));
+d246 1
+a246 1
+      return FT_Err_Ok;
+d253 1
+a253 1
+    if ( tt_check_trickyness( ttface ) )
+d262 1
+d264 1
+a265 2
+#endif
+      {
+d267 6
+d274 1
+a274 7
+        /* having a (non-zero) `glyf' table without */
+        /* a `loca' table is not valid              */
+        if ( face->glyf_len && FT_ERR_EQ( error, Table_Missing ) )
+          goto Exit;
+        if ( error )
+          goto Exit;
+      }
+d276 8
+a283 4
+      /* `fpgm', `cvt', and `prep' are optional */
+      error = tt_face_load_cvt( face, stream );
+      if ( error && FT_ERR_NEQ( error, Table_Missing ) )
+        goto Exit;
+a284 11
+      error = tt_face_load_fpgm( face, stream );
+      if ( error && FT_ERR_NEQ( error, Table_Missing ) )
+        goto Exit;
+
+      error = tt_face_load_prep( face, stream );
+      if ( error && FT_ERR_NEQ( error, Table_Missing ) )
+        goto Exit;
+
+      /* Check the scalable flag based on `loca'. */
+#ifdef FT_CONFIG_OPTION_INCREMENTAL
+      if ( !ttface->internal->incremental_interface )
+a285 9
+      {
+        if ( ttface->num_fixed_sizes          &&
+             face->glyph_locations            &&
+             tt_check_single_notdef( ttface ) )
+        {
+          FT_TRACE5(( "tt_face_init:"
+                      " Only the `.notdef' glyph has an outline.\n"
+                      "             "
+                      " Resetting scalable flag to FALSE.\n" ));
+a286 3
+          ttface->face_flags &= ~FT_FACE_FLAG_SCALABLE;
+        }
+      }
+d289 2
+a290 1
+#ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
+d293 7
+a299 1
+      FT_Int  instance_index = face_index >> 16;
+d301 3
+d305 2
+a306 36
+      if ( FT_HAS_MULTIPLE_MASTERS( ttface ) &&
+           instance_index > 0                )
+      {
+        error = TT_Get_MM_Var( face, NULL );
+        if ( error )
+          goto Exit;
+
+        if ( face->blend->mmvar->namedstyle )
+        {
+          FT_Memory  memory = ttface->memory;
+
+          FT_Var_Named_Style*  named_style;
+          FT_String*           style_name;
+
+
+          /* in `face_index', the instance index starts with value 1 */
+          named_style = face->blend->mmvar->namedstyle + instance_index - 1;
+          error = sfnt->get_name( face,
+                                  (FT_UShort)named_style->strid,
+                                  &style_name );
+          if ( error )
+            goto Exit;
+
+          /* set style name; if already set, replace it */
+          if ( face->root.style_name )
+            FT_FREE( face->root.style_name );
+          face->root.style_name = style_name;
+
+          /* finally, select the named instance */
+          error = TT_Set_Var_Design( face,
+                                     face->blend->mmvar->num_axis,
+                                     named_style->coords );
+          if ( error )
+            goto Exit;
+        }
+      }
+d309 2
+a310 1
+#endif /* TT_CONFIG_OPTION_GX_VAR_SUPPORT */
+d319 1
+a319 1
+    error = FT_THROW( Unknown_File_Format );
+d374 1
+a374 1
+    tt_done_blend( face );
+d397 1
+a397 3
+  /*    size     :: A handle to the size object.                           */
+  /*                                                                       */
+  /*    pedantic :: Set if bytecode execution should be pedantic.          */
+d403 1
+a403 2
+  tt_size_run_fpgm( TT_Size  size,
+                    FT_Bool  pedantic )
+d410 5
+a414 1
+    exec = size->context;
+d416 4
+a419 3
+    error = TT_Load_Context( exec, face, size );
+    if ( error )
+      return error;
+d421 2
+a422 2
+    exec->callTop = 0;
+    exec->top     = 0;
+d429 1
+a429 3
+    exec->F_dot_P          = 0x4000L;
+
+    exec->pedantic_hinting = pedantic;
+d450 1
+a450 1
+                      (FT_Long)face->font_program_size );
+d458 1
+a458 1
+      TT_Goto_CodeRange( exec, tt_coderange_font, 0 );
+d460 2
+a461 2
+      FT_TRACE4(( "Executing `fpgm' table.\n" ));
+      error = face->interpreter( exec );
+d464 1
+a464 3
+      error = FT_Err_Ok;
+
+    size->bytecode_ready = error;
+d482 1
+a482 3
+  /*    size     :: A handle to the size object.                           */
+  /*                                                                       */
+  /*    pedantic :: Set if bytecode execution should be pedantic.          */
+d488 1
+a488 2
+  tt_size_run_prep( TT_Size  size,
+                    FT_Bool  pedantic )
+d495 8
+a502 1
+    exec = size->context;
+d504 1
+a504 3
+    error = TT_Load_Context( exec, face, size );
+    if ( error )
+      return error;
+a510 2
+    exec->pedantic_hinting = pedantic;
+
+d514 1
+a514 1
+                      (FT_Long)face->cvt_program_size );
+d520 1
+a520 3
+      TT_Goto_CodeRange( exec, tt_coderange_cvt, 0 );
+
+      FT_TRACE4(( "Executing `prep' table.\n" ));
+d522 2
+a523 1
+      error = face->interpreter( exec );
+d526 1
+a526 23
+      error = FT_Err_Ok;
+
+    size->cvt_ready = error;
+
+    /* UNDOCUMENTED!  The MS rasterizer doesn't allow the following */
+    /* graphics state variables to be modified by the CVT program.  */
+
+    exec->GS.dualVector.x = 0x4000;
+    exec->GS.dualVector.y = 0;
+    exec->GS.projVector.x = 0x4000;
+    exec->GS.projVector.y = 0x0;
+    exec->GS.freeVector.x = 0x4000;
+    exec->GS.freeVector.y = 0x0;
+
+    exec->GS.rp0 = 0;
+    exec->GS.rp1 = 0;
+    exec->GS.rp2 = 0;
+
+    exec->GS.gep0 = 1;
+    exec->GS.gep1 = 1;
+    exec->GS.gep2 = 1;
+
+    exec->GS.loop = 1;
+d536 4
+d548 2
+a549 1
+    if ( size->context )
+d551 1
+a551 1
+      TT_Done_Context( size->context );
+d553 1
+d577 2
+a578 2
+    size->bytecode_ready = -1;
+    size->cvt_ready      = -1;
+d585 1
+a585 2
+  tt_size_init_bytecode( FT_Size  ftsize,
+                         FT_Bool  pedantic )
+d591 1
+d597 2
+a598 14
+    /* clean up bytecode related data */
+    FT_FREE( size->function_defs );
+    FT_FREE( size->instruction_defs );
+    FT_FREE( size->cvt );
+    FT_FREE( size->storage );
+
+    if ( size->context )
+      TT_Done_Context( size->context );
+    tt_glyphzone_done( &size->twilight );
+
+    size->bytecode_ready = -1;
+    size->cvt_ready      = -1;
+
+    size->context = TT_New_Context( (TT_Driver)face->root.driver );
+d620 3
+a622 5
+      /* set default engine compensation */
+      metrics->compensations[0] = 0;   /* gray     */
+      metrics->compensations[1] = 0;   /* black    */
+      metrics->compensations[2] = 0;   /* white    */
+      metrics->compensations[3] = 0;   /* reserved */
+d658 1
+a658 9
+
+    /* In case of an error while executing `fpgm', we intentionally don't */
+    /* clean up immediately – bugs in the `fpgm' are so fundamental that  */
+    /* all following hinting calls should fail.  Additionally, `fpgm' is  */
+    /* to be executed just once; calling it again is completely useless   */
+    /* and might even lead to extremely slow behaviour if it is malformed */
+    /* (containing an infinite loop, for example).                        */
+    error = tt_size_run_fpgm( size, pedantic );
+    return error;
+d669 1
+a669 2
+  tt_size_ready_bytecode( TT_Size  size,
+                          FT_Bool  pedantic )
+d671 1
+a671 1
+    FT_Error  error = FT_Err_Ok;
+d674 6
+a679 5
+    if ( size->bytecode_ready < 0 )
+      error = tt_size_init_bytecode( (FT_Size)size, pedantic );
+
+    if ( error || size->bytecode_ready )
+      goto Exit;
+d682 1
+a682 1
+    if ( size->cvt_ready < 0 )
+d708 3
+a710 1
+      error = tt_size_run_prep( size, pedantic );
+d738 1
+a738 2
+    FT_Error  error = FT_Err_Ok;
+
+d741 2
+a742 2
+    size->bytecode_ready = -1;
+    size->cvt_ready      = -1;
+d770 2
+a771 1
+    tt_size_done_bytecode( ttsize );
+d794 1
+a794 1
+    FT_Error          error = FT_Err_Ok;
+d808 1
+a808 1
+      return FT_THROW( Invalid_PPem );
+d838 2
+a839 1
+      size->ttmetrics.y_ratio = FT_DivFix( metrics->y_ppem,
+d846 2
+a847 1
+      size->ttmetrics.x_ratio = FT_DivFix( metrics->x_ppem,
+d853 1
+a853 1
+    size->cvt_ready = -1;
+a884 7
+    driver->interpreter_version = TT_INTERPRETER_VERSION_35;
+#ifdef TT_SUPPORT_SUBPIXEL_HINTING_INFINALITY
+    driver->interpreter_version = TT_INTERPRETER_VERSION_38;
+#endif
+#ifdef TT_SUPPORT_SUBPIXEL_HINTING_MINIMAL
+    driver->interpreter_version = TT_INTERPRETER_VERSION_40;
+#endif
+d886 4
+a889 1
+#else /* !TT_USE_BYTECODE_INTERPRETER */
+d893 1
+a893 1
+#endif /* !TT_USE_BYTECODE_INTERPRETER */
+d895 1
+a895 1
+    return FT_Err_Ok;
+d913 11
+d925 2
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

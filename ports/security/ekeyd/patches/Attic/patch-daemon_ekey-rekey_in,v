@@ -1,0 +1,227 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2012.01.15.13.47.48;	author tg;	state dead;
+branches;
+next	1.2;
+commitid	1004F12D919735D2719;
+
+1.2
+date	2009.11.22.19.32.32;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004B0991C1317436F4;
+
+1.1
+date	2009.11.14.21.45.29;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004AFF25061DF717E6;
+
+
+desc
+@@
+
+
+1.3
+log
+@update
+@
+text
+@$MirOS: ports/security/ekeyd/patches/patch-daemon_ekey-rekey_in,v 1.2 2009/11/22 19:32:32 tg Exp $
+--- daemon/ekey-rekey.in.orig	Mon Nov 16 15:18:11 2009
++++ daemon/ekey-rekey.in	Sun Nov 22 19:09:28 2009
+@@@@ -4,64 +4,80 @@@@ if test "x$KEYRING" = "x"; then
+     KEYRING=@@SYSCONFPREFIX@@/keyring
+ fi
+ 
+-usage () {
++usage() {
+     cat <<EOF >&2
+ ekey-rekey: Utility to re-key an Entropy Key's Long-term-key
+ Usage:
+     ekey-rekey SERIAL MASTERKEY
+ Advanced Usage:
+-    ekey-rekey --device SERIAL DEVICENODE MASTERKEY
++    ekey-rekey {-d | --device} DEVICENODE SERIAL MASTERKEY
++    ekey-rekey --device=DEVICENODE SERIAL MASTERKEY
+ EOF
+ }
+ 
+-if test "x$1" = "x"; then
+-    usage
+-    exit 1
+-fi
++optloop=1
++while test $optloop = 1; do
++    case x$1 in
++    x-d|x--device)
++	DEVICE=$2
++	shift
++	shift
++	;;
++    x--device=*)
++	DEVICE=$(echo "x$1" | sed 's/^x--device=//')
++	shift
++	;;
++    x-h|x-\?|x--help)
++	usage
++	exit 0
++	;;
++    x-V|x--version)
++	echo "ekey-rekey version 1"
++	exit 0
++	;;
++    x--)
++	shift
++	break
++	;;
++    x|x-*)
++	# empty or unknown -o or unknown --long-option
++	usage
++	exit 1
++	;;
++    *)
++	# non-option argument
++	optloop=0
++	;;
++    esac
++done
+ 
+-if test "x$2" = "x"; then
++if test $# -ne 2; then
+     usage
+     exit 1
+ fi
+ 
+-if test "x$1" = "x--help"; then
+-    usage
+-    exit 0
+-fi
+-
+-if test "x$1" = "x--version"; then
+-    echo "ekey-rekey version 1"
+-    exit 0
+-fi
+-
+-if test "x$1" = "x--device" -o "x$1" = "x-d"; then
+-    DEVICE="$2"
+-    shift
+-    shift
+-fi
+-
+-SERIAL="$1"
++SERIAL=$1
+ # alter the serial number to ensure it contains no path separators
+ SERIALP="$(echo "$1" | tr / .)"
+ 
+-: ${DEVICE="/dev/entropykey/$SERIALP"}
+-SOCKET="/var/run/entropykeys/$SERIALP"
++: ${DEVICE=/dev/entropykey/$SERIALP}
++SOCKET=/var/run/entropykeys/$SERIALP
+ 
+-NODETOUSE="$DEVICE"
++NODETOUSE=$DEVICE
+ 
+ shift
+ 
+ MASTERKEY=$(echo $@@ | tr -d ' ')
+ 
+-if ! test -e "$DEVICE"; then
++if test '!' -e "$DEVICE"; then
+     NODETOUSE="$SOCKET"
+-    if ! test -e "$SOCKET"; then
+-	echo "Unable to find $DEVICE or $SOCKET for $SERIAL"
++    if test '!' -e "$SOCKET"; then
++	echo >&2 "Unable to find $DEVICE or $SOCKET for $SERIAL"
+ 	exit 2
+     fi
+ fi
+ 
+-ctl () {
++ctl() {
+     ekeydctl "$@@" 2>/dev/null
+ }
+ 
+@@@@ -69,16 +85,16 @@@@ ctl () {
+ # Try to ensure that any running daemon ignores the key
+ ctl remove "$SERIAL"
+ test $? = 4 && {
+-    echo "Unable to generate new long-term key."
+-    echo "Could not detach key from daemon."
+-    echo "Try stopping the daemon before re-running the rekey tool."
++    echo >&2 "Unable to generate new long-term key."
++    echo >&2 "Could not detach key from daemon."
++    echo >&2 "Try stopping the daemon before re-running the rekey tool."
+     exit 4
+ }
+ 
+ # Generate the new key
+ ekey-setkey -s "$SERIAL" -m "$MASTERKEY" -f "$KEYRING" "$NODETOUSE"
+ if test $? -ne 0; then
+-    echo "Unable to generate new long-term key"
++    echo >&2 "Unable to generate new long-term key"
+ fi
+ 
+ # Re-add the new keyring
+@
+
+
+1.2
+log
+@update (most of our patches have been accepted, but ekey-rekey is
+really FUBAR’d now in upstream, couldn’t work, and the rest are to
+fix some really bad programming practice leading to a strcpy
+@
+text
+@d1 1
+a1 1
+$MirOS$
+@
+
+
+1.1
+log
+@experimental port for the Simtec eKey control software
+@
+text
+@d2 8
+a9 4
+--- daemon/ekey-rekey.in.orig	Wed Oct 14 15:28:56 2009
++++ daemon/ekey-rekey.in	Sat Nov 14 21:48:09 2009
+@@@@ -7,10 +7,20 @@@@ fi
+ usage () {
+d12 6
+a17 2
+-Usage: ekey-rekey SERIAL MASTERKEY
++Usage: ekey-rekey [-d PATH] SERIAL MASTERKEY
+d21 42
+a62 11
++if test "x$1" = "x-d"; then
++    if test "x$2" = "x"; then
++        usage
++        exit 1
++    fi
++    DEVICE=$2
++    shift
++    shift
++fi
++
+ if test "x$1" = "x"; then
+d65 20
+a84 1
+@@@@ -35,7 +45,7 @@@@ SERIAL="$1"
+a86 5
+ MASTERKEY="$2"
+-DEVICE="/dev/entropykey/$SERIALP"
++: ${DEVICE="/dev/entropykey/$SERIALP"}
+ SOCKET="/var/run/entropykeys/$SERIALP"
+ NODETOUSE="$DEVICE"
+d88 49
+@
+

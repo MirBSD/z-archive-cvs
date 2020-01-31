@@ -1,0 +1,537 @@
+head	1.12;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.1
+	cvs-200808011000:1.1.1.1
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507032030:1.1.1.1
+	cvs-200505050030:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.12
+date	2009.01.11.15.34.46;	author tg;	state dead;
+branches;
+next	1.11;
+commitid	100496A119B31D04903;
+
+1.11
+date	2009.01.10.22.18.54;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	10049691EDB67E0F5CA;
+
+1.10
+date	2009.01.10.20.28.29;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004969050259BEA59F;
+
+1.9
+date	2009.01.10.18.15.10;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004968E59B158ABED9;
+
+1.8
+date	2009.01.10.14.38.49;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004968B3060A76F359;
+
+1.7
+date	2009.01.10.13.58.58;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004968A9A5662F59EA;
+
+1.6
+date	2009.01.10.13.41.19;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004968A59443A02B58;
+
+1.5
+date	2009.01.10.11.58.01;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10049688D4C6703171F;
+
+1.4
+date	2009.01.03.13.43.33;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100495F6B566145BE45;
+
+1.3
+date	2009.01.01.17.46.20;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100495D00F40CC2CEE6;
+
+1.2
+date	2008.12.28.19.04.32;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004957CDD62B4D72F5;
+
+1.1
+date	2005.02.05.17.27.29;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.27.29;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.12
+log
+@nuke some of the pxeboot remnants
+• net.c is needed (and included)
+• pxeboot.8 and boot.8 need to be merged some time, later…
+@
+text
+@/*	$OpenBSD: srt0.S,v 1.1 2004/03/19 13:48:19 tom Exp $	*/
+
+/*
+ * Copyright (c) 1997 Michael Shalayeff
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR 
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */
+#include <machine/asm.h>
+#include <assym.h>
+
+#define BOOTSTACK 0x3FFFC
+
+	.globl	_C_LABEL(end)
+	.globl	_C_LABEL(edata)
+	.globl	_C_LABEL(boot)
+	.globl	_C_LABEL(_rtt)
+	.globl	_C_LABEL(bios_bootpte)
+	.globl	i386_userpt
+	.globl	i386_biosdev
+	.globl	i386_biosflags
+	.globl	i386_dosdev
+	.globl	idt_init
+	.globl	Gdtr
+
+	.text
+	.code16
+	.globl	_start
+_start:
+#ifdef DEBUG
+	movl	$0xb80a0, %ebx
+	addr32 movl $0x07420742, (%ebx)
+#endif
+
+/* Clobbers %ax, maybe more */
+#define	putc(c)		movb	$c, %al;	call	Lchr
+
+	/*
+	 * We are loaded by the PXE loader at location 0x7C00.  Like
+	 * the standard /boot, we are linked to run at 0x40000, so
+	 * we relocate to there.
+	 *
+	 * From 0x7C00 to 0x40000 is 0x38400 (230400) bytes, so don't
+	 * have to worry about an overlapping copy until pxeboot is
+	 * over 225 KB.
+	 *
+	 * Note that there are other reasons to be worried if
+	 * sizeof(/boot) > 64 KB.  So currently we copy a maximum of 64 KB.
+	 *
+	 * PXE loads us with a stack that grows down from 0x80000 (512 KB).
+	 * While it is unlikely that this will clash with our code that
+	 * we're copying up, we create a temporary stack just below us
+	 * before the relocate.  We also set the entire %esp register, to
+	 * be on the safe side.
+	 */
+#define PXEBOOTADDR	0x7c00		/* Address where we are loaded by PXE */
+	xorw	%ax, %ax
+	movw	%ax, %ss		/* CPU disables interrupts till.. */
+	movl	$PXEBOOTADDR-4, %esp	/* after this instruction */
+
+	movw	$(PXEBOOTADDR >> 4), %ax
+	movw	%ax, %ds
+	xorw	%si, %si		/* Where we're coming from */
+
+	movw	$(SA_LINKADDR >> 4), %ax
+	movw	%ax, %es		/* Set %es = 0x4000 */
+	xorw	%di, %di		/* Where we're going to */
+
+	movl	$_C_LABEL(end), %ecx
+	subl	$_C_LABEL(_start), %ecx	/* How big are we? */
+
+	cld
+	rep; movsb			/* Copy into place */
+
+	jmpl	$(SA_LINKADDR >> 4), $(relocated-_start)	/* Now relocate */
+
+relocated:
+	.intel_syntax noprefix
+	cli
+	mov	ax,cs
+	mov	ds,ax
+	mov	es,ax
+	mov	ax,0x3000
+	mov	ss,ax
+	mov	esp,0x0000FFFC
+	/* Set up an interrupt descriptor table for protected mode. */
+	call	idt_init
+	/*
+	 * In 16-bit mode, we have segment registers == 0x4000, and
+	 * offsets work from here, with offset(_start) == 0.
+	 *
+	 * In 32-bit mode, we have a flat memory model, where
+	 * offset(_start) == 0x40000.  This is how we're linked.
+	 *
+	 * Now transition to protected mode.
+	 */
+	call	real_to_prot
+	.code32
+	mov	ax,ds
+	.att_syntax
+	mov	%ax, %fs
+	mov	%ax, %gs
+#ifdef DEBUG
+	movl	$0xb8000, %ebx
+	movl	$0x07420742, (%ebx)
+#endif
+
+	xorl	%edx, %edx
+	pushl	%edx			/* boot() takes this as a parameter */
+
+#ifdef DEBUG
+	movl	$0xb80a4, %ebx
+	movl	$0x07520752, (%ebx)
+#endif
+
+	/* Zero .bss */
+	xorl	%eax, %eax
+	movl	$_C_LABEL(end), %ecx
+	subl	$_C_LABEL(edata), %ecx
+	movl	$_C_LABEL(edata), %edi
+	cld
+	rep;	stosb
+
+	/* Set our program name ("PXEBOOT", not "BOOT"). */
+	movl	$pxe_progname, %eax
+	movl	%eax, progname
+
+	/*
+	 * Now call "main()".
+	 *
+	 * We run in flat 32-bit protected mode, with no address mapping.
+	 */
+#ifdef DEBUG
+	movl	$0xb8004, %ebx
+	movl	$0x07410741, (%ebx)
+#endif
+	call	_C_LABEL(boot)
+
+	/* boot() should not return.  If it does, reset computer. */
+	jmp	_C_LABEL(_rtt)
+
+ENTRY(debugchar)
+	pushl	%ebx
+	movl	8(%esp), %ebx
+	addl	%ebx, %ebx
+	addl	$0xb8000, %ebx
+
+	xorl	%eax, %eax
+	movb	12(%esp), %al
+	
+	andl	$0xfffffffe, %ebx
+	movb	%al, (%ebx)
+	popl	%ebx
+	ret
+
+	.code16
+
+/*
+ * Write out value in %ax in hex
+ */
+hex_word:
+	pushw	%ax
+	mov	%ah, %al
+	call	hex_byte
+	popw	%ax
+	/* fall thru */
+/*
+ * Write out value in %al in hex
+ */
+hex_byte:
+	pushw	%ax
+	shrb	$4, %al
+	call	hex_nibble
+	popw	%ax
+	/* fall thru */
+
+/* Write out nibble in %al */
+hex_nibble:
+	and	$0x0F, %al
+	add	$'0', %al
+	cmpb	$'9', %al
+	jbe	Lchr
+	addb	$'A'-'9'-1, %al
+	/* fall thru to Lchr */
+/*
+ *	Lchr: write the character in %al to console
+ */
+Lchr:
+	pushw	%bx
+	movb	$0x0e, %ah
+	xorw	%bx, %bx
+	incw	%bx		/* movw $0x01, %bx */
+	int	$0x10
+	popw	%bx
+	ret
+
+pxe_progname:
+	.asciz	"PXEBOOT"
+
+_C_LABEL(bios_bootpte):
+	.long	0, 0, 0, 0
+i386_userpt:
+i386_biosdev:
+i386_biosflags:
+i386_dosdev:
+	.byte	0
+
+	.globl	pxe_bang
+	.globl	pxe_plus
+pxe_bang:
+pxe_plus:
+	.long	0
+
+	bounce_buf = 0x30000
+	.globl	bounce_buf
+	.size	bounce_buf, 4096
+@
+
+
+1.11
+log
+@more work towards unifying devices (and network)
+@
+text
+@@
+
+
+1.10
+log
+@shuffle some defns around
+@
+text
+@d228 6
+@
+
+
+1.9
+log
+@new loader and stuff (new bootxx too, *incompatible*!)
+still not usable until biosdev/-probe rewrite though…
+
+syslinux, dos, multiboot operation not tested yet, either
+@
+text
+@d39 4
+a42 1
+	.globl	_C_LABEL(i386_userpt)
+d222 4
+a225 1
+_C_LABEL(i386_userpt):
+@
+
+
+1.8
+log
+@move bounce buffer out of .bss section to bottom of SS
+@
+text
+@a37 1
+	.globl	_C_LABEL(bios_bootdev)
+d39 1
+a125 1
+	movl	%edx, _C_LABEL(bios_bootdev)
+d219 2
+@
+
+
+1.7
+log
+@rename pmm_init into idt_init and let it run in 16 bit mode already,
+so that we can use real_to_prot for the actual switch
+@
+text
+@d221 2
+a222 2
+	.bss
+	.globl	_C_LABEL(bounce_buf)
+a223 5
+	.p2align 4
+_C_LABEL(bounce_buf):
+	.skip	4096
+
+	.end
+@
+
+
+1.6
+log
+@new memory layout, part 1
+@
+text
+@d40 1
+a40 1
+	.globl	_ASM_LABEL(pmm_init)
+d95 10
+a112 2
+	 *
+	 * First, initialise the global descriptor table.
+d114 1
+a114 10
+	cli
+	push	%cs
+	pop	%ds
+	addr32 data32 lgdt (Gdtr - SA_LINKADDR)
+
+	movl	%cr0, %eax
+	orl	$CR0_PE, %eax
+	data32 movl %eax, %cr0
+	data32 ljmp $8, $1f		/* Seg sel 0x08 is flat 32-bit code */
+1:
+d116 2
+a117 3
+	movl	$0x10, %eax		/* Seg sel 0x10 is flat 32-bit data */
+	mov	%ax, %ds
+	mov	%ax, %es
+a119 2
+	mov	%ax, %ss
+	movl	$BOOTSTACK, %esp
+a128 2
+	/* Set up an interrupt descriptor table for protected mode. */
+	call	_ASM_LABEL(pmm_init)
+@
+
+
+1.5
+log
+@LINKADDR, LINKSEG, LOADADDR, LOADSEG, SA_{LINK,LOAD}{ADDR,SEG} cleanup
+@
+text
+@d32 1
+a32 1
+#define BOOTSTACK 0xfffc
+d57 2
+a58 2
+	 * the standard /boot, we are linked to run at 0x40120 (load
+	 * address 0x40000), so we relocate to there.
+d96 1
+a96 1
+	 * In 16-bit mode, we have segment registers == 0x4012, and
+d100 1
+a100 1
+	 * offset(_start) == 0x40120.  This is how we're linked.
+@
+
+
+1.4
+log
+@• cut down on stack usage
+• improve reliability (especially on 64K and larger reads)
+• remove alloca
+• nuke tori transfer buffer
+by making use of a paragraph-aligned 4 KiB bounce buffer very early in
+the .bss section (allocated in srt0.S, which is first in link)
+
+XXX biosdev.c ist eine Ausgeburt an Häßlichkeit!
+@
+text
+@d82 1
+a82 1
+	movw	$(LINKADDR >> 4), %ax
+d92 1
+a92 1
+	jmpl	$(LINKADDR >> 4), $(relocated-_start)	/* Now relocate */
+d109 1
+a109 1
+	addr32 data32 lgdt (Gdtr - LINKADDR)
+@
+
+
+1.3
+log
+@rename uint32_t bios_bootpart[2] into uint32_t bios_bootpte[4]
+and preserve the whole partition record (table entry)
+@
+text
+@d227 7
+@
+
+
+1.2
+log
+@new two-long array bios_bootpart[]
+@
+text
+@d39 1
+a39 1
+	.globl	_C_LABEL(bios_bootpart)
+d224 2
+a225 2
+_C_LABEL(bios_bootpart):
+	.long	0, 0
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d39 1
+d224 3
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

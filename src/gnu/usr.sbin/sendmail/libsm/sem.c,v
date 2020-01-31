@@ -1,0 +1,627 @@
+head	1.3;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.3
+	sendmail-8_14_7:1.1.127.2
+	sendmail-8_14_6:1.1.127.2
+	sendmail-8_14_5-ERRATA-1:1.1.127.2
+	mbsd-20101220_mergebase:1.2
+	sendmail-8_14_5:1.1.127.2
+	cvs-201107021500:1.1.1.4
+	cvs-20101220:1.1.1.3
+	mbsd-20101220:1.2.0.2
+	cvs-201012191730:1.1.1.2
+	sendmail-8_14_5_Beta0:1.1.127.2
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.2
+	cvs-200805071200:1.1.1.2
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200803022030:1.1.1.2
+	cvs-200707152000:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200702051700:1.1.1.2
+	cvs-200609121900:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.2
+	cvs-200606151800:1.1.1.2
+	cvs-200603231300:1.1.1.2
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2014.06.09.15.17.29;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005395CFC65E5646F1;
+
+1.2
+date	2010.12.19.17.18.13;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004D0E3E2D1286B3DF;
+
+1.1
+date	2005.04.26.20.58.24;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.04.26.20.58.24;	author tg;	state Exp;
+branches
+	1.1.1.1.2.1;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.03.23.13.09.37;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	10044229DEA33D36552;
+
+1.1.1.3
+date	2011.07.02.15.00.12;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.4
+date	2011.07.02.15.17.39;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F36A10B5CA95B;
+
+1.1.1.1.2.1
+date	2006.03.30.19.27.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	100442C309C7183FA09;
+
+1.1.127.1
+date	2010.12.19.14.45.49;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2010.12.19.14.56.29;	author tg;	state Exp;
+branches;
+next	1.1.127.3;
+commitid	1004D0E1D294DE25888;
+
+1.1.127.3
+date	2014.06.09.14.29.21;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@/*
+ * Copyright (c) 2000-2001, 2005, 2008 Proofpoint, Inc. and its suppliers.
+ *      All rights reserved.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: sem.c,v 1.15 2013-11-22 20:51:43 ca Exp $")
+
+#if SM_CONF_SEM
+# include <stdlib.h>
+# include <unistd.h>
+# include <sm/string.h>
+# include <sm/sem.h>
+# include <sm/heap.h>
+# include <errno.h>
+
+/*
+**  SM_SEM_START -- initialize semaphores
+**
+**	Parameters:
+**		key -- key for semaphores.
+**		nsem -- number of semaphores.
+**		semflg -- flag for semget(), if 0, use a default.
+**		owner -- create semaphores.
+**
+**	Returns:
+**		id for semaphores.
+**		< 0 on failure.
+*/
+
+int
+sm_sem_start(key, nsem, semflg, owner)
+	key_t key;
+	int nsem;
+	int semflg;
+	bool owner;
+{
+	int semid, i, err;
+	unsigned short *semvals;
+
+	semvals = NULL;
+	if (semflg == 0)
+		semflg = (SEM_A|SEM_R)|((SEM_A|SEM_R) >> 3);
+	if (owner)
+		semflg |= IPC_CREAT|IPC_EXCL;
+	semid = semget(key, nsem, semflg);
+	if (semid < 0)
+		goto error;
+
+	if (owner)
+	{
+		union semun semarg;
+
+		semvals = (unsigned short *) sm_malloc(nsem * sizeof semvals);
+		if (semvals == NULL)
+			goto error;
+		semarg.array = semvals;
+
+		/* initialize semaphore values to be available */
+		for (i = 0; i < nsem; i++)
+			semvals[i] = 1;
+		if (semctl(semid, 0, SETALL, semarg) < 0)
+			goto error;
+	}
+	return semid;
+
+error:
+	err = errno;
+	if (semvals != NULL)
+		sm_free(semvals);
+	if (semid >= 0)
+		sm_sem_stop(semid);
+	return (err > 0) ? (0 - err) : -1;
+}
+
+/*
+**  SM_SEM_STOP -- stop using semaphores.
+**
+**	Parameters:
+**		semid -- id for semaphores.
+**
+**	Returns:
+**		0 on success.
+**		< 0 on failure.
+*/
+
+int
+sm_sem_stop(semid)
+	int semid;
+{
+	return semctl(semid, 0, IPC_RMID, NULL);
+}
+
+/*
+**  SM_SEM_ACQ -- acquire semaphore.
+**
+**	Parameters:
+**		semid -- id for semaphores.
+**		semnum -- number of semaphore.
+**		timeout -- how long to wait for operation to succeed.
+**
+**	Returns:
+**		0 on success.
+**		< 0 on failure.
+*/
+
+int
+sm_sem_acq(semid, semnum, timeout)
+	int semid;
+	int semnum;
+	int timeout;
+{
+	int r;
+	struct sembuf semops[1];
+
+	semops[0].sem_num = semnum;
+	semops[0].sem_op = -1;
+	semops[0].sem_flg = SEM_UNDO |
+			    (timeout != SM_TIME_FOREVER ? 0 : IPC_NOWAIT);
+	if (timeout == SM_TIME_IMMEDIATE || timeout == SM_TIME_FOREVER)
+		return semop(semid, semops, 1);
+	do
+	{
+		r = semop(semid, semops, 1);
+		if (r == 0)
+			return r;
+		sleep(1);
+		--timeout;
+	} while (timeout > 0);
+	return r;
+}
+
+/*
+**  SM_SEM_REL -- release semaphore.
+**
+**	Parameters:
+**		semid -- id for semaphores.
+**		semnum -- number of semaphore.
+**		timeout -- how long to wait for operation to succeed.
+**
+**	Returns:
+**		0 on success.
+**		< 0 on failure.
+*/
+
+int
+sm_sem_rel(semid, semnum, timeout)
+	int semid;
+	int semnum;
+	int timeout;
+{
+	int r;
+	struct sembuf semops[1];
+
+#if PARANOID
+	/* XXX should we check whether the value is already 0 ? */
+	SM_REQUIRE(sm_get_sem(semid, semnum) > 0);
+#endif /* PARANOID */
+
+	semops[0].sem_num = semnum;
+	semops[0].sem_op = 1;
+	semops[0].sem_flg = SEM_UNDO |
+			    (timeout != SM_TIME_FOREVER ? 0 : IPC_NOWAIT);
+	if (timeout == SM_TIME_IMMEDIATE || timeout == SM_TIME_FOREVER)
+		return semop(semid, semops, 1);
+	do
+	{
+		r = semop(semid, semops, 1);
+		if (r == 0)
+			return r;
+		sleep(1);
+		--timeout;
+	} while (timeout > 0);
+	return r;
+}
+
+/*
+**  SM_SEM_GET -- get semaphore value.
+**
+**	Parameters:
+**		semid -- id for semaphores.
+**		semnum -- number of semaphore.
+**
+**	Returns:
+**		value of semaphore on success.
+**		< 0 on failure.
+*/
+
+int
+sm_sem_get(semid, semnum)
+	int semid;
+	int semnum;
+{
+	int semval;
+
+	if ((semval = semctl(semid, semnum, GETVAL, NULL)) < 0)
+		return -1;
+	return semval;
+}
+
+/*
+**  SM_SEMSETOWNER -- set owner/group/mode of semaphores.
+**
+**	Parameters:
+**		semid -- id for semaphores.
+**		uid -- uid to use
+**		gid -- gid to use
+**		mode -- mode to use
+**
+**	Returns:
+**		0 on success.
+**		< 0 on failure.
+*/
+
+int
+sm_semsetowner(semid, uid, gid, mode)
+	int semid;
+	uid_t uid;
+	gid_t gid;
+	mode_t mode;
+{
+	int r;
+	struct semid_ds	semidds;
+	union semun {
+		int		val;
+		struct semid_ds	*buf;
+		ushort		*array;
+	} arg;
+
+	memset(&semidds, 0, sizeof(semidds));
+	arg.buf = &semidds;
+	if ((r = semctl(semid, 1, IPC_STAT, arg)) < 0)
+		return r;
+	semidds.sem_perm.uid = uid;
+	semidds.sem_perm.gid = gid;
+	semidds.sem_perm.mode = mode;
+	if ((r = semctl(semid, 1, IPC_SET, arg)) < 0)
+		return r;
+	return 0;
+}
+#endif /* SM_CONF_SEM */
+@
+
+
+1.2
+log
+@merge newer sendmail; fix and correct; reduce upstream diffs; prep for deb
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001, 2005, 2008 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Id: sem.c,v 1.14 2008/05/30 16:26:38 ca Exp $")
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001, 2005 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Sendmail: sem.c,v 1.12 2005/03/25 21:27:02 ca Exp $")
+d16 1
+d19 1
+d42 1
+a42 1
+	int semid, i;
+d72 1
+d77 1
+a77 1
+	return -1;
+d204 41
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Id: sem.c,v 1.13 2005/08/12 20:39:59 ca Exp $")
+a17 1
+# include <errno.h>
+d40 1
+a40 1
+	int semid, i, err;
+a69 1
+	err = errno;
+d74 1
+a74 1
+	return (err > 0) ? (0 - err) : -1;
+@
+
+
+1.1.127.2
+log
+@Import sendmail.8.14.5.Beta0.tar.gz
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001, 2005, 2008 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Id: sem.c,v 1.14 2008/05/30 16:26:38 ca Exp $")
+a15 1
+# include <sm/string.h>
+a202 41
+
+/*
+**  SM_SEMSETOWNER -- set owner/group/mode of semaphores.
+**
+**	Parameters:
+**		semid -- id for semaphores.
+**		uid -- uid to use
+**		gid -- gid to use
+**		mode -- mode to use
+**
+**	Returns:
+**		0 on success.
+**		< 0 on failure.
+*/
+
+int
+sm_semsetowner(semid, uid, gid, mode)
+	int semid;
+	uid_t uid;
+	gid_t gid;
+	mode_t mode;
+{
+	int r;
+	struct semid_ds	semidds;
+	union semun {
+		int		val;
+		struct semid_ds	*buf;
+		ushort		*array;
+	} arg;
+
+	memset(&semidds, 0, sizeof(semidds));
+	arg.buf = &semidds;
+	if ((r = semctl(semid, 1, IPC_STAT, arg)) < 0)
+		return r;
+	semidds.sem_perm.uid = uid;
+	semidds.sem_perm.gid = gid;
+	semidds.sem_perm.mode = mode;
+	if ((r = semctl(semid, 1, IPC_SET, arg)) < 0)
+		return r;
+	return 0;
+}
+@
+
+
+1.1.127.3
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001, 2005, 2008 Proofpoint, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Id: sem.c,v 1.15 2013-11-22 20:51:43 ca Exp $")
+@
+
+
+1.1.1.1
+log
+@I persuaded myself to import another fix... though sendmail needed
+much less updates/fixes recently than any other MTA (except qm�ll)
+@
+text
+@@
+
+
+1.1.1.1.2.1
+log
+@MFC most of the recent sendmail updates to MirOS #8-stable
+agreed bsiegert@@
+
+This also changes the LOCALBASE stuff, links libmilter not
+against LDAP, etc. but doesn't install the FreeBSD 6 confs
+nor a shared libmilter in order to pass a no-files-diff:
+
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo find / -ls | sort -k11 >~/x1
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo make install
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo make distribution
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo find / -ls | sort -k11 | diff -u ~/x1 - | less
+
+Note: files in /etc/mail/ are also changed, this affects the etc8.ngz set
+on fresh installs and cannot(!) be automatically upgraded!
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Sendmail: sem.c,v 1.13 2005/08/12 20:39:59 ca Exp $")
+a17 1
+# include <errno.h>
+d40 1
+a40 1
+	int semid, i, err;
+a69 1
+	err = errno;
+d74 1
+a74 1
+	return (err > 0) ? (0 - err) : -1;
+@
+
+
+1.1.1.2
+log
+@Update to Sendmail 8.13.6
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Sendmail: sem.c,v 1.13 2005/08/12 20:39:59 ca Exp $")
+a17 1
+# include <errno.h>
+d40 1
+a40 1
+	int semid, i, err;
+a69 1
+	err = errno;
+d74 1
+a74 1
+	return (err > 0) ? (0 - err) : -1;
+@
+
+
+1.1.1.3
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Id: sem.c,v 1.13 2005/08/12 20:39:59 ca Exp $")
+@
+
+
+1.1.1.4
+log
+@Import OpenBSD’s sendmail 8.14.5, RCS IDs properly sedded back
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001, 2005, 2008 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Id: sem.c,v 1.14 2008/05/30 16:26:38 ca Exp $")
+a15 1
+# include <sm/string.h>
+a202 41
+
+/*
+**  SM_SEMSETOWNER -- set owner/group/mode of semaphores.
+**
+**	Parameters:
+**		semid -- id for semaphores.
+**		uid -- uid to use
+**		gid -- gid to use
+**		mode -- mode to use
+**
+**	Returns:
+**		0 on success.
+**		< 0 on failure.
+*/
+
+int
+sm_semsetowner(semid, uid, gid, mode)
+	int semid;
+	uid_t uid;
+	gid_t gid;
+	mode_t mode;
+{
+	int r;
+	struct semid_ds	semidds;
+	union semun {
+		int		val;
+		struct semid_ds	*buf;
+		ushort		*array;
+	} arg;
+
+	memset(&semidds, 0, sizeof(semidds));
+	arg.buf = &semidds;
+	if ((r = semctl(semid, 1, IPC_STAT, arg)) < 0)
+		return r;
+	semidds.sem_perm.uid = uid;
+	semidds.sem_perm.gid = gid;
+	semidds.sem_perm.mode = mode;
+	if ((r = semctl(semid, 1, IPC_SET, arg)) < 0)
+		return r;
+	return 0;
+}
+@
+
+

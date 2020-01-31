@@ -1,0 +1,392 @@
+head	1.3;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.2.4.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.3
+	cvs-20101220:1.1.1.3
+	mbsd-20101220:1.1.1.2.0.4
+	cvs-201012191730:1.1.1.2
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.2
+	cvs-200805071200:1.1.1.2
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200803022030:1.1.1.2
+	cvs-200707152000:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200702051700:1.1.1.2
+	cvs-200609121900:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.2
+	cvs-200606151800:1.1.1.2
+	cvs-200603231300:1.1.1.2
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2014.06.09.15.17.23;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005395CFC65E5646F1;
+
+1.2
+date	2011.07.02.15.03.49;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E0F31C5496AB95F;
+
+1.1
+date	2005.02.05.17.24.23;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.23;	author tg;	state Exp;
+branches
+	1.1.1.1.2.1;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.03.23.13.09.29;	author tg;	state Exp;
+branches
+	1.1.1.2.4.1;
+next	1.1.1.3;
+commitid	10044229DEA33D36552;
+
+1.1.1.3
+date	2011.07.02.15.00.01;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.1.2.1
+date	2006.03.30.19.27.45;	author tg;	state Exp;
+branches;
+next	;
+commitid	100442C309C7183FA09;
+
+1.1.1.2.4.1
+date	2011.07.02.15.02.22;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.127.1
+date	2010.12.19.14.45.48;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2014.06.09.14.29.20;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@/*
+ * Copyright (c) 2000-2001, 2004 Proofpoint, Inc. and its suppliers.
+ *      All rights reserved.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: b-strcmp.c,v 1.15 2013-11-22 20:51:42 ca Exp $")
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sm/time.h>
+#include <sm/string.h>
+
+#define toseconds(x, y)	(x.tv_sec - y.tv_sec)
+#define SIZE	512
+#define LOOPS	4000000L	/* initial number of loops */
+#define MAXTIME	30L	/* "maximum" time to run single test */
+
+void fatal __P((char *));
+void purpose __P((void));
+int main __P((int, char *[]));
+
+void
+fatal(str)
+	char *str;
+{
+	perror(str);
+	exit(1);
+}
+
+void
+purpose()
+{
+	printf("This program benchmarks the performance differences between\n");
+	printf("strcasecmp() and sm_strcasecmp().\n");
+	printf("These tests may take several minutes to complete.\n");
+}
+
+int
+main(argc, argv)
+	int argc;
+	char *argv[];
+{
+	long a;
+	int k;
+	bool doit = false;
+	long loops;
+	long j;
+	long one, two;
+	struct timeval t1, t2;
+	char src1[SIZE], src2[SIZE];
+
+# define OPTIONS	"d"
+	while ((k = getopt(argc, argv, OPTIONS)) != -1)
+	{
+		switch ((char) k)
+		{
+		  case 'd':
+			doit = true;
+			break;
+
+		  default:
+			break;
+		}
+	}
+
+	if (!doit)
+	{
+		purpose();
+		printf("If you want to run it, specify -d as option.\n");
+		return 0;
+	}
+
+	/* Run-time comments to the user */
+	purpose();
+	printf("\n");
+	for (k = 0; k < 3; k++)
+	{
+		switch (k)
+		{
+		  case 0:
+			(void) sm_strlcpy(src1, "1234567890", SIZE);
+			(void) sm_strlcpy(src2, "1234567890", SIZE);
+			break;
+		  case 1:
+			(void) sm_strlcpy(src1, "1234567890", SIZE);
+			(void) sm_strlcpy(src2, "1234567891", SIZE);
+			break;
+		  case 2:
+			(void) sm_strlcpy(src1, "1234567892", SIZE);
+			(void) sm_strlcpy(src2, "1234567891", SIZE);
+			break;
+		}
+		printf("Test %d: strcasecmp(%s, %s) versus sm_strcasecmp()\n",
+			k, src1, src2);
+		loops = LOOPS;
+		for (;;)
+		{
+			j = 0;
+			if (gettimeofday(&t1, NULL) < 0)
+				fatal("gettimeofday");
+			for (a = 0; a < loops; a++)
+				j += strcasecmp(src1, src2);
+			if (gettimeofday(&t2, NULL) < 0)
+				fatal("gettimeofday");
+			one = toseconds(t2, t1);
+			printf("\tstrcasecmp() result: %ld seconds [%ld]\n",
+				one, j);
+
+			j = 0;
+			if (gettimeofday(&t1, NULL) < 0)
+				fatal("gettimeofday");
+			for (a = 0; a < loops; a++)
+				j += sm_strcasecmp(src1, src2);
+			if (gettimeofday(&t2, NULL) < 0)
+				fatal("gettimeofday");
+			two = toseconds(t2, t1);
+			printf("\tsm_strcasecmp() result: %ld seconds [%ld]\n",
+				two, j);
+
+			if (abs(one - two) > 2)
+				break;
+			loops += loops;
+			if (loops < 0L || one > MAXTIME)
+			{
+				printf("\t\t** results too close: no decision\n");
+				break;
+			}
+			else
+			{
+				printf("\t\t** results too close redoing test %ld times **\n",
+					loops);
+			}
+		}
+	}
+
+	printf("\n\n");
+	printf("Interpreting the results:\n");
+	printf("\tFor differences larger than 2 seconds, the lower value is\n");
+	printf("\tbetter and that function should be used for performance\n");
+	printf("\treasons.\n\n");
+	printf("This program will re-run the tests when the difference is\n");
+	printf("less than 2 seconds.\n");
+	printf("The result will vary depending on the compiler optimization\n");	printf("level used. Compiling the sendmail libsm library with a\n");
+	printf("better optimization level can change the results.\n");
+	return 0;
+}
+@
+
+
+1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001, 2004 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Id: b-strcmp.c,v 1.14 2005/06/14 23:07:20 ca Exp $")
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Sendmail: b-strcmp.c,v 1.13 2004/08/03 20:07:59 ca Exp $")
+d16 1
+a16 1
+#include <sys/time.h>
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Id: b-strcmp.c,v 1.14 2005/06/14 23:07:20 ca Exp $")
+d16 1
+a16 1
+#include <sm/time.h>
+@
+
+
+1.1.127.2
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001, 2004 Proofpoint, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Id: b-strcmp.c,v 1.15 2013-11-22 20:51:42 ca Exp $")
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.1.2.1
+log
+@MFC most of the recent sendmail updates to MirOS #8-stable
+agreed bsiegert@@
+
+This also changes the LOCALBASE stuff, links libmilter not
+against LDAP, etc. but doesn't install the FreeBSD 6 confs
+nor a shared libmilter in order to pass a no-files-diff:
+
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo find / -ls | sort -k11 >~/x1
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo make install
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo make distribution
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo find / -ls | sort -k11 | diff -u ~/x1 - | less
+
+Note: files in /etc/mail/ are also changed, this affects the etc8.ngz set
+on fresh installs and cannot(!) be automatically upgraded!
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Sendmail: b-strcmp.c,v 1.14 2005/06/14 23:07:20 ca Exp $")
+d16 1
+a16 1
+#include <sm/time.h>
+@
+
+
+1.1.1.2
+log
+@Update to Sendmail 8.13.6
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Sendmail: b-strcmp.c,v 1.14 2005/06/14 23:07:20 ca Exp $")
+d16 1
+a16 1
+#include <sm/time.h>
+@
+
+
+1.1.1.2.4.1
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Id: b-strcmp.c,v 1.14 2005/06/14 23:07:20 ca Exp $")
+@
+
+
+1.1.1.3
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Id: b-strcmp.c,v 1.14 2005/06/14 23:07:20 ca Exp $")
+@
+
+

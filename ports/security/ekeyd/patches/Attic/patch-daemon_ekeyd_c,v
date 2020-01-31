@@ -1,0 +1,127 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2012.01.15.13.47.48;	author tg;	state dead;
+branches;
+next	1.2;
+commitid	1004F12D919735D2719;
+
+1.2
+date	2009.11.22.19.32.34;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004B0991C1317436F4;
+
+1.1
+date	2009.11.14.21.45.30;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004AFF25061DF717E6;
+
+
+desc
+@@
+
+
+1.3
+log
+@update
+@
+text
+@$MirOS: ports/security/ekeyd/patches/patch-daemon_ekeyd_c,v 1.2 2009/11/22 19:32:34 tg Exp $
+--- daemon/ekeyd.c.orig	Tue Nov 17 11:05:01 2009
++++ daemon/ekeyd.c	Sun Nov 22 19:29:01 2009
+@@@@ -105,12 +105,9 @@@@ add_ekey(const char *devpath, const char
+ void 
+ kill_ekey(OpaqueEkey *ekey)
+ {
+-    char serial_num_buffer[32];
+-    serial_num_buffer[0] = serial_num_buffer[16] = 0;
+-    
+-    if (econ_getsnum(ekey, serial_num_buffer) == false)
+-        serial_num_buffer[0] = 0;
+-    
++    char *serial_num_buffer;
++
++    serial_num_buffer = econ_getsnum(ekey);
+     if (ekey->key_stream != NULL) {
+         ekeyfd_rm(econ_get_rd_fd(ekey));
+         syslog(LOG_INFO, "Detaching entropy key %s (%s)", 
+@@@@ -118,6 +115,7 @@@@ kill_ekey(OpaqueEkey *ekey)
+     } else {
+         syslog(LOG_INFO, "Detaching entropy key %s", serial_num_buffer);
+     }
++    free(serial_num_buffer);
+     econ_close(ekey);
+ }
+ 
+@@@@ -144,10 +142,17 @@@@ int query_ekey_status(OpaqueEkey *ekey)
+     }
+ }
+ 
+-bool
+-retrieve_ekey_serial(OpaqueEkey *ekey, char *buf)
++char *
++retrieve_ekey_serial(OpaqueEkey *ekey)
+ {
+-    return econ_getsnum(ekey, buf);
++    char *snum;
++
++    snum = econ_getsnum(ekey);
++    if (!strcmp(snum, "UnknownKey")) {
++        free(snum);
++        snum = NULL;
++    }
++    return (snum);
+ }
+ 
+ bool
+@
+
+
+1.2
+log
+@update (most of our patches have been accepted, but ekey-rekey is
+really FUBAR’d now in upstream, couldn’t work, and the rest are to
+fix some really bad programming practice leading to a strcpy
+@
+text
+@d1 1
+a1 1
+$MirOS$
+@
+
+
+1.1
+log
+@experimental port for the Simtec eKey control software
+@
+text
+@d2 46
+a47 3
+--- daemon/ekeyd.c.orig	Fri Nov  6 12:33:09 2009
++++ daemon/ekeyd.c	Sat Nov 14 21:48:09 2009
+@@@@ -163,10 +163,13 @@@@ open_file_output(const char *fname)
+a48 15
+ open_kernel_output(int bits_per_byte)
+ {
+-    static char *fname = "/dev/random";
+-#ifdef EKEY_OS_OPENBSD
+-    fname = "/dev/srandom";
++    static char fname[] =
++#if defined(EKEY_OS_OPENBSD) || defined(EKEY_OS_MIRBSD)
++      "/dev/srandom"
++#else
++      "/dev/random"
+ #endif
++      ;
+     if (output_stream != NULL) {
+         errno = EADDRINUSE;
+         return false;
+@
+

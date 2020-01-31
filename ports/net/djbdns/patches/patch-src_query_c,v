@@ -1,0 +1,1507 @@
+head	1.9;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.9
+date	2017.03.15.22.45.22;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10058C9C41A0C975C95;
+
+1.8
+date	2017.03.15.22.39.39;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10058C9C2C131BD4C13;
+
+1.7
+date	2017.03.15.22.32.28;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10058C9C1092C8FA5EA;
+
+1.6
+date	2016.07.29.19.38.58;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100579BB0D62C0C7F51;
+
+1.5
+date	2016.06.12.22.32.17;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100575DE30A33D74867;
+
+1.4
+date	2016.06.12.22.28.39;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100575DE22040948CDE;
+
+1.3
+date	2016.03.26.17.29.23;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10056F6C535787D61F0;
+
+1.2
+date	2005.12.14.23.28.37;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043A0AA0E5A220A51;
+
+1.1
+date	2005.05.14.23.21.05;	author tg;	state Exp;
+branches
+	1.1.201.1;
+next	;
+commitid	1e94428687d39445;
+
+1.1.201.1
+date	2005.05.14.23.21.05;	author tg;	state Exp;
+branches;
+next	;
+commitid	1e94428687d39445;
+
+
+desc
+@@
+
+
+1.9
+log
+@finally fix…
+@
+text
+@$MirOS: ports/net/djbdns/patches/patch-src_query_c,v 1.8 2017/03/15 22:39:39 tg Exp $
+--- src/query.c.orig	Sun Feb 11 21:11:23 2001
++++ src/query.c	Wed Mar 15 22:44:13 2017
+@@@@ -12,7 +12,14 @@@@
+ #include "alloc.h"
+ #include "response.h"
+ #include "query.h"
++#include "ip6.h"
+ 
++extern stralloc ignoreip;
++extern uint64 numqueries;
++extern uint64 cache_motion;
++extern int uactive;
++extern int tactive;
++
+ static int flagforwardonly = 0;
+ 
+ void query_forwardonly(void)
+@@@@ -81,7 +88,7 @@@@ static void cleanup(struct query *z)
+   int j;
+   int k;
+ 
+-  dns_transmit_free(&z->dt);
++  qmerge_free(&z->qm);
+   for (j = 0;j < QUERY_MAXALIAS;++j)
+     dns_domain_free(&z->alias[j]);
+   for (j = 0;j < QUERY_MAXLEVEL;++j) {
+@@@@ -91,6 +98,21 @@@@ static void cleanup(struct query *z)
+   }
+ }
+ 
++static int move_name_to_alias(struct query *z,uint32 ttl)
++{
++  int j ;
++
++  if (z->alias[QUERY_MAXALIAS - 1]) return 0 ;
++  for (j = QUERY_MAXALIAS - 1;j > 0;--j)
++    z->alias[j] = z->alias[j - 1];
++  for (j = QUERY_MAXALIAS - 1;j > 0;--j)
++    z->aliasttl[j] = z->aliasttl[j - 1];
++  z->alias[0] = z->name[0];
++  z->aliasttl[0] = ttl;
++  z->name[0] = 0;
++  return 1 ;
++}
++
+ static int rqa(struct query *z)
+ {
+   int i;
+@@@@ -110,7 +132,7 @@@@ static int rqa(struct query *z)
+   return 1;
+ }
+ 
+-static int globalip(char *d,char ip[4])
++static int globalip(char *d,char ip[16])
+ {
+   if (dns_domain_equal(d,"\011localhost\0")) {
+     byte_copy(ip,4,"\177\0\0\1");
+@@@@ -123,7 +145,6 @@@@ static int globalip(char *d,char ip[4])
+ static char *t1 = 0;
+ static char *t2 = 0;
+ static char *t3 = 0;
+-static char *cname = 0;
+ static char *referral = 0;
+ static unsigned int *records = 0;
+ 
+@@@@ -165,7 +186,7 @@@@ static int doit(struct query *z,int stat
+   char *buf;
+   unsigned int len;
+   const char *whichserver;
+-  char header[12];
++  char header[24];
+   char misc[20];
+   unsigned int rcode;
+   unsigned int posanswers;
+@@@@ -179,20 +200,20 @@@@ static int doit(struct query *z,int stat
+   uint16 datalen;
+   char *control;
+   char *d;
++  char *owner_name = 0 ;
+   const char *dtype;
+   unsigned int dlen;
+   int flagout;
+-  int flagcname;
+   int flagreferral;
+   int flagsoa;
+   uint32 ttl;
+   uint32 soattl;
+-  uint32 cnamettl;
+   int i;
+   int j;
+   int k;
+   int p;
+   int q;
++  unsigned int ii;
+ 
+   errno = error_io;
+   if (state == 1) goto HAVEPACKET;
+@@@@ -205,14 +226,15 @@@@ static int doit(struct query *z,int stat
+   NEWNAME:
+   if (++z->loop == 100) goto DIE;
+   d = z->name[z->level];
+-  dtype = z->level ? DNS_T_A : z->type;
++  dtype = z->level ? (z->ipv6[z->level] ? DNS_T_AAAA : DNS_T_A) : z->type;
+   dlen = dns_domain_length(d);
+ 
+   if (globalip(d,misc)) {
+     if (z->level) {
+-      for (k = 0;k < 64;k += 4)
+-        if (byte_equal(z->servers[z->level - 1] + k,4,"\0\0\0\0")) {
+-	  byte_copy(z->servers[z->level - 1] + k,4,misc);
++      for (k = 0;k < 256;k += 16)
++        if (byte_equal(z->servers[z->level - 1] + k,16,V6any)) {
++	  byte_copy(z->servers[z->level - 1] + k,12,V4mappedprefix);
++	  byte_copy(z->servers[z->level - 1] + k + 12,4,misc);
+ 	  break;
+ 	}
+       goto LOWERLEVEL;
+@@@@ -227,6 +249,158 @@@@ static int doit(struct query *z,int stat
+     return 1;
+   }
+ 
++  if (dns_domain_equal(d,"\0011\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\003ip6\004arpa\0")) {
++    if (z->level) goto LOWERLEVEL;
++    if (!rqa(z)) goto DIE;
++    if (typematch(DNS_T_PTR,dtype)) {
++      if (!response_rstart(d,DNS_T_PTR,655360)) goto DIE;
++      if (!response_addname("\016ipv6-localhost\0")) goto DIE;
++      if (!response_addname("\015ipv6-loopback\0")) goto DIE;
++      response_rfinish(RESPONSE_ANSWER);
++    }
++    cleanup(z);
++    return 1;
++  }
++
++  if (dns_domain_equal(d,"\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\001e\001f\003ip6\004arpa\0")) {
++    if (z->level) goto LOWERLEVEL;
++    if (!rqa(z)) goto DIE;
++    if (typematch(DNS_T_PTR,dtype)) {
++      if (!response_rstart(d,DNS_T_PTR,655360)) goto DIE;
++      if (!response_addname("\015ipv6-localnet\0")) goto DIE;
++      response_rfinish(RESPONSE_ANSWER);
++    }
++    cleanup(z);
++    return 1;
++  }
++
++  if (dns_domain_equal(d,"\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\001f\001f\003ip6\004arpa\0")) {
++    if (z->level) goto LOWERLEVEL;
++    if (!rqa(z)) goto DIE;
++    if (typematch(DNS_T_PTR,dtype)) {
++      if (!response_rstart(d,DNS_T_PTR,655360)) goto DIE;
++      if (!response_addname("\020ipv6-mcastprefix\0")) goto DIE;
++      response_rfinish(RESPONSE_ANSWER);
++    }
++    cleanup(z);
++    return 1;
++  }
++
++  if (dns_domain_equal(d,"\0011\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0012\0010\001f\001f\003ip6\004arpa\0")) {
++    if (z->level) goto LOWERLEVEL;
++    if (!rqa(z)) goto DIE;
++    if (typematch(DNS_T_PTR,dtype)) {
++      if (!response_rstart(d,DNS_T_PTR,655360)) goto DIE;
++      if (!response_addname("\015ipv6-allnodes\0")) goto DIE;
++      response_rfinish(RESPONSE_ANSWER);
++    }
++    cleanup(z);
++    return 1;
++  }
++
++  if (dns_domain_equal(d,"\0012\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0012\0010\001f\001f\003ip6\004arpa\0")) {
++    if (z->level) goto LOWERLEVEL;
++    if (!rqa(z)) goto DIE;
++    if (typematch(DNS_T_PTR,dtype)) {
++      if (!response_rstart(d,DNS_T_PTR,655360)) goto DIE;
++      if (!response_addname("\017ipv6-allrouters\0")) goto DIE;
++      response_rfinish(RESPONSE_ANSWER);
++    }
++    cleanup(z);
++    return 1;
++  }
++
++  if (dns_domain_equal(d,"\0011\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0012\0010\001f\001f\003ip6\004arpa\0")) {
++    if (z->level) goto LOWERLEVEL;
++    if (!rqa(z)) goto DIE;
++    if (typematch(DNS_T_PTR,dtype)) {
++      if (!response_rstart(d,DNS_T_PTR,655360)) goto DIE;
++      if (!response_addname("\015ipv6-allhosts\0")) goto DIE;
++      response_rfinish(RESPONSE_ANSWER);
++    }
++    cleanup(z);
++    return 1;
++  }
++
++  if (dns_domain_equal(d,"\016ipv6-localhost\0") ||
++      dns_domain_equal(d,"\015ipv6-loopback\0"))
++    {
++      if (z->level) goto LOWERLEVEL;
++      if (!rqa(z)) goto DIE;
++      if (typematch(DNS_T_AAAA,dtype)) {
++	if (!response_rstart(d,DNS_T_AAAA,655360)) goto DIE;
++	if (!response_addbytes("\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\001",16)) goto DIE;
++	response_rfinish(RESPONSE_ANSWER);
++      }
++      cleanup(z);
++      return 1;
++    }
++
++  if (dns_domain_equal(d,"\015ipv6-localnet\0"))
++    {
++      if (z->level) goto LOWERLEVEL;
++      if (!rqa(z)) goto DIE;
++      if (typematch(DNS_T_AAAA,dtype)) {
++	if (!response_rstart(d,DNS_T_AAAA,655360)) goto DIE;
++	if (!response_addbytes("\376\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000",16)) goto DIE;
++	response_rfinish(RESPONSE_ANSWER);
++      }
++      cleanup(z);
++      return 1;
++    }
++
++  if (dns_domain_equal(d,"\020ipv6-mcastprefix\0"))
++    {
++      if (z->level) goto LOWERLEVEL;
++      if (!rqa(z)) goto DIE;
++      if (typematch(DNS_T_AAAA,dtype)) {
++	if (!response_rstart(d,DNS_T_AAAA,655360)) goto DIE;
++	if (!response_addbytes("\377\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000",16)) goto DIE;
++	response_rfinish(RESPONSE_ANSWER);
++      }
++      cleanup(z);
++      return 1;
++    }
++
++  if (dns_domain_equal(d,"\15ipv6-allnodes\0"))
++    {
++      if (z->level) goto LOWERLEVEL;
++      if (!rqa(z)) goto DIE;
++      if (typematch(DNS_T_AAAA,dtype)) {
++	if (!response_rstart(d,DNS_T_AAAA,655360)) goto DIE;
++	if (!response_addbytes("\377\002\000\000\000\000\000\000\000\000\000\000\000\000\000\001",16)) goto DIE;
++	response_rfinish(RESPONSE_ANSWER);
++      }
++      cleanup(z);
++      return 1;
++    }
++
++  if (dns_domain_equal(d,"\17ipv6-allrouters\0"))
++    {
++      if (z->level) goto LOWERLEVEL;
++      if (!rqa(z)) goto DIE;
++      if (typematch(DNS_T_AAAA,dtype)) {
++	if (!response_rstart(d,DNS_T_AAAA,655360)) goto DIE;
++	if (!response_addbytes("\377\002\000\000\000\000\000\000\000\000\000\000\000\000\000\002",16)) goto DIE;
++	response_rfinish(RESPONSE_ANSWER);
++      }
++      cleanup(z);
++      return 1;
++    }
++
++  if (dns_domain_equal(d,"\15ipv6-allhosts\0"))
++    {
++      if (z->level) goto LOWERLEVEL;
++      if (!rqa(z)) goto DIE;
++      if (typematch(DNS_T_AAAA,dtype)) {
++	if (!response_rstart(d,DNS_T_AAAA,655360)) goto DIE;
++	if (!response_addbytes("\377\002\000\000\000\000\000\000\000\000\000\000\000\000\000\003",16)) goto DIE;
++	response_rfinish(RESPONSE_ANSWER);
++      }
++      cleanup(z);
++      return 1;
++    }
++
+   if (dns_domain_equal(d,"\0011\0010\0010\003127\7in-addr\4arpa\0")) {
+     if (z->level) goto LOWERLEVEL;
+     if (!rqa(z)) goto DIE;
+@@@@ -236,7 +410,7 @@@@ static int doit(struct query *z,int stat
+       response_rfinish(RESPONSE_ANSWER);
+     }
+     cleanup(z);
+-    log_stats();
++    log_stats(numqueries, cache_motion, uactive, tactive);
+     return 1;
+   }
+ 
+@@@@ -252,7 +426,10 @@@@ static int doit(struct query *z,int stat
+ 
+     byte_copy(key,2,DNS_T_CNAME);
+     cached = cache_get(key,dlen + 2,&cachedlen,&ttl);
+-    if (cached) {
++    /* A previous explicit query might have caused an empty RRSet to have been
++    ** cached.  Take care to ignore such a thing. 
++    */
++    if (cached && cachedlen) {
+       if (typematch(DNS_T_CNAME,dtype)) {
+         log_cachedanswer(d,DNS_T_CNAME);
+         if (!rqa(z)) goto DIE;
+@@@@ -261,8 +438,11 @@@@ static int doit(struct query *z,int stat
+ 	return 1;
+       }
+       log_cachedcname(d,cached);
+-      if (!dns_domain_copy(&cname,cached)) goto DIE;
+-      goto CNAME;
++      if (!z->level) {
++	if (!move_name_to_alias(z,ttl)) goto DIE ;
++      }
++      if (!dns_domain_copy(&z->name[z->level],cached)) goto DIE;
++      goto NEWNAME;
+     }
+ 
+     if (typematch(DNS_T_NS,dtype)) {
+@@@@ -272,7 +452,7 @@@@ static int doit(struct query *z,int stat
+ 	log_cachedanswer(d,DNS_T_NS);
+ 	if (!rqa(z)) goto DIE;
+ 	pos = 0;
+-	while (pos = dns_packet_getname(cached,cachedlen,pos,&t2)) {
++	while ((pos = dns_packet_getname(cached,cachedlen,pos,&t2))) {
+ 	  if (!response_rstart(d,DNS_T_NS,ttl)) goto DIE;
+ 	  if (!response_addname(t2)) goto DIE;
+ 	  response_rfinish(RESPONSE_ANSWER);
+@@@@ -282,6 +462,29 @@@@ static int doit(struct query *z,int stat
+       }
+     }
+ 
++    if (typematch(DNS_T_SOA,dtype)) {
++      byte_copy(key,2,DNS_T_SOA);
++      cached = cache_get(key,dlen + 2,&cachedlen,&ttl);
++      if (cached && (cachedlen || byte_diff(dtype,2,DNS_T_ANY))) {
++        log_cachedanswer(d,DNS_T_SOA);
++        if (!rqa(z)) goto DIE;
++        pos = 0;
++        while (pos = dns_packet_copy(cached,cachedlen,pos,misc,20)) {
++          pos = dns_packet_getname(cached,cachedlen,pos,&t2);
++          if (!pos) break;
++          pos = dns_packet_getname(cached,cachedlen,pos,&t3);
++          if (!pos) break;
++          if (!response_rstart(d,DNS_T_SOA,ttl)) goto DIE;
++          if (!response_addname(t2)) goto DIE;
++          if (!response_addname(t3)) goto DIE;
++          if (!response_addbytes(misc,20)) goto DIE;
++          response_rfinish(RESPONSE_ANSWER);
++        }
++        cleanup(z);
++        return 1;
++      }
++    }
++
+     if (typematch(DNS_T_PTR,dtype)) {
+       byte_copy(key,2,DNS_T_PTR);
+       cached = cache_get(key,dlen + 2,&cachedlen,&ttl);
+@@@@ -289,7 +492,7 @@@@ static int doit(struct query *z,int stat
+ 	log_cachedanswer(d,DNS_T_PTR);
+ 	if (!rqa(z)) goto DIE;
+ 	pos = 0;
+-	while (pos = dns_packet_getname(cached,cachedlen,pos,&t2)) {
++	while ((pos = dns_packet_getname(cached,cachedlen,pos,&t2))) {
+ 	  if (!response_rstart(d,DNS_T_PTR,ttl)) goto DIE;
+ 	  if (!response_addname(t2)) goto DIE;
+ 	  response_rfinish(RESPONSE_ANSWER);
+@@@@ -306,7 +509,7 @@@@ static int doit(struct query *z,int stat
+ 	log_cachedanswer(d,DNS_T_MX);
+ 	if (!rqa(z)) goto DIE;
+ 	pos = 0;
+-	while (pos = dns_packet_copy(cached,cachedlen,pos,misc,2)) {
++	while ((pos = dns_packet_copy(cached,cachedlen,pos,misc,2))) {
+ 	  pos = dns_packet_getname(cached,cachedlen,pos,&t2);
+ 	  if (!pos) break;
+ 	  if (!response_rstart(d,DNS_T_MX,ttl)) goto DIE;
+@@@@ -319,16 +522,54 @@@@ static int doit(struct query *z,int stat
+       }
+     }
+ 
++    if (typematch(DNS_T_AAAA,dtype)) {
++      byte_copy(key,2,DNS_T_AAAA);
++      cached = cache_get(key,dlen + 2,&cachedlen,&ttl);
++      if (cached && (cachedlen || byte_diff(dtype,2,DNS_T_ANY))) {
++	if (z->level) {
++	  log_cachedanswer(d,DNS_T_AAAA);
++	  while (cachedlen >= 16) {
++	    for (k = 0;k < 256;k += 16)
++	      if (byte_equal(z->servers[z->level - 1] + k,16,V6any)) {
++		byte_copy(z->servers[z->level - 1] + k,16,cached);
++		break;
++	      }
++	    cached += 16;
++	    cachedlen -= 16;
++	  }
++	  goto LOWERLEVEL;
++	}
++
++	log_cachedanswer(d,DNS_T_AAAA);
++	if (!rqa(z)) goto DIE;
++	while (cachedlen >= 16) {
++	  if (!response_rstart(d,DNS_T_AAAA,ttl)) goto DIE;
++	  if (!response_addbytes(cached,16)) goto DIE;
++	  response_rfinish(RESPONSE_ANSWER);
++	  cached += 16;
++	  cachedlen -= 16;
++	}
++	cleanup(z);
++	return 1;
++      }
++    }
++
+     if (typematch(DNS_T_A,dtype)) {
+       byte_copy(key,2,DNS_T_A);
+       cached = cache_get(key,dlen + 2,&cachedlen,&ttl);
++      if (cached && !cachedlen && z->level) {
++	/* if we were looking the A record up to find an NS, try IPv6 too */
++	z->ipv6[z->level]=1;
++	goto NEWNAME;
++      }
+       if (cached && (cachedlen || byte_diff(dtype,2,DNS_T_ANY))) {
+ 	if (z->level) {
+ 	  log_cachedanswer(d,DNS_T_A);
+ 	  while (cachedlen >= 4) {
+-	    for (k = 0;k < 64;k += 4)
+-	      if (byte_equal(z->servers[z->level - 1] + k,4,"\0\0\0\0")) {
+-		byte_copy(z->servers[z->level - 1] + k,4,cached);
++	    for (k = 0;k < 256;k += 16)
++	      if (byte_equal(z->servers[z->level - 1] + k,16,V6any)) {
++		byte_copy(z->servers[z->level - 1] + k,12,V4mappedprefix);
++		byte_copy(z->servers[z->level - 1] + k + 12,4,cached);
+ 		break;
+ 	      }
+ 	    cached += 4;
+@@@@ -351,7 +592,7 @@@@ static int doit(struct query *z,int stat
+       }
+     }
+ 
+-    if (!typematch(DNS_T_ANY,dtype) && !typematch(DNS_T_AXFR,dtype) && !typematch(DNS_T_CNAME,dtype) && !typematch(DNS_T_NS,dtype) && !typematch(DNS_T_PTR,dtype) && !typematch(DNS_T_A,dtype) && !typematch(DNS_T_MX,dtype)) {
++    if (!typematch(DNS_T_ANY,dtype) && !typematch(DNS_T_AXFR,dtype) && !typematch(DNS_T_NS,dtype) && !typematch(DNS_T_SOA,dtype) && !typematch(DNS_T_PTR,dtype) && !typematch(DNS_T_AAAA,dtype) && !typematch(DNS_T_A,dtype) && !typematch(DNS_T_MX,dtype)) {
+       byte_copy(key,2,dtype);
+       cached = cache_get(key,dlen + 2,&cachedlen,&ttl);
+       if (cached && (cachedlen || byte_diff(dtype,2,DNS_T_ANY))) {
+@@@@ -390,12 +631,12 @@@@ static int doit(struct query *z,int stat
+         cached = cache_get(key,dlen + 2,&cachedlen,&ttl);
+         if (cached && cachedlen) {
+ 	  z->control[z->level] = d;
+-          byte_zero(z->servers[z->level],64);
++          byte_zero(z->servers[z->level],256);
+           for (j = 0;j < QUERY_MAXNS;++j)
+             dns_domain_free(&z->ns[z->level][j]);
+           pos = 0;
+           j = 0;
+-          while (pos = dns_packet_getname(cached,cachedlen,pos,&t1)) {
++          while ((pos = dns_packet_getname(cached,cachedlen,pos,&t1))) {
+ 	    log_cachedns(d,t1);
+             if (j < QUERY_MAXNS)
+               if (!dns_domain_copy(&z->ns[z->level][j++],t1)) goto DIE;
+@@@@ -418,25 +659,20 @@@@ static int doit(struct query *z,int stat
+         if (!dns_domain_copy(&z->name[z->level + 1],z->ns[z->level][j])) goto DIE;
+         dns_domain_free(&z->ns[z->level][j]);
+         ++z->level;
++        z->ipv6[z->level]=0;
+         goto NEWNAME;
+       }
+       dns_domain_free(&z->ns[z->level][j]);
+     }
+ 
+-  for (j = 0;j < 64;j += 4)
+-    if (byte_diff(z->servers[z->level] + j,4,"\0\0\0\0"))
++  for (j = 0;j < 256;j += 16)
++    if (byte_diff(z->servers[z->level] + j,16,V6any) && byte_diff(z->servers[z->level] + j,16,V4any))
+       break;
+-  if (j == 64) goto SERVFAIL;
++  if (j == 256) goto SERVFAIL;
+ 
+-  dns_sortip(z->servers[z->level],64);
+-  if (z->level) {
+-    log_tx(z->name[z->level],DNS_T_A,z->control[z->level],z->servers[z->level],z->level);
+-    if (dns_transmit_start(&z->dt,z->servers[z->level],flagforwardonly,z->name[z->level],DNS_T_A,z->localip) == -1) goto DIE;
+-  }
+-  else {
+-    log_tx(z->name[0],z->type,z->control[0],z->servers[0],0);
+-    if (dns_transmit_start(&z->dt,z->servers[0],flagforwardonly,z->name[0],z->type,z->localip) == -1) goto DIE;
+-  }
++  dns_sortip6(z->servers[z->level],256);
++  dtype = z->level ? (z->ipv6[z->level] ? DNS_T_AAAA : DNS_T_A) : z->type;
++  if (qmerge_start(&z->qm,z->servers[z->level],flagforwardonly,z->name[z->level],dtype,z->localip,z->control[z->level]) == -1) goto DIE;
+   return 0;
+ 
+ 
+@@@@ -450,13 +686,13 @@@@ static int doit(struct query *z,int stat
+ 
+   HAVEPACKET:
+   if (++z->loop == 100) goto DIE;
+-  buf = z->dt.packet;
+-  len = z->dt.packetlen;
++  buf = z->qm->dt.packet;
++  len = z->qm->dt.packetlen;
+ 
+-  whichserver = z->dt.servers + 4 * z->dt.curserver;
++  whichserver = z->qm->dt.servers + 16 * z->qm->dt.curserver;
+   control = z->control[z->level];
+   d = z->name[z->level];
+-  dtype = z->level ? DNS_T_A : z->type;
++  dtype = z->level ? (z->ipv6[z->level] ? DNS_T_AAAA : DNS_T_A) : z->type;
+ 
+   pos = dns_packet_copy(buf,len,0,header,12); if (!pos) goto DIE;
+   pos = dns_packet_skipname(buf,len,pos); if (!pos) goto DIE;
+@@@@ -471,29 +707,31 @@@@ static int doit(struct query *z,int stat
+   if (rcode && (rcode != 3)) goto DIE; /* impossible; see irrelevant() */
+ 
+   flagout = 0;
+-  flagcname = 0;
+   flagreferral = 0;
+   flagsoa = 0;
+   soattl = 0;
+-  cnamettl = 0;
++  if (!dns_domain_copy(&owner_name,d)) goto DIE;
++  /* This code assumes that the CNAME chain is presented in the correct 
++  ** order.  The example algorithm in RFC 1034 will actually result in this
++  ** being the case, but the words do not require it to be so.
++  */
+   for (j = 0;j < numanswers;++j) {
+     pos = dns_packet_getname(buf,len,pos,&t1); if (!pos) goto DIE;
+     pos = dns_packet_copy(buf,len,pos,header,10); if (!pos) goto DIE;
+ 
+-    if (dns_domain_equal(t1,d))
++    if (dns_domain_equal(t1,owner_name))
+       if (byte_equal(header + 2,2,DNS_C_IN)) { /* should always be true */
+         if (typematch(header,dtype))
+           flagout = 1;
+         else if (typematch(header,DNS_T_CNAME)) {
+-          if (!dns_packet_getname(buf,len,pos,&cname)) goto DIE;
+-          flagcname = 1;
+-	  cnamettl = ttlget(header + 4);
++          if (!dns_packet_getname(buf,len,pos,&owner_name)) goto DIE;
+         }
+       }
+   
+     uint16_unpack_big(header + 8,&datalen);
+     pos += datalen;
+   }
++  dns_domain_free(&owner_name) ;
+   posauthority = pos;
+ 
+   for (j = 0;j < numauthority;++j) {
+@@@@ -516,14 +754,6 @@@@ static int doit(struct query *z,int stat
+   posglue = pos;
+ 
+ 
+-  if (!flagcname && !rcode && !flagout && flagreferral && !flagsoa)
+-    if (dns_domain_equal(referral,control) || !dns_domain_suffix(referral,control)) {
+-      log_lame(whichserver,control,referral);
+-      byte_zero(whichserver,4);
+-      goto HAVENS;
+-    }
+-
+-
+   if (records) { alloc_free(records); records = 0; }
+ 
+   k = numanswers + numauthority + numglue;
+@@@@ -585,15 +815,24 @@@@ static int doit(struct query *z,int stat
+     else if (byte_equal(type,2,DNS_T_AXFR))
+       ;
+     else if (byte_equal(type,2,DNS_T_SOA)) {
++      int non_authority = 0;
++      save_start();
+       while (i < j) {
+         pos = dns_packet_skipname(buf,len,records[i]); if (!pos) goto DIE;
+         pos = dns_packet_getname(buf,len,pos + 10,&t2); if (!pos) goto DIE;
+         pos = dns_packet_getname(buf,len,pos,&t3); if (!pos) goto DIE;
+         pos = dns_packet_copy(buf,len,pos,misc,20); if (!pos) goto DIE;
+-        if (records[i] < posauthority)
++        if (records[i] < posauthority) {
+           log_rrsoa(whichserver,t1,t2,t3,misc,ttl);
++          save_data(misc,20);
++          save_data(t2,dns_domain_length(t2));
++          save_data(t3,dns_domain_length(t3));
++          non_authority++;
++        }
+         ++i;
+       }
++      if (non_authority)
++        save_finish(DNS_T_SOA,t1,ttl);
+     }
+     else if (byte_equal(type,2,DNS_T_CNAME)) {
+       pos = dns_packet_skipname(buf,len,records[j - 1]); if (!pos) goto DIE;
+@@@@ -643,6 +882,11 @@@@ static int doit(struct query *z,int stat
+         pos = dns_packet_copy(buf,len,pos,header,10); if (!pos) goto DIE;
+         if (byte_equal(header + 8,2,"\0\4")) {
+           pos = dns_packet_copy(buf,len,pos,header,4); if (!pos) goto DIE;
++          if (ignoreip.len)
++	    for (ii = 0; ii < ignoreip.len; ii+= 16) {
++	      if (byte_equal(ignoreip.s+ii,12,V4mappedprefix) &&
++	          byte_equal(header,4,ignoreip.s+ii+12)) goto NXDOMAIN;
++	    }
+           save_data(header,4);
+           log_rr(whichserver,t1,DNS_T_A,header,4,ttl);
+         }
+@@@@ -650,6 +894,23 @@@@ static int doit(struct query *z,int stat
+       }
+       save_finish(DNS_T_A,t1,ttl);
+     }
++    else if (byte_equal(type,2,DNS_T_AAAA)) {
++      save_start();
++      while (i < j) {
++        pos = dns_packet_skipname(buf,len,records[i]); if (!pos) goto DIE;
++        pos = dns_packet_copy(buf,len,pos,header,10); if (!pos) goto DIE;
++        if (byte_equal(header + 8,2,"\0\20")) {
++          pos = dns_packet_copy(buf,len,pos,header,16); if (!pos) goto DIE;
++          if (ignoreip.len)
++	    for (ii = 0; ii < ignoreip.len; ii+= 16)
++	      if (byte_equal(header,16,ignoreip.s+ii)) goto NXDOMAIN;
++          save_data(header,16);
++          log_rr(whichserver,t1,DNS_T_AAAA,header,16,ttl);
++        }
++        ++i;
++      }
++      save_finish(DNS_T_AAAA,t1,ttl);
++    }
+     else {
+       save_start();
+       while (i < j) {
+@@@@ -670,24 +931,47 @@@@ static int doit(struct query *z,int stat
+ 
+   alloc_free(records); records = 0;
+ 
++  if (byte_diff(DNS_T_CNAME,2,dtype)) {
++    /* This code assumes that the CNAME chain is presented in the correct 
++    ** order.  The example algorithm in RFC 1034 will actually result in this
++    ** being the case, but the words do not require it to be so.
++    */
++    pos = posanswers;
++    for (j = 0;j < numanswers;++j) {
++      pos = dns_packet_getname(buf,len,pos,&t1); if (!pos) goto DIE;
++      pos = dns_packet_copy(buf,len,pos,header,10); if (!pos) goto DIE;
+ 
+-  if (flagcname) {
+-    ttl = cnamettl;
+-    CNAME:
+-    if (!z->level) {
+-      if (z->alias[QUERY_MAXALIAS - 1]) goto DIE;
+-      for (j = QUERY_MAXALIAS - 1;j > 0;--j)
+-        z->alias[j] = z->alias[j - 1];
+-      for (j = QUERY_MAXALIAS - 1;j > 0;--j)
+-        z->aliasttl[j] = z->aliasttl[j - 1];
+-      z->alias[0] = z->name[0];
+-      z->aliasttl[0] = ttl;
+-      z->name[0] = 0;
++      if (dns_domain_equal(t1,d))
++	if (byte_equal(header + 2,2,DNS_C_IN)) { /* should always be true */
++	  if (typematch(header,DNS_T_CNAME)) {
++	    char *save_d;
++
++	    ttl = ttlget(header + 4);
++	    if (z->level == 0) {
++	      if (!move_name_to_alias(z,ttl)) goto DIE ;
++	    }
++	    save_d = z->name[z->level];
++	    z->name[z->level] = (void *)0;
++	    if (!dns_packet_getname(buf,len,pos,&z->name[z->level])) {
++		alloc_free(save_d);
++		goto DIE;
++	    }
++	    d = z->name[z->level];
++	    if (!dns_domain_suffix(d,control) || !roots_same(d,control)) {
++		alloc_free(save_d);
++		/* Cannot trust the chain further - restart using current name */
++		goto NEWNAME;
++	    }
++	    alloc_free(save_d);
++	  }
++	}
++
++      uint16_unpack_big(header + 8,&datalen);
++      pos += datalen;
+     }
+-    if (!dns_domain_copy(&z->name[z->level],cname)) goto DIE;
+-    goto NEWNAME;
+   }
+ 
++  /* A "no such name" error applies to the end of any CNAME chain, not to the start. */
+   if (rcode == 3) {
+     log_nxdomain(whichserver,d,soattl);
+     cachegeneric(DNS_T_ANY,d,"",0,soattl);
+@@@@ -700,16 +984,37 @@@@ static int doit(struct query *z,int stat
+     return 1;
+   }
+ 
++  /* We check for a lame server _after_ we have cached any records that it
++  ** might have returned to us.  This copes better with the incorrect
++  ** behaviour of one content DNS server software that doesn't return
++  ** complete CNAME chains but instead returns only the first link in a
++  ** chain followed by a lame delegation to the same server.
++  ** Also: We check for a lame server _after_ following the CNAME chain.  The
++  ** delegation in a referral answer applies to the _end_ of the chain, not
++  ** to the beginning.
++  */
++  if (!rcode && !flagout && flagreferral && !flagsoa)
++    if (dns_domain_equal(referral,control) || !dns_domain_suffix(referral,control)) {
++      log_lame(whichserver,control,referral);
++      byte_zero(whichserver,16);
++      goto HAVENS;
++    }
++
+   if (!flagout && flagsoa)
++    /* Don't save empty RRSets for those types that we use as special markers. */
+     if (byte_diff(DNS_T_ANY,2,dtype))
+-      if (byte_diff(DNS_T_AXFR,2,dtype))
+-        if (byte_diff(DNS_T_CNAME,2,dtype)) {
++      if (byte_diff(DNS_T_AXFR,2,dtype)) {
+           save_start();
+           save_finish(dtype,d,soattl);
+ 	  log_nodata(whichserver,d,dtype,soattl);
++	  if (z->level && !byte_diff(DNS_T_A,2,dtype)) {
++	    d = z->name[z->level];
++	    z->ipv6[z->level] = 1;
++	    goto NEWNAME; /* retry, will ask for AAAA next */
++	  }
+         }
+ 
+-  log_stats();
++  log_stats(numqueries, cache_motion, uactive, tactive);
+ 
+ 
+   if (flagout || flagsoa || !flagreferral) {
+@@@@ -719,15 +1024,25 @@@@ static int doit(struct query *z,int stat
+         pos = dns_packet_getname(buf,len,pos,&t1); if (!pos) goto DIE;
+         pos = dns_packet_copy(buf,len,pos,header,10); if (!pos) goto DIE;
+         uint16_unpack_big(header + 8,&datalen);
+-        if (dns_domain_equal(t1,d))
++        if (dns_domain_equal(t1,d)) {
+           if (typematch(header,DNS_T_A))
+             if (byte_equal(header + 2,2,DNS_C_IN)) /* should always be true */
+               if (datalen == 4)
+-                for (k = 0;k < 64;k += 4)
+-                  if (byte_equal(z->servers[z->level - 1] + k,4,"\0\0\0\0")) {
+-                    if (!dns_packet_copy(buf,len,pos,z->servers[z->level - 1] + k,4)) goto DIE;
++                for (k = 0;k < 256;k += 16)
++                  if (byte_equal(z->servers[z->level - 1] + k,16,V6any)) {
++		    byte_copy(z->servers[z->level - 1] + k,12,V4mappedprefix);
++                    if (!dns_packet_copy(buf,len,pos,z->servers[z->level - 1] + k + 12,4)) goto DIE;
+                     break;
+                   }
++          if (typematch(header,DNS_T_AAAA))
++            if (byte_equal(header + 2,2,DNS_C_IN)) /* should always be true */
++              if (datalen == 16)
++                for (k = 0;k < 256;k += 16)
++                  if (byte_equal(z->servers[z->level - 1] + k,16,V6any)) {
++                    if (!dns_packet_copy(buf,len,pos,z->servers[z->level - 1] + k,16)) goto DIE;
++                    break;
++                  }
++        }
+         pos += datalen;
+       }
+       goto LOWERLEVEL;
+@@@@ -781,9 +1096,21 @@@@ static int doit(struct query *z,int stat
+ 
+ 
+   if (!dns_domain_suffix(d,referral)) goto DIE;
++
++  /* In strict "forwardonly" mode, we don't, as the manual states,
++  ** contact a chain of servers according to "NS" resource records.
++  ** We don't obey any referral responses, therefore.  Instead, we
++  ** eliminate the server from the list and try the next one.
++  */
++  if (flagforwardonly) {
++      log_ignore_referral(whichserver,control,referral);
++      byte_zero(whichserver,16);
++      goto HAVENS;
++  }
++
+   control = d + dns_domain_suffixpos(d,referral);
+   z->control[z->level] = control;
+-  byte_zero(z->servers[z->level],64);
++  byte_zero(z->servers[z->level],256);
+   for (j = 0;j < QUERY_MAXNS;++j)
+     dns_domain_free(&z->ns[z->level][j]);
+   k = 0;
+@@@@ -815,10 +1142,11 @@@@ static int doit(struct query *z,int stat
+   DIE:
+   cleanup(z);
+   if (records) { alloc_free(records); records = 0; }
++  dns_domain_free(&owner_name) ;
+   return -1;
+ }
+ 
+-int query_start(struct query *z,char *dn,char type[2],char class[2],char localip[4])
++int query_start(struct query *z,char *dn,char type[2],char class[2],char localip[16],unsigned int scope_id)
+ {
+   if (byte_equal(type,2,DNS_T_AXFR)) { errno = error_perm; return -1; }
+ 
+@@@@ -829,14 +1157,16 @@@@ int query_start(struct query *z,char *dn
+   if (!dns_domain_copy(&z->name[0],dn)) return -1;
+   byte_copy(z->type,2,type);
+   byte_copy(z->class,2,class);
+-  byte_copy(z->localip,4,localip);
++  byte_copy(z->localip,16,localip);
++  z->scope_id=scope_id;
++  z->ipv6[0]=0;
+ 
+   return doit(z,0);
+ }
+ 
+ int query_get(struct query *z,iopause_fd *x,struct taia *stamp)
+ {
+-  switch(dns_transmit_get(&z->dt,x,stamp)) {
++  switch(qmerge_get(&z->qm,x,stamp)) {
+     case 1:
+       return doit(z,1);
+     case -1:
+@@@@ -847,5 +1177,5 @@@@ int query_get(struct query *z,iopause_fd
+ 
+ void query_io(struct query *z,iopause_fd *x,struct taia *deadline)
+ {
+-  dns_transmit_io(&z->dt,x,deadline);
++  qmerge_io(z->qm,x,deadline);
+ }
+@
+
+
+1.8
+log
+@log.c is… tricky.
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_query_c,v 1.7 2017/03/15 22:32:28 tg Exp $
+d3 2
+a4 2
++++ src/query.c	Wed Mar 15 22:38:21 2017
+@@@@ -12,7 +12,10 @@@@
+d11 4
+d19 1
+a19 1
+@@@@ -81,7 +84,7 @@@@ static void cleanup(struct query *z)
+d28 1
+a28 1
+@@@@ -91,6 +94,21 @@@@ static void cleanup(struct query *z)
+d50 1
+a50 1
+@@@@ -110,7 +128,7 @@@@ static int rqa(struct query *z)
+d59 1
+a59 1
+@@@@ -123,7 +141,6 @@@@ static int globalip(char *d,char ip[4])
+d67 1
+a67 1
+@@@@ -165,7 +182,7 @@@@ static int doit(struct query *z,int stat
+d76 1
+a76 1
+@@@@ -179,20 +196,20 @@@@ static int doit(struct query *z,int stat
+d99 1
+a99 1
+@@@@ -205,14 +222,15 @@@@ static int doit(struct query *z,int stat
+d119 1
+a119 1
+@@@@ -227,6 +245,158 @@@@ static int doit(struct query *z,int stat
+d278 1
+a278 1
+@@@@ -236,7 +406,7 @@@@ static int doit(struct query *z,int stat
+d287 1
+a287 1
+@@@@ -252,7 +422,10 @@@@ static int doit(struct query *z,int stat
+d299 1
+a299 1
+@@@@ -261,8 +434,11 @@@@ static int doit(struct query *z,int stat
+d313 1
+a313 1
+@@@@ -272,7 +448,7 @@@@ static int doit(struct query *z,int stat
+d322 1
+a322 1
+@@@@ -282,6 +458,29 @@@@ static int doit(struct query *z,int stat
+d352 1
+a352 1
+@@@@ -289,7 +488,7 @@@@ static int doit(struct query *z,int stat
+d361 1
+a361 1
+@@@@ -306,7 +505,7 @@@@ static int doit(struct query *z,int stat
+d370 1
+a370 1
+@@@@ -319,16 +518,54 @@@@ static int doit(struct query *z,int stat
+d428 1
+a428 1
+@@@@ -351,7 +588,7 @@@@ static int doit(struct query *z,int stat
+d437 1
+a437 1
+@@@@ -390,12 +627,12 @@@@ static int doit(struct query *z,int stat
+d452 1
+a452 1
+@@@@ -418,25 +655,20 @@@@ static int doit(struct query *z,int stat
+d485 1
+a485 1
+@@@@ -450,13 +682,13 @@@@ static int doit(struct query *z,int stat
+d503 1
+a503 1
+@@@@ -471,29 +703,31 @@@@ static int doit(struct query *z,int stat
+d541 1
+a541 1
+@@@@ -516,14 +750,6 @@@@ static int doit(struct query *z,int stat
+d556 1
+a556 1
+@@@@ -585,15 +811,24 @@@@ static int doit(struct query *z,int stat
+d582 1
+a582 1
+@@@@ -643,6 +878,11 @@@@ static int doit(struct query *z,int stat
+d594 1
+a594 1
+@@@@ -650,6 +890,23 @@@@ static int doit(struct query *z,int stat
+d618 1
+a618 1
+@@@@ -670,24 +927,47 @@@@ static int doit(struct query *z,int stat
+d680 1
+a680 1
+@@@@ -700,13 +980,34 @@@@ static int doit(struct query *z,int stat
+d716 6
+a721 2
+   log_stats();
+@@@@ -719,15 +1020,25 @@@@ static int doit(struct query *z,int stat
+d751 1
+a751 1
+@@@@ -781,9 +1092,21 @@@@ static int doit(struct query *z,int stat
+d774 1
+a774 1
+@@@@ -815,10 +1138,11 @@@@ static int doit(struct query *z,int stat
+d787 1
+a787 1
+@@@@ -829,14 +1153,16 @@@@ int query_start(struct query *z,char *dn
+d806 1
+a806 1
+@@@@ -847,5 +1173,5 @@@@ int query_get(struct query *z,iopause_fd
+@
+
+
+1.7
+log
+@fix ignoring 0.0.0.0 (broken by Fefe ignoring only ::)
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_query_c,v 1.6 2016/07/29 19:38:58 tg Exp $
+d3 1
+a3 1
++++ src/query.c	Wed Mar 15 22:18:29 2017
+d274 9
+@
+
+
+1.6
+log
+@fix arpa. length (vs. int.)
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_query_c,v 1.5 2016/06/12 22:32:17 tg Exp $
+d3 1
+a3 1
++++ src/query.c	Fri Jul 29 19:28:35 2016
+d452 1
+a452 1
++    if (byte_diff(z->servers[z->level] + j,16,V6any))
+@
+
+
+1.5
+log
+@…
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_query_c,v 1.4 2016/06/12 22:28:39 tg Exp $
+d3 1
+a3 1
++++ src/query.c	Sun Jun 12 22:25:23 2016
+d119 1
+a119 1
++  if (dns_domain_equal(d,"\0011\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\003ip6\003arpa\0")) {
+d132 1
+a132 1
++  if (dns_domain_equal(d,"\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\001e\001f\003ip6\003arpa\0")) {
+d144 1
+a144 1
++  if (dns_domain_equal(d,"\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\001f\001f\003ip6\003arpa\0")) {
+d156 1
+a156 1
++  if (dns_domain_equal(d,"\0011\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0012\0010\001f\001f\003ip6\003arpa\0")) {
+d168 1
+a168 1
++  if (dns_domain_equal(d,"\0012\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0012\0010\001f\001f\003ip6\003arpa\0")) {
+d180 1
+a180 1
++  if (dns_domain_equal(d,"\0011\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0010\0012\0010\001f\001f\003ip6\003arpa\0")) {
+@
+
+
+1.4
+log
+@prevent use-after-free in the face of CNAMEs and stupid remote servers
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_query_c,v 1.3 2016/03/26 17:29:23 tg Exp $
+d641 1
+a641 1
++	    z->name[z->level] = NULL;
+@
+
+
+1.3
+log
+@complete overhaul of djbdns port:
+
+• merge t4/t6 flavours back into one binary
+  ‣ greatly simplify IPv6 handling, too; drop code for v6-less OSes
+• merge v4/v6 dnsroots back into one, update all of them
+• improve documentation a bit
+• apply two patches from http://www.your.org/dnscache/ (SECURITY):
+  ‣ merge identical outgoing requests
+  ‣ allow caching SOA responses
+• update to Fefe’s djbdns-1.05-test27.diff.bz2
+  ‣ fixes recursively resolving hosts behind IPv6-only nameservers;
+    spotted by Natureshadow (for Teckids’ Lunatics network) and via
+    http://serverfault.com/q/627912/189656 (which I’ll answer RSN)
+  ⚠ fix with “one second” CDB validity patch
+  ⚠ adapt for OpenBSD-style IPv6
+• drop ip6.int. reverse v6 DNS for good
+• improve dealing with mixing v4/v6 transport
+  ⇒ TODO add IP4SEND/IP6SEND support; currently; if IPSEND is v6
+    but we send to a v4 server, we use INADDR_ANY for outgoing,
+    as automatic fallback address
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_query_c,v 1.2 2005/12/14 23:28:37 tg Exp $
+d3 1
+a3 1
++++ src/query.c	Sat Mar 26 16:55:30 2016
+d605 1
+a605 1
+@@@@ -670,24 +927,36 @@@@ static int doit(struct query *z,int stat
+d634 2
+d640 6
+a645 1
++	    if (!dns_packet_getname(buf,len,pos,&z->name[z->level])) goto DIE;
+d647 6
+a652 2
++	    if (!dns_domain_suffix(d,control) || !roots_same(d,control))
++	      goto NEWNAME ;  /* Cannot trust the chain further - restart using current name */
+d667 1
+a667 1
+@@@@ -700,13 +969,34 @@@@ static int doit(struct query *z,int stat
+d704 1
+a704 1
+@@@@ -719,15 +1009,25 @@@@ static int doit(struct query *z,int stat
+d734 1
+a734 1
+@@@@ -781,9 +1081,21 @@@@ static int doit(struct query *z,int stat
+d757 1
+a757 1
+@@@@ -815,10 +1127,11 @@@@ static int doit(struct query *z,int stat
+d770 1
+a770 1
+@@@@ -829,14 +1142,16 @@@@ int query_start(struct query *z,char *dn
+d789 1
+a789 1
+@@@@ -847,5 +1162,5 @@@@ int query_get(struct query *z,iopause_fd
+@
+
+
+1.2
+log
+@* update to fefe's djbdns-1.05-test23.diff
+  with djbdns-1.05-ixfr.diff
+* slightly change naming of v6-transport binaries
+* consolidate all added source files in a central directory
+  so it can be reused by the v6-transport stuff
+* integrate the v6 transport binaries
+* fix spacing
+* sync descriptive texts with reality
+* sync European ORSN (v4 and v6) to their root.hint
+* sync OpenNIC too
+* Open-RSC seeminly ceased to exist recently
+* Apply compiler-temporary-filename.patch
+  from http://homepages.tesco.net/~J.deBoynePollard/FGA/djbdns-problems.html
+* apply dnscache-cname-handling.patch
+* apply dnscache-strict-forwardonly.patch w/ IPv6 tweak
+* apply dnscacheip-space-separator.patch
+* apply tinydns-alias-chain-truncation.patch
+* apply tinydns-data-semantic-error.patch
+  appropriately for 6 and 3, too
+* fix shell code and path to includes
+* fix relative paths
+* fix names of library and programmes; NOMAN=yes here (t6)
+* Add support for the IPv6 transport module to communicate,
+  as a client, with IPv4 transport name servers as well.
+
+  WFM
+* build it with -Wall -Werror
+* honour ${SYSCONFDIR} throughout the port
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_query_c,v 1.1.201.1 2005/05/14 23:21:05 tg Exp $
+d3 2
+a4 2
++++ src/query.c	Tue Dec 13 23:46:20 2005
+@@@@ -12,7 +12,12 @@@@
+a7 1
++#ifdef DJB_V6ONLY
+a8 1
++#endif /* DJB_V6ONLY */
+d15 10
+a24 1
+@@@@ -91,6 +96,21 @@@@ static void cleanup(struct query *z)
+d46 1
+a46 1
+@@@@ -110,7 +130,11 @@@@ static int rqa(struct query *z)
+d50 1
+a50 3
++#ifndef DJB_V6ONLY
+ static int globalip(char *d,char ip[4])
++#else
+a51 1
++#endif /* DJB_V6ONLY */
+d55 1
+a55 1
+@@@@ -123,7 +147,6 @@@@ static int globalip(char *d,char ip[4])
+d63 1
+a63 1
+@@@@ -165,7 +188,11 @@@@ static int doit(struct query *z,int stat
+d67 1
+a67 3
++#ifndef DJB_V6ONLY
+   char header[12];
++#else
+a68 1
++#endif /* DJB_V6ONLY */
+d72 1
+a72 1
+@@@@ -179,20 +206,20 @@@@ static int doit(struct query *z,int stat
+d95 7
+a101 1
+@@@@ -210,9 +237,16 @@@@ static int doit(struct query *z,int stat
+d105 3
+a107 5
++#ifndef DJB_V6ONLY
+       for (k = 0;k < 64;k += 4)
+         if (byte_equal(z->servers[z->level - 1] + k,4,"\0\0\0\0")) {
+ 	  byte_copy(z->servers[z->level - 1] + k,4,misc);
++#else
+a111 1
++#endif /* DJB_V6ONLY */
+d115 1
+a115 1
+@@@@ -227,6 +261,158 @@@@ static int doit(struct query *z,int stat
+d274 1
+a274 1
+@@@@ -252,7 +438,10 @@@@ static int doit(struct query *z,int stat
+d286 1
+a286 1
+@@@@ -261,8 +450,11 @@@@ static int doit(struct query *z,int stat
+d300 1
+a300 1
+@@@@ -272,7 +464,7 @@@@ static int doit(struct query *z,int stat
+d309 31
+a339 1
+@@@@ -289,7 +481,7 @@@@ static int doit(struct query *z,int stat
+d348 1
+a348 1
+@@@@ -306,7 +498,7 @@@@ static int doit(struct query *z,int stat
+d357 1
+a357 18
+@@@@ -326,9 +518,16 @@@@ static int doit(struct query *z,int stat
+ 	if (z->level) {
+ 	  log_cachedanswer(d,DNS_T_A);
+ 	  while (cachedlen >= 4) {
++#ifndef DJB_V6ONLY
+ 	    for (k = 0;k < 64;k += 4)
+ 	      if (byte_equal(z->servers[z->level - 1] + k,4,"\0\0\0\0")) {
+ 		byte_copy(z->servers[z->level - 1] + k,4,cached);
++#else
++	    for (k = 0;k < 256;k += 16)
++	      if (byte_equal(z->servers[z->level - 1] + k,16,V6any)) {
++		byte_copy(z->servers[z->level - 1] + k,12,V4mappedprefix);
++		byte_copy(z->servers[z->level - 1] + k + 12,4,cached);
++#endif /* DJB_V6ONLY */
+ 		break;
+ 	      }
+ 	    cached += 4;
+@@@@ -351,7 +550,45 @@@@ static int doit(struct query *z,int stat
+a360 1
+-    if (!typematch(DNS_T_ANY,dtype) && !typematch(DNS_T_AXFR,dtype) && !typematch(DNS_T_CNAME,dtype) && !typematch(DNS_T_NS,dtype) && !typematch(DNS_T_PTR,dtype) && !typematch(DNS_T_A,dtype) && !typematch(DNS_T_MX,dtype)) {
+a367 5
++#ifndef DJB_V6ONLY
++	    for (k = 0;k < 64;k += 4)
++	      if (byte_equal(z->servers[z->level - 1] + k,4,"\0\0\0\0")) {
++		byte_copy(z->servers[z->level - 1] + k,4,cached);
++#else
+a370 1
++#endif /* DJB_V6ONLY */
+d393 28
+a420 1
++    if (!typematch(DNS_T_ANY,dtype) && !typematch(DNS_T_AXFR,dtype) && !typematch(DNS_T_NS,dtype) && !typematch(DNS_T_PTR,dtype) && !typematch(DNS_T_A,dtype) && !typematch(DNS_T_MX,dtype) && !typematch(DNS_T_AAAA,dtype)) {
+d424 1
+a424 1
+@@@@ -390,12 +627,16 @@@@ static int doit(struct query *z,int stat
+d428 1
+a428 3
++#ifndef DJB_V6ONLY
+           byte_zero(z->servers[z->level],64);
++#else
+a429 1
++#endif /* DJB_V6ONLY */
+d439 7
+a445 1
+@@@@ -423,12 +664,25 @@@@ static int doit(struct query *z,int stat
+d449 2
+a450 4
++#ifndef DJB_V6ONLY
+   for (j = 0;j < 64;j += 4)
+     if (byte_diff(z->servers[z->level] + j,4,"\0\0\0\0"))
++#else
+a452 1
++#endif /* DJB_V6ONLY */
+d454 1
+a454 3
++#ifndef DJB_V6ONLY
+   if (j == 64) goto SERVFAIL;
++#else
+a455 1
++#endif /* DJB_V6ONLY */
+d457 9
+a465 3
++#ifndef DJB_V6ONLY
+   dns_sortip(z->servers[z->level],64);
++#else
+d467 16
+a482 13
++#endif /* DJB_V6ONLY */
+   if (z->level) {
+     log_tx(z->name[z->level],DNS_T_A,z->control[z->level],z->servers[z->level],z->level);
+     if (dns_transmit_start(&z->dt,z->servers[z->level],flagforwardonly,z->name[z->level],DNS_T_A,z->localip) == -1) goto DIE;
+@@@@ -453,7 +707,11 @@@@ static int doit(struct query *z,int stat
+   buf = z->dt.packet;
+   len = z->dt.packetlen;
+ 
++#ifndef DJB_V6ONLY
+   whichserver = z->dt.servers + 4 * z->dt.curserver;
++#else
++  whichserver = z->dt.servers + 16 * z->dt.curserver;
++#endif /* DJB_V6ONLY */
+d485 6
+a490 2
+   dtype = z->level ? DNS_T_A : z->type;
+@@@@ -471,29 +729,31 @@@@ static int doit(struct query *z,int stat
+d528 1
+a528 1
+@@@@ -516,14 +776,6 @@@@ static int doit(struct query *z,int stat
+d543 27
+a569 1
+@@@@ -643,6 +895,17 @@@@ static int doit(struct query *z,int stat
+d574 1
+a574 2
++#ifdef DJB_V6ONLY
++	    for(ii = 0; ii < ignoreip.len; ii+= 16) {
+a577 5
++#else
++	    for(ii = 0; ii < ignoreip.len; ii+= 4) {
++	      if (byte_equal(header,4,ignoreip.s+ii)) goto NXDOMAIN;
++	    }
++#endif
+d581 1
+a581 1
+@@@@ -650,6 +913,25 @@@@ static int doit(struct query *z,int stat
+a591 1
++#ifdef DJB_V6ONLY
+d593 1
+a593 1
++	    for(ii = 0; ii < ignoreip.len; ii+= 16)
+a594 1
++#endif
+d605 1
+a605 1
+@@@@ -670,24 +952,36 @@@@ static int doit(struct query *z,int stat
+d656 1
+a656 1
+@@@@ -700,10 +994,30 @@@@ static int doit(struct query *z,int stat
+a671 3
++#ifndef DJB_V6ONLY
++      byte_zero(whichserver,4);
++#else
+a672 1
++#endif /* DJB_V6ONLY */
+d685 14
+a698 1
+@@@@ -723,9 +1037,16 @@@@ static int doit(struct query *z,int stat
+d702 3
+a704 5
++#ifndef DJB_V6ONLY
+                 for (k = 0;k < 64;k += 4)
+                   if (byte_equal(z->servers[z->level - 1] + k,4,"\0\0\0\0")) {
+                     if (!dns_packet_copy(buf,len,pos,z->servers[z->level - 1] + k,4)) goto DIE;
++#else
+a708 1
++#endif /* DJB_V6ONLY */
+d711 9
+d721 3
+a723 1
+@@@@ -781,6 +1102,22 @@@@ static int doit(struct query *z,int stat
+a734 3
++#ifndef DJB_V6ONLY
++      byte_zero(whichserver,4);
++#else
+a735 1
++#endif /* DJB_V6ONLY */
+d741 6
+a746 2
+   byte_zero(z->servers[z->level],64);
+@@@@ -815,10 +1152,15 @@@@ static int doit(struct query *z,int stat
+d754 1
+a754 3
++#ifndef DJB_V6ONLY
+ int query_start(struct query *z,char *dn,char type[2],char class[2],char localip[4])
++#else
+a755 1
++#endif /* DJB_V6ONLY */
+d759 1
+a759 1
+@@@@ -829,7 +1171,12 @@@@ int query_start(struct query *z,char *dn
+d763 1
+a763 3
++#ifndef DJB_V6ONLY
+   byte_copy(z->localip,4,localip);
++#else
+d766 1
+a766 1
++#endif /* DJB_V6ONLY */
+d770 15
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 1
+a3 1
++++ src/query.c	Sat May 14 22:50:54 2005
+d17 23
+a39 1
+@@@@ -110,7 +115,11 @@@@ static int rqa(struct query *z)
+d51 9
+a59 1
+@@@@ -165,7 +174,11 @@@@ static int doit(struct query *z,int stat
+d71 16
+a86 1
+@@@@ -193,6 +206,7 @@@@ static int doit(struct query *z,int stat
+d94 1
+a94 1
+@@@@ -210,9 +224,16 @@@@ static int doit(struct query *z,int stat
+d111 1
+a111 1
+@@@@ -227,6 +248,158 @@@@ static int doit(struct query *z,int stat
+d270 54
+a323 1
+@@@@ -326,9 +499,16 @@@@ static int doit(struct query *z,int stat
+d340 1
+a340 1
+@@@@ -351,7 +531,45 @@@@ static int doit(struct query *z,int stat
+d383 1
+a383 1
++    if (!typematch(DNS_T_ANY,dtype) && !typematch(DNS_T_AXFR,dtype) && !typematch(DNS_T_CNAME,dtype) && !typematch(DNS_T_NS,dtype) && !typematch(DNS_T_PTR,dtype) && !typematch(DNS_T_A,dtype) && !typematch(DNS_T_MX,dtype) && !typematch(DNS_T_AAAA,dtype)) {
+d387 1
+a387 1
+@@@@ -390,7 +608,11 @@@@ static int doit(struct query *z,int stat
+d399 7
+a405 1
+@@@@ -423,12 +645,25 @@@@ static int doit(struct query *z,int stat
+d431 1
+a431 1
+@@@@ -453,7 +688,11 @@@@ static int doit(struct query *z,int stat
+d443 51
+a493 11
+@@@@ -519,7 +758,11 @@@@ static int doit(struct query *z,int stat
+   if (!flagcname && !rcode && !flagout && flagreferral && !flagsoa)
+     if (dns_domain_equal(referral,control) || !dns_domain_suffix(referral,control)) {
+       log_lame(whichserver,control,referral);
++#ifndef DJB_V6ONLY
+       byte_zero(whichserver,4);
++#else
++      byte_zero(whichserver,16);
++#endif /* DJB_V6ONLY */
+       goto HAVENS;
+     }
+d495 2
+a496 1
+@@@@ -643,6 +886,9 @@@@ static int doit(struct query *z,int stat
+d501 10
+a510 2
++	    for (ii = 0; ii < ignoreip.len; ii += 4)
++	      if (byte_equal(header, 4, ignoreip.s + ii)) goto NXDOMAIN;
+d514 1
+a514 1
+@@@@ -650,6 +896,20 @@@@ static int doit(struct query *z,int stat
+d525 5
+d540 85
+a624 1
+@@@@ -723,9 +983,16 @@@@ static int doit(struct query *z,int stat
+d641 28
+a668 1
+@@@@ -818,7 +1085,11 @@@@ static int doit(struct query *z,int stat
+d680 1
+a680 1
+@@@@ -829,7 +1100,12 @@@@ int query_start(struct query *z,char *dn
+@
+
+
+1.1.201.1
+log
+@New djbdns port, #ifdef'd, "original" and "no_ipv6" flavours removed
+"no_ipv4" non-functional at the moment, will follow later after
+redesign using crunchgen(1) and crunchide(1)
+@
+text
+@@

@@ -1,0 +1,197 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2015.10.26.21.54.52;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100562EA13929194F9F;
+
+1.4
+date	2015.07.18.21.41.00;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10055AAC7FC7E90D4FA;
+
+1.3
+date	2015.07.18.21.12.43;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10055AAC1543E595A8E;
+
+1.2
+date	2014.12.15.21.04.21;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100548F4CC703E2776F;
+
+1.1
+date	2014.11.30.00.12.56;	author tg;	state Exp;
+branches;
+next	;
+commitid	100547A6120450D078B;
+
+
+desc
+@@
+
+
+1.5
+log
+@use MirBSD-specific path to definitely get system header paths
+@
+text
+@/* $MirOS: src/lib/libssl/crypto/sha.h,v 1.4 2015/07/18 21:41:00 tg Exp $ */
+
+#ifndef HEADER_SHA1_H
+#define HEADER_SHA1_H
+
+#include <sys/types.h>
+#include <MirBSD/sha1.h>
+#include <MirBSD/sha2.h>
+#include <openssl/e_os2.h>
+
+#ifdef OPENSSL_NO_SHA
+#error SHA is disabled.
+#endif
+
+#ifdef OPENSSL_NO_SHA1
+#error SHA1 is disabled.
+#endif
+
+__BEGIN_DECLS
+
+#define SHA_LONG u_int32_t
+
+#define SHA_CBLOCK SHA1_BLOCK_LENGTH
+#define SHA_LBLOCK 16
+#define SHA_LAST_BLOCK (SHA_CBLOCK - 8)
+#define SHA_DIGEST_LENGTH SHA1_DIGEST_LENGTH
+
+#define SHA256_CBLOCK (SHA_LBLOCK * 4)
+#define SHA512_CBLOCK (SHA_LBLOCK * 8)
+#define SHA224_DIGEST_LENGTH 28
+
+#define SHA_CTX SHA1_CTX
+
+int SHA1_Init(SHA_CTX *c);
+int SHA1_Update(SHA_CTX *c, const void *data, size_t len)
+    __attribute__((__bounded__(__string__, 2, 3)));
+int SHA1_Final(unsigned char *md, SHA_CTX *c)
+    __attribute__((__bounded__(__minbytes__, 1, SHA1_DIGEST_LENGTH)));
+void SHA1_Transform(SHA_CTX *c, const unsigned char *b)
+    __attribute__((__bounded__(__minbytes__, 2, SHA1_BLOCK_LENGTH)));
+unsigned char *SHA1(const unsigned char *d, size_t n, unsigned char *md)
+    __attribute__((__bounded__(__string__, 1, 2)))
+    __attribute__((__bounded__(__minbytes__, 3, SHA1_DIGEST_LENGTH)));
+
+#define SHA1_version		"$MirOS: src/lib/libssl/crypto/sha.h,v 1.4 2015/07/18 21:41:00 tg Exp $"
+#define SHA256_version		SHA1_version
+#define SHA512_version		SHA1_version
+#define SHA1_Init(c)		(SHA1Init(c), 1)
+#define SHA1_Update(c,d,l)	(l ? (SHA1Update(c, d, l), 1) : 1)
+#define SHA1_Final(md,c)	(SHA1Final(md, c), 1)
+#define SHA1_Transform(c,b)	SHA1Transform(((SHA_CTX *)(c))->state, b)
+
+int SHA224_Init(SHA256_CTX *c);
+int SHA224_Update(SHA256_CTX *c, const void *data, size_t len)
+    __attribute__((__bounded__(__string__, 2, 3)));
+int SHA224_Final(unsigned char *md, SHA256_CTX *c)
+    __attribute__((__bounded__(__minbytes__, 1, SHA224_DIGEST_LENGTH)));
+unsigned char *SHA224(const unsigned char *d, size_t n, unsigned char *md)
+    __attribute__((__bounded__(__string__, 1, 2)))
+    __attribute__((__bounded__(__minbytes__, 3, SHA224_DIGEST_LENGTH)));
+
+unsigned char *SHA256(const unsigned char *d, size_t n, unsigned char *md)
+    __attribute__((__bounded__(__string__, 1, 2)))
+    __attribute__((__bounded__(__minbytes__, 3, SHA256_DIGEST_LENGTH)));
+unsigned char *SHA384(const unsigned char *d, size_t n, unsigned char *md)
+    __attribute__((__bounded__(__string__, 1, 2)))
+    __attribute__((__bounded__(__minbytes__, 3, SHA384_DIGEST_LENGTH)));
+unsigned char *SHA512(const unsigned char *d, size_t n, unsigned char *md)
+    __attribute__((__bounded__(__string__, 1, 2)))
+    __attribute__((__bounded__(__minbytes__, 3, SHA512_DIGEST_LENGTH)));
+
+__END_DECLS
+
+#endif
+@
+
+
+1.4
+log
+@we appear to do need SHA224; plus some minor fixes
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/libssl/crypto/sha.h,v 1.3 2015/07/18 21:12:43 tg Exp $ */
+d7 2
+a8 2
+#include <sha1.h>
+#include <sha2.h>
+d45 1
+a45 1
+#define SHA1_version		"$MirOS: src/lib/libssl/crypto/sha.h,v 1.3 2015/07/18 21:12:43 tg Exp $"
+@
+
+
+1.3
+log
+@SHA2 for OpenSSL, the easy part
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/libssl/crypto/sha.h,v 1.2 2014/12/15 21:04:21 tg Exp $ */
+d24 1
+a24 1
+#define SHA_LBLOCK (SHA1_CBLOCK / 4)
+d29 2
+d45 1
+a45 1
+#define SHA1_version		"$MirOS: src/lib/libssl/crypto/sha.h,v 1.2 2014/12/15 21:04:21 tg Exp $"
+d53 9
+@
+
+
+1.2
+log
+@inline wrappers instead of having one more function call plus some
+assorted stack shuffling (especially where argument order differs)
+which gives us a small but nice speedup and another size reduction
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/libssl/crypto/sha.h,v 1.1 2014/11/30 00:12:56 tg Exp $ */
+d8 1
+d28 2
+d33 1
+a33 1
+int SHA1_Update(SHA_CTX *c, const void *data, unsigned long len)
+d39 1
+a39 1
+unsigned char *SHA1(const unsigned char *d, unsigned long n, unsigned char *md)
+d43 3
+a45 1
+#define SHA1_version		"$MirOS$"
+d51 10
+@
+
+
+1.1
+log
+@… and SHA1
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/libssl/crypto/sha1.h,v 1.1 2014/11/29 23:47:04 tg Exp $ */
+d40 6
+@
+

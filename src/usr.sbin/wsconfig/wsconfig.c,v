@@ -1,0 +1,905 @@
+head	1.16;
+access;
+symbols
+	MIRBSD_10:1.16.0.2
+	MIRBSD_10_BASE:1.16;
+locks; strict;
+comment	@ * @;
+
+
+1.16
+date	2007.05.10.13.02.21;	author tg;	state Exp;
+branches;
+next	1.15;
+commitid	100464317A6439F08F1;
+
+1.15
+date	2007.04.19.10.17.54;	author tg;	state Exp;
+branches;
+next	1.14;
+commitid	100462741D72C50916D;
+
+1.14
+date	2007.04.17.23.41.01;	author tg;	state Exp;
+branches;
+next	1.13;
+commitid	10046255A1913F69329;
+
+1.13
+date	2007.03.04.22.56.57;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	10045EB4ECF03E8F0F6;
+
+1.12
+date	2007.03.04.20.00.51;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	10045EB2500777EEDFA;
+
+1.11
+date	2007.02.18.01.15.11;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	10045D7A8AA71150951;
+
+1.10
+date	2007.02.11.00.59.00;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	10045CE69591B8446BA;
+
+1.9
+date	2007.02.11.00.48.24;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10045CE679A4A3CDB4E;
+
+1.8
+date	2007.01.10.00.01.06;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10045A42CD03C39B36A;
+
+1.7
+date	2006.11.16.21.34.37;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100455CD978714B7EE1;
+
+1.6
+date	2006.10.28.18.56.52;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004543A7ED4EE5B71F;
+
+1.5
+date	2006.10.28.18.54.48;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004543A76928F0B143;
+
+1.4
+date	2006.08.16.23.28.27;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10044E3A9EF454956C1;
+
+1.3
+date	2006.08.16.23.19.33;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10044E3A7EE6513DD64;
+
+1.2
+date	2006.08.16.23.13.02;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044E3A68E72F5F3D9;
+
+1.1
+date	2006.08.16.23.12.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	10044E3A6064DC98451;
+
+
+desc
+@@
+
+
+1.16
+log
+@• wait 75 ms between flushing all tty I/O and writing the enquiry string
+• wait 75 ms between writing the enquiry string and waiting for an answer
+• bump date of chkuterm, patchlev^Wdash_ver of screen
+• screen: mention chkuterm functionality in the description
+@
+text
+@/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.15 2007/04/19 10:17:54 tg Exp $ */
+
+/*-
+ * Copyright (c) 2006, 2007
+ *	Thorsten Glaser <tg@@mirbsd.de>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ */
+
+#include <sys/param.h>
+#include <sys/ioctl.h>
+#include <dev/wscons/wsconsio.h>
+#include <dev/wscons/wsdisplay_usl_io.h>
+#include <dev/wscons/wsdisplayvar.h>
+#include <ctype.h>
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <termios.h>
+#include <unistd.h>
+
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.16 2007/05/10 13:02:21 tg Exp $");
+__RCSID("$miros: ports/sysutils/chkuterm/dist/chkuterm.c,v 1.11 2007/05/10 13:02:22 tg Exp $");
+__RCSID("$miros: ports/misc/screen/patches/patch-screen_c,v 1.12 2007/05/10 13:02:23 tg Exp $");
+
+#define DEFDEV	"/dev/ttyCcfg"
+
+/* query string sent to the terminal for LC_CTYPE detection */
+/* XXX is U+20AC U+002E ok or some other char better? Think EUC, SJIS, etc. */
+const char ctype_qstr[] = "\030\032\r\xE2\x82\xAC.\033[6n";
+
+#ifndef SMALL
+__dead void usage(void);
+#endif
+
+/*
+ * common options:
+ * -f <device>		select device on which to operate
+ * -q			be more quiet
+ * -?			help
+ *
+ *
+ * operation modes:
+ *
+ * === default device: /dev/ttyCcfg ===
+ * -I <number>		dump info about font in slot #number
+ * -S			print out active VT number
+ * -s <number>		activate VT #number
+ *
+ * === default device: ttyname(stdin) ===
+ * -o <name>		select font #name
+ * -U			return true and print (unless -q) if VT is UTF-8
+ */
+
+int
+#ifdef SMALL
+main(void)		/* like -U -q */
+#else
+main(int argc, char **argv)
+#endif
+{
+	const char *wsdev, *est;
+	char ch;
+	int wsfd, c, rv = 0;
+	int action = 0, nr = 0;
+	struct termios tio, otio;
+	fd_set fds;
+	struct timeval tv;
+	FILE *wsf;
+#ifndef SMALL
+	struct wsdisplay_font f;
+	int q = 0;
+
+	wsdev = DEFDEV;
+	while ((c = getopt(argc, argv, "f:I:o:qSs:U")) != -1)
+		switch (c) {
+		case 'f':
+			wsdev = optarg;
+			break;
+		case 'I':
+			if (action)
+				usage();
+			else
+				action = 5;
+			nr = strtonum(optarg, 0, WSDISPLAY_MAXFONT - 1, &est);
+			if (est)
+				errx(1, "slot number %s is %s", optarg, est);
+			f.index = nr;
+			break;
+		case 'o':
+			if (action)
+				usage();
+			else
+				action = 4;
+			strlcpy(f.name, optarg, WSFONT_NAME_SIZE);
+			break;
+		case 'q':
+			q = 1;
+			break;
+		case 'S':
+			if (action)
+				usage();
+			else
+				action = 2;
+			break;
+		case 's':
+			if (action)
+				usage();
+			else
+				action = 1;
+			nr = strtonum(optarg, 1, 255, &est);
+			if (est)
+				errx(1, "console number %s is %s", optarg, est);
+			break;
+		case 'U':
+			if (action)
+				usage();
+			else
+#endif
+				action = 6;
+#ifndef SMALL
+			break;
+		default:
+			usage();
+		}
+	argc -= optind;
+	argv += optind;
+
+	if (!action)
+		usage();
+
+	if (wsdev == DEFDEV && (action == 4 || action == 6))
+#endif
+		if ((wsdev = ttyname(STDIN_FILENO)) == NULL)
+			wsdev = "/dev/tty";
+
+	/* apparently O_RDONLY wouldn't matter but we stay safe */
+	if ((est = ttyname(STDIN_FILENO)) != NULL && !strcmp(wsdev, est))
+		wsfd = STDIN_FILENO;
+	else if ((est = ttyname(STDOUT_FILENO)) != NULL && !strcmp(wsdev, est))
+		wsfd = STDOUT_FILENO;
+	else
+		if ((wsfd = open(wsdev, O_RDWR, 0)) < 0)
+			err(2, "open %s", wsdev);
+	wsf = fdopen(wsfd, "rb+");
+
+#ifndef SMALL
+	switch (action) {
+	case 1:
+		if (argc)
+			usage();
+		if (ioctl(wsfd, VT_ACTIVATE, nr) == -1)
+			err(3, "ioctl VT_ACTIVATE %d", nr);
+		break;
+	case 2:
+		if (argc)
+			usage();
+		if (ioctl(wsfd, VT_GETACTIVE, &nr) == -1)
+			err(3, "ioctl VT_GETACTIVE");
+		printf("%d\n", nr);
+		break;
+	case 4:
+		if (ioctl(wsfd, WSDISPLAYIO_USEFONT, &f) == -1)
+			err(3, "ioctl WSDISPLAYIO_USEFONT");
+		if (!q)
+			printf("selected font \"%s\"\n", f.name);
+		break;
+	case 5:
+		if (ioctl(wsfd, WSDISPLAYIO_LSFONT, &f) == -1)
+			err(3, "ioctl WSDISPLAYIO_LSFONT");
+		if (q)
+			printf("%s\n", f.name);
+		else {
+			printf("%32s%s\n", "Name:", f.name);
+			printf("%32s%d\n", "Index:", f.index);
+			printf("%32s%d\n", "First Character:", f.firstchar);
+			printf("%32s%d\n", "Number of Characters:", f.numchars);
+			printf("%32s%d\n", "Last Character:",
+			    f.firstchar + f.numchars);
+			if ((unsigned)f.encoding < 5)
+				printf("%32s%s\n", "Encoding:",
+				    (f.encoding == 0) ? "ISO (latin1)" :
+				    (f.encoding == 1) ? "IBM (437)" :
+				    (f.encoding == 2) ? "PCVT (special)" :
+				    (f.encoding == 3) ? "ISO7 (greek)" :
+				    "SONY");
+			else
+				printf("%32sUNKNOWN (%d)\n",
+				    "Encoding:", f.encoding);
+			printf("%32s%u\n", "Font Width:", f.fontwidth);
+			printf("%32s%u\n", "Font Height:", f.fontheight);
+			printf("%32s%u\n", "Font Stride:", f.stride);
+			if ((unsigned)f.bitorder < 3)
+				printf("%32s%s\n", "Bit Order:",
+				    (f.bitorder == 0) ? "KNOWN (host)" :
+				    (f.bitorder == 1) ? "L2R" : "R2L");
+			else
+				printf("%32sUNKNOWN (%d)\n",
+				    "Bit Order:", f.bitorder);
+			if ((unsigned)f.byteorder < 3)
+				printf("%32s%s\n", "Byte Order:",
+				    (f.byteorder == 0) ? "KNOWN (host)" :
+				    (f.byteorder == 1) ? "L2R" : "R2L");
+			else
+				printf("%32sUNKNOWN (%d)\n",
+				    "Byte Order:", f.byteorder);
+		}
+		break;
+	case 6:
+#endif
+		if (tcgetattr(wsfd, &otio))
+			err(3, "tcgetattr");
+		tio = otio;
+		cfmakeraw(&tio);
+		if (tcflush(wsfd, TCIOFLUSH))
+			warn("tcflush");
+		rv = /* error */ 3;
+		if (tcsetattr(wsfd, TCSANOW, &tio)) {
+			warn("tcsetattr\r");
+			goto tios_err;
+		}
+		tv.tv_sec = 0;
+		tv.tv_usec = 75;
+		select(0, NULL, NULL, NULL, &tv);	/* sleep 75 msec */
+		if ((size_t)write(wsfd, ctype_qstr, strlen(ctype_qstr)) !=
+		    strlen(ctype_qstr)) {
+			warn("write\r");
+			goto noin;
+		}
+		select(0, NULL, NULL, NULL, &tv);	/* sleep 75 msec */
+		FD_ZERO(&fds);
+		FD_SET(wsfd, &fds);
+		tv.tv_sec = 2;
+		tv.tv_usec = 0;
+		if (select(wsfd + 1, &fds, NULL, NULL, &tv) <= 0)
+			goto noin;
+		nr = read(wsfd, &ch, 1);
+		rv = /* unknown */ 1;
+		if (wsf != NULL && nr == 1 && ch == 033) {
+			unsigned zeile, spalte;
+
+			if (fscanf(wsf, "[%u;%u", &zeile, &spalte) == 2)
+				switch (spalte) {
+				case 1:	/* EUC-JP, EUC-KR kterm */
+				case 5:	/* Shift-JIS kterm */
+					break;
+				case 3:	/* UTF-8 xterm, screen */
+					rv = 0;
+					break;
+				case 4:	/* ISO-8859-1 xterm, screen */
+					rv = 2;
+					break;
+				default:
+					rv = 0x1000 | spalte;
+					break;
+				}
+		}
+ noin:
+		write(wsfd, "\r      \r", 8);
+ tios_err:
+		if (tcflush(wsfd, TCIOFLUSH))
+			warn("tcflush");
+		if (tcsetattr(wsfd, TCSANOW, &otio))
+			err(3, "tcsetattr");
+#ifndef SMALL
+		if (rv & 0x1000) {
+			/* unknown charset */
+			if (!q)
+				printf("# unknown column %d\n", rv & 0xFFF);
+			rv = 1;
+		}
+		if (!q)
+			printf("LC_CTYPE=%s; export LC_CTYPE\n",
+			    rv == 0 ? "en_US.UTF-8" : "C");
+		if (!q && rv > 2)
+			puts("# warning: problems occured!\n");
+		break;
+	default:
+		usage();
+	}
+#endif
+
+	if (wsf == NULL)
+		close(wsfd);
+	else
+		fclose(wsf);
+	return (rv);
+}
+
+#ifndef SMALL
+void
+usage(void)
+{
+	extern const char *__progname;
+
+	fprintf(stderr, "Usage:\t%s -U\n"
+	    "\t%s [-f ctldev] -s screen\n"
+	    "\t%s [-q] [-f wsdev] { -I slot | -o name }\n",
+	    __progname, __progname, __progname);
+	exit(1);
+}
+#endif
+@
+
+
+1.15
+log
+@move “FILE *wsf;” out of #ifndef SMALL to where it belongs
+this broke distrib/special/ stuff, oops
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.14 2007/04/17 23:41:01 tg Exp $ */
+d38 3
+a40 3
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.14 2007/04/17 23:41:01 tg Exp $");
+__RCSID("$miros: ports/sysutils/chkuterm/dist/chkuterm.c,v 1.10 2007/04/17 23:41:01 tg Exp $");
+__RCSID("$miros: ports/misc/screen/patches/patch-screen_c,v 1.11 2007/04/17 23:41:02 tg Exp $");
+d238 3
+d246 1
+@
+
+
+1.14
+log
+@When select(2) tells us that we've got something on wsfd, we maybe only got
+one char (the first one of the response would be ESC); read it and if it is
+it indeed, switch to blocking stdio and get row and column with fscanf(3) –
+the response code is luckily being trailed by an ‘R’ that, upon being read,
+terminates fscanf gracefully (other stuff is done using TCIOFLUSH).
+
+This change should both make the detection e̲v̲e̲n̲ more reliable on (slow) in-
+ternet links as well as reduce the number of flush'd keys if we type during
+login already (and not get us the response messed up as programme input). I
+only tested this a little bit, though, yet…
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/share/misc/licence.template,v 1.20 2006/12/11 21:04:56 tg Rel $ */
+d85 1
+a88 1
+	FILE *wsf;
+@
+
+
+1.13
+log
+@sync with ports/misc/screen/patches/patch-screen_c,v 1.10
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.12 2007/03/04 20:00:51 tg Exp $ */
+d38 3
+a40 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.12 2007/03/04 20:00:51 tg Exp $");
+d79 1
+a79 1
+	char buf[64];
+d88 1
+d161 1
+d249 1
+a249 1
+		nr = read(wsfd, buf, sizeof (buf));
+d251 13
+a263 4
+		if (nr > 5 && buf[0] == 033 && buf[1] == '[') {
+			c = 2;
+			while (c < (nr - 2))
+				if (buf[c++] == ';')
+d265 4
+a268 4
+		if (buf[c - 1] == ';' &&
+		    (buf[c] == '3' || buf[c] == '4') &&
+		    !isdigit(buf[c + 1]))
+			rv = buf[c] == '4' ? /* latin1 */ 2 : /* utf-8 */ 0;
+d278 6
+d295 4
+a298 1
+	close(wsfd);
+@
+
+
+1.12
+log
+@• use TCIOFLUSH + TCSANOW instead of TCSAFLUSH
+• sleep 50 ms between writing the “get cursor position” request to the
+  terminal and reading the answer
+
+appears to¹ help screen's problems when reattaching from an utf-8 tty
+to utf-8 screen backend introduced in screen-4.0.3-4 ― please upgrade
+
+¹) if someone has got a better idea², please tell me
+²) no we don't fscanf(3) like linux vt-is-UTF8, since the tty may not
+   even support the “get cursor position” request at all
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.11 2007/02/18 01:15:11 tg Exp $ */
+d38 1
+a38 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.11 2007/02/18 01:15:11 tg Exp $");
+d81 2
+d237 1
+a237 9
+			goto tios_err;
+		}
+		/* delay for 50 ms */
+		{
+			struct timeval t;
+
+			t.tv_sec = 0;
+			t.tv_usec = 50 * 1000;
+			select(0, NULL, NULL, NULL, &t);
+d239 6
+d257 1
+@
+
+
+1.11
+log
+@#ifdef SMALL behave as if called -U -q, like chkuterm in small
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.10 2007/02/11 00:59:00 tg Exp $ */
+d38 1
+a38 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.10 2007/02/11 00:59:00 tg Exp $");
+d237 8
+d259 3
+a261 1
+		if (tcsetattr(wsfd, TCSAFLUSH, &otio))
+@
+
+
+1.10
+log
+@because the code yields sometimes quite large values:
+* 1 in kterm/EUC-JP (the '.' is required here to end a shift sequence!)
+* 3 in screen/UTF-8 and uxterm
+* 4 in screen/ISO-8859-1
+* 5 in kterm/Shift-JIS (2=竄 (double-width kanji) + 1=ｬ (half-width
+  katakana 'ya') + 1=.)
+we need to extend our erase space in order to clean up
+the temporary output line to prevent display artefacts
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.9 2007/02/11 00:48:24 tg Exp $ */
+d38 1
+a38 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.9 2007/02/11 00:48:24 tg Exp $");
+d46 1
+d48 1
+d70 3
+d74 1
+d79 1
+a79 1
+	int action, nr = 0, q = 0;
+d81 1
+d83 1
+a85 2
+	action = 0;
+
+d130 1
+d132 1
+d144 1
+d157 1
+d220 1
+d253 1
+d263 1
+d269 1
+d281 1
+@
+
+
+1.9
+log
+@* prevent false positives with Shift-JIS or EUC-JP in ports/japanese/kterm
+* new return values:
+  0 = UTF-8 (as previously)
+  >0 = not utf-8 (as previously)
+  1 = unknown charset (as previously, but new meaning)
+  2 = positively ISO-8859-1 (new retval)
+  3 = error occured (as previously)
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.8 2007/01/10 00:01:06 tg Exp $ */
+d38 1
+a38 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.8 2007/01/10 00:01:06 tg Exp $");
+d238 1
+a238 1
+		write(wsfd, "\r   \r", 5);
+@
+
+
+1.8
+log
+@from chkuterm (ports): simplify
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/share/misc/licence.template,v 1.20 2006/12/11 21:04:56 tg Rel $ */
+d38 1
+a38 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.7 2006/11/16 21:34:37 tg Exp $");
+d43 2
+a44 2
+/* XXX is U+00A0 ok or some other char better? Think EUC, SJIS, etc. */
+const char ctype_qstr[] = "\030\032\r\xC2\xA0\033[6n";
+d216 1
+a216 1
+		rv = 3;
+d227 1
+a227 1
+		rv = 1;
+d233 4
+a236 3
+			if (buf[c - 1] == ';' && buf[c] == '2' &&
+			    !isdigit(buf[c + 1]))
+				rv = 0;
+d245 1
+a245 1
+		if (!q && rv > 1)
+@
+
+
+1.7
+log
+@add new -U option: return 0 if tty is utf-8, 1 otherwise, 3 if error
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.6 2006/10/28 18:56:52 tg Exp $ */
+d4 1
+a4 1
+ * Copyright (c) 2006
+d7 5
+a11 6
+ * Licensee is hereby permitted to deal in this work without restric-
+ * tion, including unlimited rights to use, publicly perform, modify,
+ * merge, distribute, sell, give away or sublicence, provided all co-
+ * pyright notices above, these terms and the disclaimer are retained
+ * in all redistributions or reproduced in accompanying documentation
+ * or other materials provided with binary redistributions.
+d13 8
+a20 8
+ * Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+ * express, or implied, to the maximum extent permitted by applicable
+ * law, without malicious intent or gross negligence; in no event may
+ * licensor, an author or contributor be held liable for any indirect
+ * or other damage, or direct damage except proven a consequence of a
+ * direct error of said person and intended use of this work, loss or
+ * other issues arising in any way out of its use, even if advised of
+ * the possibility of such damage or existence of a defect.
+d38 1
+a38 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.6 2006/10/28 18:56:52 tg Exp $");
+d42 4
+d221 2
+a222 2
+		strlcpy(buf, "\030\032\r\xC2\xA0\033[6n", sizeof (buf));
+		if ((size_t)write(wsfd, buf, strlen(buf)) != strlen(buf)) {
+@
+
+
+1.6
+log
+@-O was nice but the ioctl isn't available for your average ttyCn device,
+so you must use -qI for that and then -o
+
+also sync usage, we have -q
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.5 2006/10/28 18:54:48 tg Exp $ */
+d29 1
+d36 1
+d39 1
+a39 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.5 2006/10/28 18:54:48 tg Exp $");
+d56 1
+a57 1
+ * -S			print out active VT number
+d61 1
+d68 1
+d71 1
+d77 1
+a77 1
+	while ((c = getopt(argc, argv, "f:I:o:qSs:")) != -1)
+d83 4
+a86 1
+			action = 5;
+d93 4
+a96 1
+			action = 4;
+d103 4
+a106 1
+			action = 2;
+d109 4
+a112 1
+			action = 1;
+d117 6
+d132 3
+a134 2
+	if ((wsdev == DEFDEV) && (action == 4))
+		wsdev = ttyname(STDIN_FILENO);
+d137 7
+a143 2
+	if ((wsfd = open(wsdev, O_RDWR, 0)) < 0)
+		err(2, "open %s", wsdev);
+d206 38
+d257 4
+a260 4
+	fprintf(stderr, "Usage:\n"
+	    "%s [-f ctldev] -s screen\n"
+	    "%s [-q] [-f wsdev] { -I slot | -o name }\n",
+	    __progname, __progname);
+@
+
+
+1.5
+log
+@add new: -O -o = wssetfont(8) functionality
+add new: -I = print font information for slot #nr
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.4 2006/08/16 23:28:27 tg Exp $ */
+d37 1
+a37 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.4 2006/08/16 23:28:27 tg Exp $");
+a57 1
+ * -O <number>		select font in slot #number
+d72 1
+a72 1
+	while ((c = getopt(argc, argv, "f:I:O:o:qSs:")) != -1)
+a83 7
+		case 'O':
+			action = 3;
+			nr = strtonum(optarg, 0, WSDISPLAY_MAXFONT - 1, &est);
+			if (est)
+				errx(1, "slot number %s is %s", optarg, est);
+			f.index = nr;
+			break;
+d109 1
+a109 1
+	if ((wsdev == DEFDEV) && ((action == 3) || (action == 4)))
+a129 6
+	case 3:
+		if (ioctl(wsfd, WSDISPLAYIO_LSFONT, &f) == -1)
+			err(3, "ioctl WSDISPLAYIO_LSFONT");
+		if (!q)
+			printf("selected font slot %d", f.index);
+		/* FALLTHROUGH */
+d134 1
+a134 2
+			printf("%s name \"%s\"\n", action == 3 ? "" :
+			    "selected font", f.name);
+d192 1
+a192 1
+	    "%s [-f wsdev] { -I slot | -O slot | -o name }\n",
+@
+
+
+1.4
+log
+@* reorder variables logically
+* add comment about O_RDONLY vs O_RDWR with ioctl(2)s
+  XXX ioctls suck, see plan9
+
+Anyway, both these (-s, -S) work as regular user when
+using -f /dev/ttyC1 (assumed I am logged in on VT2 and
+ran (exec )startx from there), or as root.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.3 2006/08/16 23:19:33 tg Exp $ */
+d28 1
+d37 1
+a37 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.3 2006/08/16 23:19:33 tg Exp $");
+d43 19
+d67 2
+a68 1
+	int action, nr = 0;
+d73 1
+a73 1
+	while ((c = getopt(argc, argv, "f:Ss:")) != -1)
+d78 21
+d117 3
+d138 54
+d206 3
+a208 2
+	    "%s [-f ctldev] -s screen\n",
+	    __progname);
+@
+
+
+1.3
+log
+@* Makefile: NOMAN for now
+* wsconfig.c: add -S for Show current VT option
+  (for the apm usage:
+  alias sleep='vt=$(wsconfig -S); zzz; wsconfig -s 1; wsconfig -s $vt')
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.2 2006/08/16 23:13:02 tg Exp $ */
+d36 1
+a36 1
+__RCSID("$MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.2 2006/08/16 23:13:02 tg Exp $");
+d46 2
+a47 1
+	int wsfd, c, action, nr = 0, rv = 0;
+d75 1
+@
+
+
+1.2
+log
+@* RCS ID
+* screen 0 doesn't exist
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/usr.sbin/wsconfig/wsconfig.c,v 1.1 2006/08/16 23:12:06 tg Exp $ */
+d36 1
+a36 1
+__RCSID("$MirOS$");
+d51 1
+a51 1
+	while ((c = getopt(argc, argv, "f:s:")) != -1)
+d56 3
+d84 7
+@
+
+
+1.1
+log
+@Add a new utility, wsconfig(8) - manpage follows - which will,
+in MirOS #9-current, replace wsfontload and wssetfont as well,
+and maybe wsconscfg, but for now offers wsswitch functionality
+(tested), because we're in #9-stable.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/share/misc/licence.template,v 1.14 2006/08/09 19:35:23 tg Rel $ */
+d36 2
+d58 1
+a58 1
+			nr = strtonum(optarg, 0, 255, &est);
+@
+

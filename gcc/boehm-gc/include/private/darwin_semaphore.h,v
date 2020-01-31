@@ -1,0 +1,143 @@
+head	1.1;
+branch	1.1.101;
+access;
+symbols
+	MIRBSD_10_BASE:1.1.101.1
+	MIRBSD_9_BASE:1.1.101.1
+	gcc-3_4_6:1.1.101.1
+	MIRBSD_8:1.1.101.1.0.2
+	MIRBSD_8_BASE:1.1.101.1
+	gcc-3_4-20051206:1.1.101.1
+	gcc-3_4-20051115:1.1.101.1
+	gcc-3_4-20050823:1.1.101.1
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.03.21.12.07.23;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.03.21.12.07.23;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#ifndef GC_DARWIN_SEMAPHORE_H
+#define GC_DARWIN_SEMAPHORE_H
+
+#if !defined(GC_DARWIN_THREADS)
+#error darwin_semaphore.h included with GC_DARWIN_THREADS not defined
+#endif
+
+/*
+   This is a very simple semaphore implementation for darwin. It
+   is implemented in terms of pthreads calls so it isn't async signal
+   safe. This isn't a problem because signals aren't used to
+   suspend threads on darwin.
+*/
+   
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int value;
+} sem_t;
+
+static int sem_init(sem_t *sem, int pshared, int value) {
+    int ret;
+    if(pshared)
+        GC_abort("sem_init with pshared set");
+    sem->value = value;
+    
+    ret = pthread_mutex_init(&sem->mutex,NULL);
+    if(ret < 0) return -1;
+    ret = pthread_cond_init(&sem->cond,NULL);
+    if(ret < 0) return -1;
+    return 0;
+}
+
+static int sem_post(sem_t *sem) {
+    if(pthread_mutex_lock(&sem->mutex) < 0)
+        return -1;
+    sem->value++;
+    if(pthread_cond_signal(&sem->cond) < 0) {
+        pthread_mutex_unlock(&sem->mutex);
+        return -1;
+    }
+    if(pthread_mutex_unlock(&sem->mutex) < 0)
+        return -1;
+    return 0;
+}
+
+static int sem_wait(sem_t *sem) {
+    if(pthread_mutex_lock(&sem->mutex) < 0)
+        return -1;
+    while(sem->value == 0) {
+        pthread_cond_wait(&sem->cond,&sem->mutex);
+    }
+    sem->value--;
+    if(pthread_mutex_unlock(&sem->mutex) < 0)
+        return -1;    
+    return 0;
+}
+
+static int sem_destroy(sem_t *sem) {
+    int ret;
+    ret = pthread_cond_destroy(&sem->cond);
+    if(ret < 0) return -1;
+    ret = pthread_mutex_destroy(&sem->mutex);
+    if(ret < 0) return -1;
+    return 0;
+}
+
+#endif
+@
+
+
+1.1.101.1
+log
+@Import the GNU Compiler Collection 3.4-stable
+from gcc-3.4-20050318.tar.bz2 after having
+* all top-level non-directories (files)
+  - except config.if
+and these directories completely:
+* INSTALL
+* boehm-gc/Mac_files
+* boehm-gc/cord
+* boehm-gc/doc
+* boehm-gc/tests
+* contrib
+  - except texi2pod.pl
+* gcc/f
+* gcc/po
+* gcc/testsuite
+* gcc/treelang
+* include
+* intl
+* libf2c
+* libffi/testsuite
+* libiberty
+* libjava/testsuite
+* libstdc++-v3/docs
+* libstdc++-v3/po
+* libstdc++-v3/scripts
+* libstdc++-v3/testsuite
+* maintainer-scripts
+* zlib
+removed before importing.
+@
+text
+@@

@@ -1,0 +1,612 @@
+head	1.5;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.2.2.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.3
+	cvs-20101220:1.1.1.3
+	mbsd-20101220:1.1.1.2.0.2
+	cvs-201012191730:1.1.1.2
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.2
+	cvs-200805071200:1.1.1.2
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	cvs-200803022030:1.1.1.1
+	cvs-200707152000:1.1.1.1
+	cvs-200704292000:1.1.1.1
+	cvs-200702051700:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2014.06.09.15.17.15;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005395CFC65E5646F1;
+
+1.4
+date	2011.07.02.15.03.41;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004E0F31C5496AB95F;
+
+1.3
+date	2008.05.07.13.15.20;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004821AB7510EE48FB;
+
+1.2
+date	2008.03.02.21.41.09;	author tg;	state Exp;
+branches
+	1.2.2.1;
+next	1.1;
+commitid	10047CB1EE51190ECAF;
+
+1.1
+date	2007.02.05.17.05.47;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+commitid	10045C763C551AABAF7;
+
+1.2.2.1
+date	2008.05.17.19.11.53;	author tg;	state Exp;
+branches;
+next	;
+commitid	100482F2DC168C89AEA;
+
+1.1.1.1
+date	2007.02.05.17.05.47;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10045C763C551AABAF7;
+
+1.1.1.2
+date	2008.05.07.12.31.47;	author tg;	state Exp;
+branches
+	1.1.1.2.2.1;
+next	1.1.1.3;
+commitid	1004821A13C1FC036E1;
+
+1.1.1.3
+date	2011.07.02.14.59.47;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.2.2.1
+date	2011.07.02.15.02.09;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.127.1
+date	2010.12.19.14.45.52;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2014.06.09.14.29.24;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.5
+log
+@merge
+@
+text
+@/*
+ *  Copyright (c) 2006 Proofpoint, Inc. and its suppliers.
+ *	All rights reserved.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ *
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: monitor.c,v 8.8 2013-11-22 20:51:36 ca Exp $")
+#include "libmilter.h"
+
+#if _FFR_THREAD_MONITOR
+
+/*
+**  Thread Monitoring
+**  Todo: more error checking (return code from function calls)
+**  add comments.
+*/
+
+bool Monitor = false; /* use monitoring? */
+static unsigned int Mon_exec_time = 0;
+
+/* mutex protects Mon_cur_ctx, Mon_ctx_head, and ctx_start */
+static smutex_t Mon_mutex;
+static scond_t Mon_cv;
+
+/*
+**  Current ctx to monitor.
+**  Invariant:
+**  Mon_cur_ctx == NULL || Mon_cur_ctx is thread which was started the longest
+**	time ago.
+**
+**  Basically the entries in the list are ordered by time because new
+**	entries are appended at the end. However, due to the concurrent
+**	execution (multi-threaded) and no guaranteed order of wakeups
+**	after a mutex_lock() attempt, the order might not be strict,
+**	i.e., if the list contains e1 and e2 (in that order) then
+**	the the start time of e2 can be (slightly) smaller than that of e1.
+**	However, this slight inaccurracy should not matter for the proper
+**	working of this algorithm.
+*/
+
+static SMFICTX_PTR Mon_cur_ctx = NULL;
+static smfi_hd_T Mon_ctx_head; /* head of the linked list of active contexts */
+
+/*
+**  SMFI_SET_MAX_EXEC_TIME -- set maximum execution time for a thread
+**
+**	Parameters:
+**		tm -- maximum execution time for a thread
+**
+**	Returns:
+**		MI_SUCCESS
+*/
+
+int
+smfi_set_max_exec_time(tm)
+	unsigned int tm;
+{
+	Mon_exec_time = tm;
+	return MI_SUCCESS;
+}
+
+/*
+**  MI_MONITOR_THREAD -- monitoring thread
+**
+**	Parameters:
+**		arg -- ignored (required by pthread_create())
+**
+**	Returns:
+**		NULL on termination.
+*/
+
+static void *
+mi_monitor_thread(arg)
+	void *arg;
+{
+	sthread_t tid;
+	int r;
+	time_t now, end;
+
+	SM_ASSERT(Monitor);
+	SM_ASSERT(Mon_exec_time > 0);
+	tid = (sthread_t) sthread_get_id();
+	if (pthread_detach(tid) != 0)
+	{
+		/* log an error */
+		return (void *)1;
+	}
+
+/*
+**  NOTE: this is "flow through" code,
+**  do NOT use do { } while ("break" is used here!)
+*/
+
+#define MON_CHK_STOP							\
+	now = time(NULL);						\
+	end = Mon_cur_ctx->ctx_start + Mon_exec_time;			\
+	if (now > end)							\
+	{								\
+		smi_log(SMI_LOG_ERR,					\
+			"WARNING: monitor timeout triggered, now=%ld, end=%ld, tid=%ld, state=0x%x",\
+			(long) now, (long) end,				\
+			(long) Mon_cur_ctx->ctx_id, Mon_cur_ctx->ctx_state);\
+		mi_stop_milters(MILTER_STOP);				\
+		break;							\
+	}
+
+	(void) smutex_lock(&Mon_mutex);
+	while (mi_stop() == MILTER_CONT)
+	{
+		if (Mon_cur_ctx != NULL && Mon_cur_ctx->ctx_start > 0)
+		{
+			struct timespec abstime;
+
+			MON_CHK_STOP;
+			abstime.tv_sec = end;
+			abstime.tv_nsec = 0;
+			r = pthread_cond_timedwait(&Mon_cv, &Mon_mutex,
+					&abstime);
+		}
+		else
+			r = pthread_cond_wait(&Mon_cv, &Mon_mutex);
+		if (mi_stop() != MILTER_CONT)
+			break;
+		if (Mon_cur_ctx != NULL && Mon_cur_ctx->ctx_start > 0)
+		{
+			MON_CHK_STOP;
+		}
+	}
+	(void) smutex_unlock(&Mon_mutex);
+
+	return NULL;
+}
+
+/*
+**  MI_MONITOR_INIT -- initialize monitoring thread
+**
+**	Parameters: none
+**
+**	Returns:
+**		MI_SUCCESS/MI_FAILURE
+*/
+
+int
+mi_monitor_init()
+{
+	int r;
+	sthread_t tid;
+
+	SM_ASSERT(!Monitor);
+	if (Mon_exec_time <= 0)
+		return MI_SUCCESS;
+	Monitor = true;
+	if (!smutex_init(&Mon_mutex))
+		return MI_FAILURE;
+	if (scond_init(&Mon_cv) != 0)
+		return MI_FAILURE;
+	SM_TAILQ_INIT(&Mon_ctx_head);
+
+	r = thread_create(&tid, mi_monitor_thread, (void *)NULL);
+	if (r != 0)
+		return r;
+	return MI_SUCCESS;
+}
+
+/*
+**  MI_MONITOR_WORK_BEGIN -- record start of thread execution
+**
+**	Parameters:
+**		ctx -- session context
+**		cmd -- milter command char
+**
+**	Returns:
+**		0
+*/
+
+int
+mi_monitor_work_begin(ctx, cmd)
+	SMFICTX_PTR ctx;
+	int cmd;
+{
+	(void) smutex_lock(&Mon_mutex);
+	if (NULL == Mon_cur_ctx)
+	{
+		Mon_cur_ctx = ctx;
+		(void) scond_signal(&Mon_cv);
+	}
+	ctx->ctx_start = time(NULL);
+	SM_TAILQ_INSERT_TAIL(&Mon_ctx_head, ctx, ctx_mon_link);
+	(void) smutex_unlock(&Mon_mutex);
+	return 0;
+}
+
+/*
+**  MI_MONITOR_WORK_END -- record end of thread execution
+**
+**	Parameters:
+**		ctx -- session context
+**		cmd -- milter command char
+**
+**	Returns:
+**		0
+*/
+
+int
+mi_monitor_work_end(ctx, cmd)
+	SMFICTX_PTR ctx;
+	int cmd;
+{
+	(void) smutex_lock(&Mon_mutex);
+	ctx->ctx_start = 0;
+	SM_TAILQ_REMOVE(&Mon_ctx_head, ctx, ctx_mon_link);
+	if (Mon_cur_ctx == ctx)
+	{
+		if (SM_TAILQ_EMPTY(&Mon_ctx_head))
+			Mon_cur_ctx = NULL;
+		else
+			Mon_cur_ctx = SM_TAILQ_FIRST(&Mon_ctx_head);
+	}
+	(void) smutex_unlock(&Mon_mutex);
+	return 0;
+}
+#endif /* _FFR_THREAD_MONITOR */
+@
+
+
+1.4
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d2 1
+a2 1
+ *  Copyright (c) 2006 Sendmail, Inc. and its suppliers.
+d12 1
+a12 1
+SM_RCSID("@@(#)$Id: monitor.c,v 8.7 2007/04/23 16:26:28 ca Exp $")
+@
+
+
+1.3
+log
+@merge and reduce diffs against upstream
+@
+text
+@d12 1
+a12 1
+SM_RCSID("@@(#)$Sendmail: monitor.c,v 8.7 2007/04/23 16:26:28 ca Exp $")
+@
+
+
+1.2
+log
+@upgrade from sendmail 8.14.1 to 8.14.2 ourselves:
+> From donotreply@@lists.sendmail.org Fri Nov  2 02:46:04 2007
+> From: Claus Assmann <donotreply@@lists.sendmail.org>
+Message-ID: <200711020234.lA22YPul046763@@lists.sendmail.org>
+To: sendmail-announce@@sendmail.org
+Date: Thu, 1 Nov 2007 19:34:25 -0700 (PDT)
+Subject: sendmail 8.14.2 available
+
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA1
+
+Sendmail, Inc., and the Sendmail Consortium announce the availability
+of sendmail 8.14.2 which fixes some problems, e.g.,
+
+- - an important bug in the milter function smfi_chgfrom() which could
+  cause the loss of a message body.
+- - the handling of queued messages with 8 bit characters in From:
+  or To: header which could be "mistaken" for internal control
+  characters during a queue run and trigger various consistency checks.
+- - the handling of lines longer than MAXLINE-1 characters in certain
+  cases.
+
+A complete list of changes can be found in the release notes (see
+below).
+
+Please send bug reports and general feedback to one of the addresses
+listed at: http://www.sendmail.org/email-addresses.html
+
+The version can be found at
+
+ftp://ftp.sendmail.org/pub/sendmail/sendmail.8.14.2.tar.gz
+ftp://ftp.sendmail.org/pub/sendmail/sendmail.8.14.2.tar.gz.sig
+ftp://ftp.sendmail.org/pub/sendmail/sendmail.8.14.2.tar.Z
+ftp://ftp.sendmail.org/pub/sendmail/sendmail.8.14.2.tar.Z.sig
+
+MD5 signatures:
+cf784b9f20c32949ae1f38f3eae29875 sendmail.8.14.2.tar.Z
+f788d6986f12a81ac958195b045a529d sendmail.8.14.2.tar.Z.sig
+1c1472365344ca8061d6453c43c9a831 sendmail.8.14.2.tar.gz
+2ae4b6175a08e8a6cda992db20141d81 sendmail.8.14.2.tar.gz.sig
+
+You either need the first two files or the third and fourth, i.e.,
+the gzip'ed version or the compressed version and the corresponding
+sig file.  The PGP signature was created using the Sendmail Signing
+Key/2007, available on the web site (http://www.sendmail.org/) or
+on the public key servers.
+
+Since sendmail 8.11 and later includes hooks to cryptography, the
+following information from OpenSSL applies to sendmail as well.
+
+   PLEASE REMEMBER THAT EXPORT/IMPORT AND/OR USE OF STRONG CRYPTOGRAPHY
+   SOFTWARE, PROVIDING CRYPTOGRAPHY HOOKS OR EVEN JUST COMMUNICATING
+   TECHNICAL DETAILS ABOUT CRYPTOGRAPHY SOFTWARE IS ILLEGAL IN SOME
+   PARTS OF THE WORLD.  SO, WHEN YOU IMPORT THIS PACKAGE TO YOUR
+   COUNTRY, RE-DISTRIBUTE IT FROM THERE OR EVEN JUST EMAIL TECHNICAL
+   SUGGESTIONS OR EVEN SOURCE PATCHES TO THE AUTHOR OR OTHER PEOPLE
+   YOU ARE STRONGLY ADVISED TO PAY CLOSE ATTENTION TO ANY EXPORT/IMPORT
+   AND/OR USE LAWS WHICH APPLY TO YOU. THE AUTHORS ARE NOT LIABLE FOR
+   ANY VIOLATIONS YOU MAKE HERE. SO BE CAREFUL, IT IS YOUR RESPONSIBILITY.
+
+
+			SENDMAIL RELEASE NOTES
+      $Id: RELEASE_NOTES,v 8.1909 2007/10/31 16:04:13 ca Exp $
+
+
+This listing shows the version of the sendmail binary, the version
+of the sendmail configuration files, the date of release, and a
+summary of the changes in that release.
+
+8.14.2/8.14.2	2007/11/01
+	If a message was queued and it contained 8 bit characters in
+		a From: or To: header, then those characters could be
+		"mistaken" for internal control characters during a queue
+		run and trigger various consistency checks.  Problem
+		noted by Neil Rickert of Northern Illinois University.
+	If MaxMimeHeaderLength is set to a value greater than 0 (which
+		it is by default) then even if the Linelimit parameter
+		is 0, sendmail corrupted in the non-transfer-encoding
+		case every MAXLINE-1 characters.  Patch from John Gardiner
+		Myers of Proofpoint.
+	Setting the suboption DeliveryMode for DaemonPortOptions did not
+		work in earlier 8.14 versions.
+	Note: DeliveryMode=interactive is silently converted to
+		background if a milter can reject or delete a recipient.
+		Prior to 8.14 this happened only if milter could delete
+		recipients.
+	ClientRate should trigger when the limit was exceeded (as
+		documented), not when it was reached.  Patch from
+		John Beck of Sun Microsystems.
+	Force a queue run for -qGqueuegroup even if no runners are
+		specified (R=0) and forking (F=f) is requested.
+	When multiple results are requested for a DNS map lookup
+		(-z and -Z), return only those that are relevant for
+		the query (not also those in the "additional section".)
+	If the message transfer time to sendmail (when acting as server)
+		exceeds Timeout.queuewarn or Timeout.queuereturn and
+		the message is refused (by a milter), sendmail previously
+		created a delivery status notification (DSN).  Patch
+		from Doug Heath of The Hertz Corporation.
+	A code change in Cyrus-SASL 2.1.22 for sasl_decode64() requires
+		the MTA to deal with some input (i.e., "=") itself.
+		Problem noted by Eliot Lear.
+	sendmail counted a delivery as successful if PIPELINING is
+		compiled in but not offered by the server and the
+		delivery failed temporarily.  Patch from Werner Wiethege.
+	If getting the result of an LDAP query times out then close the
+		map so it will be reopened on the next lookup.  This
+		should help "failover" configurations that specify more
+		than one LDAP server.
+	If check_compat returns $#discard then a "savemail panic" could
+		be triggered under some circumstances (e.g., requiring
+		a system which does not have the compile time flag
+		HASFLOCK set). Based on patch by Motonori Nakamura
+		of National Institute of Informatics, Japan.
+	If a milter rejected a recipient, the count for nrcpts= in the
+		logfile entry might have been wrong.  Problem found by
+		Petra Humann of TU Dresden.
+	If a milter invoked smfi_chgfrom() where ESMTP arguments are not
+		NULL, the message body was lost.  Patch from Motonori
+		Nakamura of National Institute of Informatics, Japan.
+	sendmail(8) had a bogus space in -qGname.  Patch from Peng Haitao.
+	CONTRIB: buildvirtuser: Preserve ownership and permissions when
+		replacing files.
+	CONTRIB: buildvirtuser: Skip dot-files (e.g., .cvsignore) when
+		reading the /etc/mail/virtusers/ directory.
+	CONTRIB: buildvirtuser: Emit warnings instead of exiting where
+		appropriate.
+	LIBMILTER: Fix ABI backwards compatibility so milters compiled
+		against an older libmilter.so shared library can use an
+		8.14 libmilter.so shared library.
+	LIBMILTER: smfi_version() did not properly extract the patchlevel
+		from the version number, however, the returned value was
+		correct for the current libmilter version.
+
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1.4.5 (OpenBSD)
+
+iQCVAwUBRyqEOs8etQMiMnoBAQKNdQP/cQKfjVP7qTi0Ol/OgR7AnvCaerCxiQ5J
+y1uxjwXs2s+RemX0u5a4c0agoLscTKU5Ot6uzOdvKvZd0/unr/IkzuXZBF9LsnlZ
+X1wS4GXQDXKDfazvwdwOUgxkthMZU1TiVFj/GH5TOfHqVUO5Ho/yRfAQoAn3taFc
+5jeg+A3+M9M=
+=DJHS
+-----END PGP SIGNATURE-----
+@
+text
+@d12 1
+a12 1
+SM_RCSID("@@(#)$Id: monitor.c,v 8.7 2007/04/23 16:26:28 ca Exp $")
+@
+
+
+1.2.2.1
+log
+@MFC sendmail update to 8.14.3
+
+agreed bsiegert@@
+@
+text
+@d12 1
+a12 1
+SM_RCSID("@@(#)$Sendmail: monitor.c,v 8.7 2007/04/23 16:26:28 ca Exp $")
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d11 2
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@a10 2
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: monitor.c,v 8.7 2007/04/23 16:26:28 ca Exp $")
+@
+
+
+1.1.127.2
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ *  Copyright (c) 2006 Proofpoint, Inc. and its suppliers.
+d12 1
+a12 1
+SM_RCSID("@@(#)$Id: monitor.c,v 8.8 2013-11-22 20:51:36 ca Exp $")
+@
+
+
+1.1.1.1
+log
+@Import Sendmail 8.14.0 via OpenBSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@OpenBSD finally has upgraded their sendmail, too…
+@
+text
+@a10 2
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Sendmail: monitor.c,v 8.7 2007/04/23 16:26:28 ca Exp $")
+@
+
+
+1.1.1.2.2.1
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d12 1
+a12 1
+SM_RCSID("@@(#)$Id: monitor.c,v 8.7 2007/04/23 16:26:28 ca Exp $")
+@
+
+
+1.1.1.3
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d12 1
+a12 1
+SM_RCSID("@@(#)$Id: monitor.c,v 8.7 2007/04/23 16:26:28 ca Exp $")
+@
+
+

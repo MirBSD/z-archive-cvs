@@ -1,0 +1,698 @@
+head	1.13;
+access;
+symbols
+	MIRBSD_10:1.12.0.2
+	MIRBSD_10_BASE:1.12
+	MIRBSD_9_BASE:1.5
+	MIRBSD_8:1.3.0.2
+	MIRBSD_8_BASE:1.3
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.13
+date	2013.10.31.20.07.30;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	1005272B7081B0E5655;
+
+1.12
+date	2007.08.16.10.38.29;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	10046C428EB50B824CD;
+
+1.11
+date	2007.08.10.23.52.24;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	10046BCFA4E557A719B;
+
+1.10
+date	2007.08.10.23.01.03;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	10046BCEE3D44DE3A31;
+
+1.9
+date	2007.07.08.15.00.30;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004690FC0552C0A95C;
+
+1.8
+date	2007.05.14.22.11.44;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004648DEB711E265CB;
+
+1.7
+date	2007.05.14.22.06.52;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004648DD5A2275F914;
+
+1.6
+date	2006.08.28.13.15.44;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10044F2EC8D774FC8BB;
+
+1.5
+date	2006.06.04.01.06.19;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100448232146FB5FBBF;
+
+1.4
+date	2006.05.29.23.38.32;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100447B85B916A0A64A;
+
+1.3
+date	2005.10.27.11.58.39;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	77604360c0d42ca3;
+
+1.2
+date	2005.03.13.19.17.21;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.31.06;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.31.06;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.13
+log
+@adapt most __attribute__((…)) occurrences to new KNF style(9)
+@
+text
+@/*	$OpenBSD: rdate.c,v 1.22 2004/02/18 20:10:53 jmc Exp $	*/
+/*	$NetBSD: rdate.c,v 1.4 1996/03/16 12:37:45 pk Exp $	*/
+
+/*
+ * Copyright © 2005, 2007, 2013
+ *	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+ * Copyright (c) 1994 Christos Zoulas
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Christos Zoulas.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
+ * rdate.c: Set the date from the specified host
+ *
+ *	Uses the rfc868 time protocol at socket 37.
+ *	Time is returned as the number of seconds since
+ *	midnight January 1st 1900.
+ */
+
+#include <sys/param.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+
+#include <stdio.h>
+#include <ctype.h>
+#include <err.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+
+#include "rdate.h"
+
+/* there are systems without libutil; for portability */
+#ifndef	NO_UTIL
+#include <util.h>
+#else
+#define	logwtmp(a,b,c)	/* nothing */
+#endif
+
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.12 2007/08/16 10:38:29 tg Exp $");
+
+static void usage(void) __attribute__((__noreturn__));
+
+extern const char *__progname;
+int debug = 0;
+
+static void
+usage(void)
+{
+	fprintf(stderr,
+	    "Usage: %s [-346acdnpsv] [-P ntpport] host\n"
+#ifndef SMALL
+	    "   -3: set SNTP version field to 3\n"
+	    "	-4: use IPv4 only\n"
+	    "	-6: use IPv6 only\n"
+	    "	-a: use adjtime instead of instant change\n"
+	    "	-d: debug SNTP exchange\n"
+	    "	-n: use SNTP instead of RFC868 time protocol\n"
+	    "	-p: just print, don't set\n"
+	    "	-r: show remainder from last adjtime\n"
+	    "	-s: just set, don't print (overrides -v)\n"
+	    "	-v: verbose output (clears -s)\n"
+#endif
+	    , __progname);
+	exit(1);
+}
+
+int
+main(int argc, char **argv)
+{
+	int             pr = 0, silent = 0, ntp = 0, verbose = 0, ntpver = 0;
+	int		slidetime = 0, showremainder = 0, portno = 0;
+	char           *hname;
+	int             c;
+	int		family = PF_UNSPEC;
+
+	struct timeval new, adjust, remainder;
+
+	while ((c = getopt(argc, argv, "346acdnP:prsv")) != -1)
+		switch (c) {
+		case '3':
+			ntpver = 3;
+			break;
+
+		case '4':
+			family = PF_INET;
+			break;
+
+		case '6':
+			family = PF_INET6;
+			break;
+
+		case 'P':
+			portno = atoi(optarg);
+			if (portno < 1 || portno > 65535)
+				errx(1, "port number %s out of range", optarg);
+			break;
+
+		case 'p':
+			pr++;
+			break;
+
+		case 'r':
+			showremainder++;
+			break;
+
+		case 's':
+			silent++;
+			break;
+
+		case 'a':
+			slidetime++;
+			break;
+
+		case 'c':
+			break;
+
+		case 'd':
+			debug++;
+			break;
+
+		case 'n':
+			ntp++;
+			break;
+
+		case 'v':
+			verbose++;
+			silent = 0;
+			break;
+
+		default:
+			usage();
+		}
+
+	if ((argc - 1) != optind)
+		usage();
+	hname = argv[optind];
+
+	if (ntp)
+		ntp_client(hname, family, &new, &adjust, portno, ntpver);
+	else
+		rfc868time_client(hname, family, &new, &adjust);
+
+	if (!pr) {
+		if (!slidetime) {
+			logwtmp("|", "date", "");
+			if (settimeofday(&new, NULL) == -1)
+				err(1, "Could not set time of day");
+			logwtmp("{", "date", "");
+		} else {
+			if (adjtime(&adjust, &remainder) == -1)
+				err(1, "Could not adjust time of day");
+		}
+	}
+
+	if (!silent) {
+		struct tm      *ltm;
+		char		buf[80];
+		time_t		tim = new.tv_sec;
+		double		adjsec, remainsec;
+
+		ltm = localtime(&tim);
+		(void) strftime(buf, sizeof buf, "%a %b %e %H:%M:%S %Z %Y\n", ltm);
+		(void) fputs(buf, stdout);
+
+		adjsec  = adjust.tv_sec + adjust.tv_usec / 1.0e6;
+		remainsec  = remainder.tv_sec + remainder.tv_usec / 1.0e6;
+
+		if (slidetime || verbose) {
+			if (ntp)
+				(void) fprintf(stdout,
+				   "%s: adjust local clock by %.6f seconds\n",
+				   __progname, adjsec);
+			else
+				(void) fprintf(stdout,
+				   "%s: adjust local clock by %ld seconds\n",
+				   __progname, (long)adjust.tv_sec);
+		}
+		if (!pr && slidetime && showremainder)
+			(void) fprintf(stdout,
+			    "%s: remainder before was %.6f seconds\n",
+			    __progname, remainsec);
+	}
+
+	return 0;
+}
+@
+
+
+1.12
+log
+@• add option -3 to use (S)NTPv3 – we just change the version field for now,
+  no idea if that’s ok with the RFC, but it WFM
+• fix displaying of IPv4-address-decoded refid
+@
+text
+@a0 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.11 2007/08/10 23:52:24 tg Exp $ */
+d5 2
+a6 1
+ * Copyright (c) 2005, 2007 Thorsten Glaser
+d65 1
+a65 1
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.11 2007/08/10 23:52:24 tg Exp $");
+d67 1
+a67 1
+static void usage(void) __attribute__((noreturn));
+@
+
+
+1.11
+log
+@told ya it needs a .h file
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.10 2007/08/10 23:01:03 tg Exp $ */
+d65 1
+a65 1
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.10 2007/08/10 23:01:03 tg Exp $");
+d76 1
+a76 1
+	    "Usage: %s [-46acdnpsv] [-P ntpport] host\n"
+d78 1
+d96 1
+a96 1
+	int             pr = 0, silent = 0, ntp = 0, verbose = 0;
+d104 1
+a104 1
+	while ((c = getopt(argc, argv, "46acdnP:prsv")) != -1)
+d106 4
+d165 1
+a165 1
+		ntp_client(hname, family, &new, &adjust, portno);
+@
+
+
+1.10
+log
+@ntp port support here too
+XXX needs a .h file…
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.9 2007/07/08 15:00:30 tg Exp $ */
+d56 2
+d65 1
+a65 1
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.9 2007/07/08 15:00:30 tg Exp $");
+a66 2
+void rfc868time_client(const char *, int, struct timeval *, struct timeval *);
+void ntp_client(const char *, int, struct timeval *, struct timeval *, int);
+@
+
+
+1.9
+log
+@• always pack sync, rdate on the ramdisc, it even fits the i386 floppy
+• make rdate a little smaller, convert sync to __IDSTRING() too
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.8 2007/05/14 22:11:44 tg Exp $ */
+d63 1
+a63 1
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.8 2007/05/14 22:11:44 tg Exp $");
+d66 1
+a66 1
+void ntp_client(const char *, int, struct timeval *, struct timeval *);
+d76 1
+a76 1
+	    "Usage: %s [-46acdnpsv] host\n"
+d96 1
+a96 1
+	int		slidetime = 0, showremainder = 0;
+d103 1
+a103 1
+	while ((c = getopt(argc, argv, "46acdnprsv")) != -1)
+d113 6
+d160 1
+a160 1
+		ntp_client(hname, family, &new, &adjust);
+@
+
+
+1.8
+log
+@fixes
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.7 2007/05/14 22:06:52 tg Exp $ */
+d63 1
+a63 1
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.7 2007/05/14 22:06:52 tg Exp $");
+d77 1
+d86 3
+a88 2
+	    "	-v: verbose output (clears -s)\n",
+	    __progname);
+@
+
+
+1.7
+log
+@• merge ntpleaps.h into ntp.c, ntpleaps.c
+• update ntpleaps.c to latest licence template
+• portability: don't use __dead
+• portability: add ifdef for external arc4random
+• add GNUmakefile to be used on e.g. Debian GNU/Linux and Debian GNU/kFreeBSD
+• BSDmakefile: remove GNU stuff
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.6 2006/08/28 13:15:44 tg Exp $ */
+d60 1
+a60 1
+#define	logwtmp(a,b,c)
+d63 1
+a63 1
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.6 2006/08/28 13:15:44 tg Exp $");
+d69 1
+a69 1
+extern char *__progname;
+@
+
+
+1.6
+log
+@I need my debug modus (rdate -nd[d]p)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.5 2006/06/04 01:06:19 tg Exp $ */
+d6 1
+a6 1
+ * Copyright (c) 2005 Thorsten Glaser
+d63 1
+a63 1
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.5 2006/06/04 01:06:19 tg Exp $");
+d67 1
+a67 1
+static __dead void usage(void);
+@
+
+
+1.5
+log
+@by suggestion of jmc@@openbsd and bsiegert@@, retain -c as nop
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.4 2006/05/29 23:38:32 tg Exp $ */
+d51 1
+d63 1
+a63 1
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.4 2006/05/29 23:38:32 tg Exp $");
+d67 1
+a67 1
+void usage(void);
+d70 1
+d72 1
+a72 1
+void
+d75 13
+a87 9
+	(void) fprintf(stderr, "Usage: %s [-46acnpsv] host\n", __progname);
+	(void) fprintf(stderr, "  -4: use IPv4 only\n");
+	(void) fprintf(stderr, "  -6: use IPv6 only\n");
+	(void) fprintf(stderr, "  -a: use adjtime instead of instant change\n");
+	(void) fprintf(stderr, "  -n: use SNTP instead of RFC868 time protocol\n");
+	(void) fprintf(stderr, "  -p: just print, don't set\n");
+	(void) fprintf(stderr, "  -r: show remainder from last adjtime\n");
+	(void) fprintf(stderr, "  -s: just set, don't print (overrides -v)\n");
+	(void) fprintf(stderr, "  -v: verbose output (clears -s)\n");
+d101 1
+a101 1
+	while ((c = getopt(argc, argv, "46acnprsv")) != -1)
+d127 7
+a142 3
+		case 'c':
+			break;
+
+a144 1
+			return 1;
+d147 1
+a147 1
+	if ((argc - 1) != optind) {
+a148 2
+		return 1;
+	}
+@
+
+
+1.4
+log
+@use libtz for determining whether we should correct leap
+seconds, instead of relying on the user to provide -c, and
+use it to know the exact amount of leap seconds to correct
+for (if any)
+
+we only lose one thing: RFC 868 leap second correction (but
+then, you don't want to use that anyway, and if you use it,
+you better know whether the server you're synching against
+is using a POSIX or "right" timezone)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.3 2005/10/27 11:58:39 tg Exp $ */
+d62 1
+a62 1
+__RCSID("$MirOS: src/usr.sbin/rdate/rdate.c,v 1.3 2005/10/27 11:58:39 tg Exp $");
+d130 3
+@
+
+
+1.3
+log
+@* merge OpenBSD import
+* rewrite tai2utc from libc:taitime.c
+* please __CRAZY=yes
+* reduce diff against OpenBSD
+* retain some functionality
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/rdate/rdate.c,v 1.2 2005/03/13 19:17:21 tg Exp $ */
+d62 1
+a62 1
+__RCSID("$MirOS$");
+d64 2
+a65 2
+void rfc868time_client(const char *, int, struct timeval *, struct timeval *, int);
+void ntp_client(const char *, int, struct timeval *, struct timeval *, int);
+a76 1
+	(void) fprintf(stderr, "  -c: correct leap second count (recommended)\n");
+d88 1
+a88 1
+	int		slidetime = 0, corrleaps = 0, showremainder = 0;
+a124 4
+		case 'c':
+			corrleaps++;
+			break;
+
+d142 1
+a142 1
+		ntp_client(hname, family, &new, &adjust, corrleaps);
+d144 1
+a144 1
+		rfc868time_client(hname, family, &new, &adjust, corrleaps);
+a186 9
+	if (!corrleaps) {
+		(void) fprintf(stderr,
+		    "%s: WARNING: Not using the '-c' parameter is deprecated and can\n"
+		    "lead to the clock being set wrongly (even if sometimes POSIXly correct)\n",
+		    __progname);
+		if (!ntp) fprintf(stderr,
+		    "This does not apply if the time server uses corrected leap seconds.\n");
+	}
+
+@
+
+
+1.2
+log
+@fast merge src/usr.sbin
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d6 1
+a43 3
+#include <sys/cdefs.h>
+__RCSID("$MirOS$");
+
+d62 2
+d66 1
+a90 1
+	extern int      optind;
+d188 1
+a188 1
+			    "%s: remainder before were %.6f seconds\n",
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d42 3
+a44 7
+#ifndef lint
+#if 0
+from: static char rcsid[] = "$NetBSD: rdate.c,v 1.3 1996/02/22 06:59:18 thorpej Exp $";
+#else
+static const char rcsid[] = "$OpenBSD: rdate.c,v 1.22 2004/02/18 20:10:53 jmc Exp $";
+#endif
+#endif				/* lint */
+d58 1
+a58 1
+#ifndef NO_UTIL
+d61 1
+a61 1
+#define logwtmp(a,b,c)
+d64 2
+a65 2
+void rfc868time_client (const char *, int, struct timeval *, struct timeval *, int);
+void ntp_client (const char *, int, struct timeval *, struct timeval *, int);
+d67 1
+a67 1
+extern char    *__progname;
+d76 1
+a76 1
+	(void) fprintf(stderr, "  -c: correct leap second count\n");
+d79 3
+a81 2
+	(void) fprintf(stderr, "  -s: just set, don't print\n");
+	(void) fprintf(stderr, "  -v: verbose output\n");
+d88 1
+a88 1
+	int		slidetime = 0, corrleaps = 0;
+d94 1
+a94 1
+	struct timeval new, adjust;
+d96 1
+a96 1
+	while ((c = getopt(argc, argv, "46psancv")) != -1)
+d110 4
+d127 1
+a127 1
+			corrleaps = 1;
+d132 1
+d140 1
+a140 1
+	if (argc - 1 != optind) {
+d158 1
+a158 1
+			if (adjtime(&adjust, NULL) == -1)
+d167 1
+a167 1
+		double		adjsec;
+d174 1
+d184 1
+a184 1
+				   __progname, adjust.tv_sec);
+d186 13
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

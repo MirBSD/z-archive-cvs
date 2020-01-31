@@ -1,0 +1,262 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2010.11.17.14.57.19;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	1004CE3ED35576F0597;
+
+1.1
+date	2010.01.19.18.05.08;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004B55F3ED237D7740;
+
+
+desc
+@@
+
+
+1.2
+log
+@Add cross-references to broken dependencies for the ports that failed to
+build, hopefully making the output more useful.
+@
+text
+@#!/usr/bin/perl -W
+
+use strict;
+use File::Spec::Functions qw(catfile);
+use Data::Dumper;
+
+my $PORTSDIR = $ENV{PORTSDIR} || "/usr/ports";
+die "Cannot find MirPorts under $PORTSDIR" unless (-d $PORTSDIR);
+my $BULKDIR = $ENV{BULKDIR} || catfile($PORTSDIR, "Bulk");
+my $LOGDIR = catfile($PORTSDIR, "Logs");
+
+my $starttime = localtime;
+my $in_category = 0;
+my $category;
+my %totals = ( 	ok => 0,
+		skipped => 0,
+		broken => 0,
+		failed => 0 );
+my %index = ();
+my %idir = ();
+
+sub start_output {
+	# XXX
+	my $arch = `cd $PORTSDIR/essentials/pkgtools && mmake show=OStriplet`;
+	print <<EOF
+<html><head><title>MirPorts Bulk Build, $starttime</title>
+<style type="text/css">
+td.skipped {
+	width: 5em;
+	text-align: center;
+	font-weight: bold;
+	color: black;
+	background-color: white;
+}
+
+td.broken {
+	width: 5em;
+	text-align: center;
+	font-weight: bold;
+	color: black;
+	background-color: #fc0;
+}
+
+td.failed {
+	width: 5em;
+	text-align: center;
+	font-weight: bold;
+	color: white;
+	background-color: #f00;
+}
+
+td.ok {
+	width: 5em;
+	text-align: center;
+	font-weight: bold;
+	color: white;
+	background-color: #0a0;
+}
+</style>
+</head>
+<body>
+<h1>MirPorts Bulk build overview</h1>
+<p>Created on $starttime for $arch</p>
+<hr />
+EOF
+}
+
+sub end_output {
+	print "</table>\n\n" if $in_category;
+
+	print "<hr>\n";
+	print "<p><b>Totals</b>: $totals{'ok'} ok, $totals{'broken'} broken, "; 
+	print "$totals{'skipped'} skipped, $totals{'failed'} failed.</p>"; 
+	print "</body></html>\n";
+}
+
+sub new_category {
+	my $cat = shift;
+
+	print "</table>\n\n" if $in_category;
+	print "<h2>$cat</h2>\n\n";
+	print "<table border=\"1\">\n";
+	$in_category = 1;
+}
+
+sub print_entry {
+	my @@brokendeps	= ();
+	my $dir		= shift;
+	my $name	= $idir{$dir}->{"pkgname"};
+	my $deps	= $idir{$dir}->{"deps"};
+	my $status	= $idir{$dir}->{"status"};
+	$totals{$status}++;
+
+	print "<tr>";
+	print "<td class=\"$status\">$status</td>";
+	if (-f catfile($LOGDIR, $name . ".log")) {
+		print "<td><a href=\"Logs/$name.log\">$dir</a></td>";
+	} else {
+		print "<td>$dir</td>";
+	}
+	print "<td><p>$name</p>";
+
+	if ($status ne "ok") {
+		foreach my $dep (keys %$deps) {
+			push @@brokendeps, $idir{$dep}
+				if defined($idir{$dep}) and $idir{$dep}->{"status"} ne "ok";
+		}
+	}
+	
+	if (@@brokendeps) {
+		print "<p class=\"brokendeps\">Blocked by: ";
+		#while (my (undef, $b) = each %brokendeps) {
+		foreach my $b (@@brokendeps) {
+			print "- ".$b->{"pkgname"}." (".$b->{"status"}.") ";
+		}
+		print "</p>";
+	}
+
+	print "</td>";
+	print "</tr>\n";
+}
+
+
+######################################################################
+
+open INDEX, "<", catfile($PORTSDIR, "INDEX") or die "Cannot open INDEX: $!";
+while (<INDEX>) {
+	chomp;
+	# pkgname, dir, prefix, comment, homepage, path_to_descr, responsible,
+	# categories, lib, build, run_depends, only_for_platform, 
+	# not_for_platform, permit_{package,distfiles}_{cdrom,ftp}
+	my ($pkgname, $dir, undef, $comment, undef, undef, undef, undef, $libdeps,
+		$builddeps, $rundeps) = split(/\|/);
+	my %deps = ();
+	
+	chop $dir if $dir =~ m/,$/;
+
+	# dependencies
+	foreach my $i (split(' ', $libdeps." ".$builddeps." ".$rundeps)) {
+		my @@d = split(':', $i);
+		$deps{$d[$#d]} = 1;
+	}
+
+	$index{$pkgname} = {dir	=> $dir,
+			pkgname	=> $pkgname,
+			status	=> qw(skipped),
+			deps	=> \%deps };
+
+	$index{$pkgname}->{"status"} = "broken" if ($comment =~ m/\(broken\)/);
+	$idir{$dir} = $index{$pkgname};
+}
+close INDEX;
+
+opendir(BULK, $BULKDIR) or die "Cannot open bulk cookie directory: $!";
+while ($_ = readdir BULK) {
+	next if m/^\./;
+	print STDERR "$_: not in index!\n" if !exists $index{$_};
+	$index{$_}->{"status"} = "ok";
+	$index{$_}->{"dir"} = "" unless $index{$_}->{"dir"};
+}
+closedir(BULK);
+
+if (open(FAILED, catfile($PORTSDIR, "Failed"))) {
+	while (<FAILED>) {
+		chomp;
+		my $dir = $_;
+		$idir{$dir}->{"status"} = "failed";
+	}
+	close FAILED;
+}
+
+#print Data::Dumper->Dump([%idir]);
+#exit 0;
+		
+# Begin the output
+start_output();
+
+foreach my $j (sort(keys %idir)) {
+	$j =~ m/(.+?)\//;
+	my $c = $1 || "No category";
+	unless ($c eq $category) {
+		new_category($c);
+		$category = $c;
+	}
+
+	print_entry($j)
+	# print $index{$j}->{"dir"} . " ($j): ";
+	# map { print "$_ " } keys %{$index{$j}->{"deps"}};
+	# print ($index{$j}->{"status"} || "unknown");
+	# print "\n";
+}
+
+end_output();
+@
+
+
+1.1
+log
+@Add my script to create an overview page after a MirPorts bulk package build
+after it has finished. Ususally started from /usr/ports, outputs a html page
+on stdout.
+@
+text
+@d19 2
+d87 5
+a91 3
+	my ($name, $dir, $status) = @@_;
+
+	$status = $status || "skipped";
+d101 19
+a119 1
+	print "<td>$name</td>";
+a125 2
+my %index = ();
+
+d135 2
+d145 2
+d150 1
+d167 1
+a167 2
+		map { $index{$_}->{"status"} = "failed"
+			if $index{$_}->{"dir"} eq $dir } keys %index;
+d171 3
+d178 2
+a179 2
+foreach my $j (sort { $index{$a}->{"dir"} cmp $index{$b}->{"dir"} } keys %index) {
+	$index{$j}->{"dir"} =~ m/(.+?)\//;
+d186 1
+a186 1
+	print_entry($j, $index{$j}->{"dir"}, $index{$j}->{"status"});
+@
+

@@ -1,0 +1,1923 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.21.22;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.47.38;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.02.26.20.04.51;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.41;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.07;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.22;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.07;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.02;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.02;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.23;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftbbox.c                                                               */
+/*                                                                         */
+/*    FreeType bbox computation (body).                                    */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used        */
+/*  modified and distributed under the terms of the FreeType project       */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* This component has a _single_ role: to compute exact outline bounding */
+  /* boxes.                                                                */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+
+#include FT_BBOX_H
+#include FT_IMAGE_H
+#include FT_OUTLINE_H
+#include FT_INTERNAL_CALC_H
+#include FT_INTERNAL_OBJECTS_H
+
+
+  typedef struct  TBBox_Rec_
+  {
+    FT_Vector  last;
+    FT_BBox    bbox;
+
+  } TBBox_Rec;
+
+
+#define FT_UPDATE_BBOX( p, bbox ) \
+  FT_BEGIN_STMNT                  \
+    if ( p->x < bbox.xMin )       \
+      bbox.xMin = p->x;           \
+    if ( p->x > bbox.xMax )       \
+      bbox.xMax = p->x;           \
+    if ( p->y < bbox.yMin )       \
+      bbox.yMin = p->y;           \
+    if ( p->y > bbox.yMax )       \
+      bbox.yMax = p->y;           \
+  FT_END_STMNT
+
+#define CHECK_X( p, bbox )                         \
+          ( p->x < bbox.xMin || p->x > bbox.xMax )
+
+#define CHECK_Y( p, bbox )                         \
+          ( p->y < bbox.yMin || p->y > bbox.yMax )
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    BBox_Move_To                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    This function is used as a `move_to' emitter during                */
+  /*    FT_Outline_Decompose().  It simply records the destination point   */
+  /*    in `user->last'. We also update bbox in case contour starts with   */
+  /*    an implicit `on' point.                                            */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    to   :: A pointer to the destination vector.                       */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    user :: A pointer to the current walk context.                     */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    Always 0.  Needed for the interface only.                          */
+  /*                                                                       */
+  static int
+  BBox_Move_To( FT_Vector*  to,
+                TBBox_Rec*  user )
+  {
+    FT_UPDATE_BBOX( to, user->bbox );
+
+    user->last = *to;
+
+    return 0;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    BBox_Line_To                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    This function is used as a `line_to' emitter during                */
+  /*    FT_Outline_Decompose().  It simply records the destination point   */
+  /*    in `user->last'; no further computations are necessary because     */
+  /*    bbox already contains both explicit ends of the line segment.      */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    to   :: A pointer to the destination vector.                       */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    user :: A pointer to the current walk context.                     */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    Always 0.  Needed for the interface only.                          */
+  /*                                                                       */
+  static int
+  BBox_Line_To( FT_Vector*  to,
+                TBBox_Rec*  user )
+  {
+    user->last = *to;
+
+    return 0;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    BBox_Conic_Check                                                   */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Find the extrema of a 1-dimensional conic Bezier curve and update  */
+  /*    a bounding range.  This version uses direct computation, as it     */
+  /*    doesn't need square roots.                                         */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    y1  :: The start coordinate.                                       */
+  /*                                                                       */
+  /*    y2  :: The coordinate of the control point.                        */
+  /*                                                                       */
+  /*    y3  :: The end coordinate.                                         */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    min :: The address of the current minimum.                         */
+  /*                                                                       */
+  /*    max :: The address of the current maximum.                         */
+  /*                                                                       */
+  static void
+  BBox_Conic_Check( FT_Pos   y1,
+                    FT_Pos   y2,
+                    FT_Pos   y3,
+                    FT_Pos*  min,
+                    FT_Pos*  max )
+  {
+    /* This function is only called when a control off-point is outside */
+    /* the bbox that contains all on-points.  It finds a local extremum */
+    /* within the segment, equal to (y1*y3 - y2*y2)/(y1 - 2*y2 + y3).   */
+    /* Or, offsetting from y2, we get                                   */
+
+    y1 -= y2;
+    y3 -= y2;
+    y2 += FT_MulDiv( y1, y3, y1 + y3 );
+
+    if ( y2 < *min )
+      *min = y2;
+    if ( y2 > *max )
+      *max = y2;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    BBox_Conic_To                                                      */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    This function is used as a `conic_to' emitter during               */
+  /*    FT_Outline_Decompose().  It checks a conic Bezier curve with the   */
+  /*    current bounding box, and computes its extrema if necessary to     */
+  /*    update it.                                                         */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    control :: A pointer to a control point.                           */
+  /*                                                                       */
+  /*    to      :: A pointer to the destination vector.                    */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    user    :: The address of the current walk context.                */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    Always 0.  Needed for the interface only.                          */
+  /*                                                                       */
+  /* <Note>                                                                */
+  /*    In the case of a non-monotonous arc, we compute directly the       */
+  /*    extremum coordinates, as it is sufficiently fast.                  */
+  /*                                                                       */
+  static int
+  BBox_Conic_To( FT_Vector*  control,
+                 FT_Vector*  to,
+                 TBBox_Rec*  user )
+  {
+    /* in case `to' is implicit and not included in bbox yet */
+    FT_UPDATE_BBOX( to, user->bbox );
+
+    if ( CHECK_X( control, user->bbox ) )
+      BBox_Conic_Check( user->last.x,
+                        control->x,
+                        to->x,
+                        &user->bbox.xMin,
+                        &user->bbox.xMax );
+
+    if ( CHECK_Y( control, user->bbox ) )
+      BBox_Conic_Check( user->last.y,
+                        control->y,
+                        to->y,
+                        &user->bbox.yMin,
+                        &user->bbox.yMax );
+
+    user->last = *to;
+
+    return 0;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    BBox_Cubic_Check                                                   */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    Find the extrema of a 1-dimensional cubic Bezier curve and         */
+  /*    update a bounding range.  This version uses iterative splitting    */
+  /*    because it is faster than the exact solution with square roots.    */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    p1  :: The start coordinate.                                       */
+  /*                                                                       */
+  /*    p2  :: The coordinate of the first control point.                  */
+  /*                                                                       */
+  /*    p3  :: The coordinate of the second control point.                 */
+  /*                                                                       */
+  /*    p4  :: The end coordinate.                                         */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    min :: The address of the current minimum.                         */
+  /*                                                                       */
+  /*    max :: The address of the current maximum.                         */
+  /*                                                                       */
+  static FT_Pos
+  cubic_peak( FT_Pos  q1,
+              FT_Pos  q2,
+              FT_Pos  q3,
+              FT_Pos  q4 )
+  {
+    FT_Pos  peak = 0;
+    FT_Int  shift;
+
+
+    /* This function finds a peak of a cubic segment if it is above 0    */
+    /* using iterative bisection of the segment, or returns 0.           */
+    /* The fixed-point arithmetic of bisection is inherently stable      */
+    /* but may loose accuracy in the two lowest bits.  To compensate,    */
+    /* we upscale the segment if there is room.  Large values may need   */
+    /* to be downscaled to avoid overflows during bisection.             */
+    /* It is called with either q2 or q3 positive, which is necessary    */
+    /* for the peak to exist and avoids undefined FT_MSB.                */
+
+    shift = 27 - FT_MSB( (FT_UInt32)( FT_ABS( q1 ) |
+                                      FT_ABS( q2 ) |
+                                      FT_ABS( q3 ) |
+                                      FT_ABS( q4 ) ) );
+
+    if ( shift > 0 )
+    {
+      /* upscaling too much just wastes time */
+      if ( shift > 2 )
+        shift = 2;
+
+      q1 <<=  shift;
+      q2 <<=  shift;
+      q3 <<=  shift;
+      q4 <<=  shift;
+    }
+    else
+    {
+      q1 >>= -shift;
+      q2 >>= -shift;
+      q3 >>= -shift;
+      q4 >>= -shift;
+    }
+
+    /* for a peak to exist above 0, the cubic segment must have */
+    /* at least one of its control off-points above 0.          */
+    while ( q2 > 0 || q3 > 0 )
+    {
+      /* determine which half contains the maximum and split */
+      if ( q1 + q2 > q3 + q4 ) /* first half */
+      {
+        q4 = q4 + q3;
+        q3 = q3 + q2;
+        q2 = q2 + q1;
+        q4 = q4 + q3;
+        q3 = q3 + q2;
+        q4 = ( q4 + q3 ) / 8;
+        q3 = q3 / 4;
+        q2 = q2 / 2;
+      }
+      else                     /* second half */
+      {
+        q1 = q1 + q2;
+        q2 = q2 + q3;
+        q3 = q3 + q4;
+        q1 = q1 + q2;
+        q2 = q2 + q3;
+        q1 = ( q1 + q2 ) / 8;
+        q2 = q2 / 4;
+        q3 = q3 / 2;
+      }
+
+      /* check whether either end reached the maximum */
+      if ( q1 == q2 && q1 >= q3 )
+      {
+        peak = q1;
+        break;
+      }
+      if ( q3 == q4 && q2 <= q4 )
+      {
+        peak = q4;
+        break;
+      }
+    }
+
+    if ( shift > 0 )
+      peak >>=  shift;
+    else
+      peak <<= -shift;
+
+    return peak;
+  }
+
+
+  static void
+  BBox_Cubic_Check( FT_Pos   p1,
+                    FT_Pos   p2,
+                    FT_Pos   p3,
+                    FT_Pos   p4,
+                    FT_Pos*  min,
+                    FT_Pos*  max )
+  {
+    /* This function is only called when a control off-point is outside  */
+    /* the bbox that contains all on-points.  So at least one of the     */
+    /* conditions below holds and cubic_peak is called with at least one */
+    /* non-zero argument.                                                */
+
+    if ( p2 > *max || p3 > *max )
+      *max += cubic_peak( p1 - *max, p2 - *max, p3 - *max, p4 - *max );
+
+    /* now flip the signs to update the minimum */
+    if ( p2 < *min || p3 < *min )
+      *min -= cubic_peak( *min - p1, *min - p2, *min - p3, *min - p4 );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    BBox_Cubic_To                                                      */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    This function is used as a `cubic_to' emitter during               */
+  /*    FT_Outline_Decompose().  It checks a cubic Bezier curve with the   */
+  /*    current bounding box, and computes its extrema if necessary to     */
+  /*    update it.                                                         */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    control1 :: A pointer to the first control point.                  */
+  /*                                                                       */
+  /*    control2 :: A pointer to the second control point.                 */
+  /*                                                                       */
+  /*    to       :: A pointer to the destination vector.                   */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    user     :: The address of the current walk context.               */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    Always 0.  Needed for the interface only.                          */
+  /*                                                                       */
+  /* <Note>                                                                */
+  /*    In the case of a non-monotonous arc, we don't compute directly     */
+  /*    extremum coordinates, we subdivide instead.                        */
+  /*                                                                       */
+  static int
+  BBox_Cubic_To( FT_Vector*  control1,
+                 FT_Vector*  control2,
+                 FT_Vector*  to,
+                 TBBox_Rec*  user )
+  {
+    /* We don't need to check `to' since it is always an on-point,    */
+    /* thus within the bbox.  Only segments with an off-point outside */
+    /* the bbox can possibly reach new extreme values.                */
+
+    if ( CHECK_X( control1, user->bbox ) ||
+         CHECK_X( control2, user->bbox ) )
+      BBox_Cubic_Check( user->last.x,
+                        control1->x,
+                        control2->x,
+                        to->x,
+                        &user->bbox.xMin,
+                        &user->bbox.xMax );
+
+    if ( CHECK_Y( control1, user->bbox ) ||
+         CHECK_Y( control2, user->bbox ) )
+      BBox_Cubic_Check( user->last.y,
+                        control1->y,
+                        control2->y,
+                        to->y,
+                        &user->bbox.yMin,
+                        &user->bbox.yMax );
+
+    user->last = *to;
+
+    return 0;
+  }
+
+
+  FT_DEFINE_OUTLINE_FUNCS(
+    bbox_interface,
+
+    (FT_Outline_MoveTo_Func) BBox_Move_To,   /* move_to  */
+    (FT_Outline_LineTo_Func) BBox_Line_To,   /* line_to  */
+    (FT_Outline_ConicTo_Func)BBox_Conic_To,  /* conic_to */
+    (FT_Outline_CubicTo_Func)BBox_Cubic_To,  /* cubic_to */
+    0,                                       /* shift    */
+    0                                        /* delta    */
+  )
+
+
+  /* documentation is in ftbbox.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_Outline_Get_BBox( FT_Outline*  outline,
+                       FT_BBox     *abbox )
+  {
+    FT_BBox     cbox = {  0x7FFFFFFFL,  0x7FFFFFFFL,
+                         -0x7FFFFFFFL, -0x7FFFFFFFL };
+    FT_BBox     bbox = {  0x7FFFFFFFL,  0x7FFFFFFFL,
+                         -0x7FFFFFFFL, -0x7FFFFFFFL };
+    FT_Vector*  vec;
+    FT_UShort   n;
+
+
+    if ( !abbox )
+      return FT_THROW( Invalid_Argument );
+
+    if ( !outline )
+      return FT_THROW( Invalid_Outline );
+
+    /* if outline is empty, return (0,0,0,0) */
+    if ( outline->n_points == 0 || outline->n_contours <= 0 )
+    {
+      abbox->xMin = abbox->xMax = 0;
+      abbox->yMin = abbox->yMax = 0;
+
+      return 0;
+    }
+
+    /* We compute the control box as well as the bounding box of  */
+    /* all `on' points in the outline.  Then, if the two boxes    */
+    /* coincide, we exit immediately.                             */
+
+    vec = outline->points;
+
+    for ( n = 0; n < outline->n_points; n++ )
+    {
+      FT_UPDATE_BBOX( vec, cbox );
+
+      if ( FT_CURVE_TAG( outline->tags[n] ) == FT_CURVE_TAG_ON )
+        FT_UPDATE_BBOX( vec, bbox );
+
+      vec++;
+    }
+
+    /* test two boxes for equality */
+    if ( cbox.xMin < bbox.xMin || cbox.xMax > bbox.xMax ||
+         cbox.yMin < bbox.yMin || cbox.yMax > bbox.yMax )
+    {
+      /* the two boxes are different, now walk over the outline to */
+      /* get the Bezier arc extrema.                               */
+
+      FT_Error   error;
+      TBBox_Rec  user;
+
+#ifdef FT_CONFIG_OPTION_PIC
+      FT_Outline_Funcs  bbox_interface;
+
+
+      Init_Class_bbox_interface( &bbox_interface );
+#endif
+
+      user.bbox = bbox;
+
+      error = FT_Outline_Decompose( outline, &bbox_interface, &user );
+      if ( error )
+        return error;
+
+      *abbox = user.bbox;
+    }
+    else
+      *abbox = bbox;
+
+    return FT_Err_Ok;
+  }
+
+
+/* END */
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2004, 2006, 2010 by                         */
+d28 2
+d45 19
+d70 1
+a70 1
+  /*    This function is used as a `move_to' and `line_to' emitter during  */
+d72 2
+a73 2
+  /*    in `user->last'; no further computations are necessary since we    */
+  /*    use the cbox as the starting bbox which must be refined.           */
+d88 2
+d96 25
+a120 2
+#define CHECK_X( p, bbox )  \
+          ( p->x < bbox.xMin || p->x > bbox.xMax )
+d122 2
+a123 2
+#define CHECK_Y( p, bbox )  \
+          ( p->y < bbox.yMin || p->y > bbox.yMax )
+d132 1
+a132 1
+  /*    Finds the extrema of a 1-dimensional conic Bezier curve and update */
+d155 13
+a167 24
+    if ( y1 <= y3 && y2 == y1 )     /* flat arc */
+      goto Suite;
+
+    if ( y1 < y3 )
+    {
+      if ( y2 >= y1 && y2 <= y3 )   /* ascending arc */
+        goto Suite;
+    }
+    else
+    {
+      if ( y2 >= y3 && y2 <= y1 )   /* descending arc */
+      {
+        y2 = y1;
+        y1 = y3;
+        y3 = y2;
+        goto Suite;
+      }
+    }
+
+    y1 = y3 = y1 - FT_MulDiv( y2 - y1, y2 - y1, y1 - 2*y2 + y3 );
+
+  Suite:
+    if ( y1 < *min ) *min = y1;
+    if ( y3 > *max ) *max = y3;
+d202 2
+a203 2
+    /* we don't need to check `to' since it is always an `on' point, thus */
+    /* within the bbox                                                    */
+d231 3
+a233 3
+  /*    Finds the extrema of a 1-dimensional cubic Bezier curve and        */
+  /*    updates a bounding range.  This version uses splitting because we  */
+  /*    don't want to use square roots and extra accuracy.                 */
+d249 5
+a253 10
+
+#if 0
+
+  static void
+  BBox_Cubic_Check( FT_Pos   p1,
+                    FT_Pos   p2,
+                    FT_Pos   p3,
+                    FT_Pos   p4,
+                    FT_Pos*  min,
+                    FT_Pos*  max )
+d255 2
+a256 1
+    FT_Pos  stack[32*3 + 1], *arc;
+d259 13
+a271 1
+    arc = stack;
+d273 18
+a290 4
+    arc[0] = p1;
+    arc[1] = p2;
+    arc[2] = p3;
+    arc[3] = p4;
+d292 3
+a294 1
+    do
+d296 13
+a308 7
+      FT_Pos  y1 = arc[0];
+      FT_Pos  y2 = arc[1];
+      FT_Pos  y3 = arc[2];
+      FT_Pos  y4 = arc[3];
+
+
+      if ( y1 == y4 )
+d310 8
+a317 2
+        if ( y1 == y2 && y1 == y3 )                         /* flat */
+          goto Test;
+d319 3
+a321 1
+      else if ( y1 < y4 )
+d323 2
+a324 2
+        if ( y2 >= y1 && y2 <= y4 && y3 >= y1 && y3 <= y4 ) /* ascending */
+          goto Test;
+d326 1
+a326 1
+      else
+d328 2
+a329 7
+        if ( y2 >= y4 && y2 <= y1 && y3 >= y4 && y3 <= y1 ) /* descending */
+        {
+          y2 = y1;
+          y1 = y4;
+          y4 = y2;
+          goto Test;
+        }
+d331 1
+d333 4
+a336 61
+      /* unknown direction -- split the arc in two */
+      arc[6] = y4;
+      arc[1] = y1 = ( y1 + y2 ) / 2;
+      arc[5] = y4 = ( y4 + y3 ) / 2;
+      y2 = ( y2 + y3 ) / 2;
+      arc[2] = y1 = ( y1 + y2 ) / 2;
+      arc[4] = y4 = ( y4 + y2 ) / 2;
+      arc[3] = ( y1 + y4 ) / 2;
+
+      arc += 3;
+      goto Suite;
+
+   Test:
+      if ( y1 < *min ) *min = y1;
+      if ( y4 > *max ) *max = y4;
+      arc -= 3;
+
+    Suite:
+      ;
+    } while ( arc >= stack );
+  }
+
+#else
+
+  static void
+  test_cubic_extrema( FT_Pos    y1,
+                      FT_Pos    y2,
+                      FT_Pos    y3,
+                      FT_Pos    y4,
+                      FT_Fixed  u,
+                      FT_Pos*   min,
+                      FT_Pos*   max )
+  {
+ /* FT_Pos    a = y4 - 3*y3 + 3*y2 - y1; */
+    FT_Pos    b = y3 - 2*y2 + y1;
+    FT_Pos    c = y2 - y1;
+    FT_Pos    d = y1;
+    FT_Pos    y;
+    FT_Fixed  uu;
+
+    FT_UNUSED ( y4 );
+
+
+    /* The polynomial is                      */
+    /*                                        */
+    /*    P(x) = a*x^3 + 3b*x^2 + 3c*x + d  , */
+    /*                                        */
+    /*   dP/dx = 3a*x^2 + 6b*x + 3c         . */
+    /*                                        */
+    /* However, we also have                  */
+    /*                                        */
+    /*   dP/dx(u) = 0                       , */
+    /*                                        */
+    /* which implies by subtraction that      */
+    /*                                        */
+    /*   P(u) = b*u^2 + 2c*u + d            . */
+
+    if ( u > 0 && u < 0x10000L )
+    {
+      uu = FT_MulFix( u, u );
+      y  = d + FT_MulFix( c, 2*u ) + FT_MulFix( b, uu );
+d338 1
+a338 3
+      if ( y < *min ) *min = y;
+      if ( y > *max ) *max = y;
+    }
+d343 4
+a346 4
+  BBox_Cubic_Check( FT_Pos   y1,
+                    FT_Pos   y2,
+                    FT_Pos   y3,
+                    FT_Pos   y4,
+d350 11
+a360 158
+    /* always compare first and last points */
+    if      ( y1 < *min )  *min = y1;
+    else if ( y1 > *max )  *max = y1;
+
+    if      ( y4 < *min )  *min = y4;
+    else if ( y4 > *max )  *max = y4;
+
+    /* now, try to see if there are split points here */
+    if ( y1 <= y4 )
+    {
+      /* flat or ascending arc test */
+      if ( y1 <= y2 && y2 <= y4 && y1 <= y3 && y3 <= y4 )
+        return;
+    }
+    else /* y1 > y4 */
+    {
+      /* descending arc test */
+      if ( y1 >= y2 && y2 >= y4 && y1 >= y3 && y3 >= y4 )
+        return;
+    }
+
+    /* There are some split points.  Find them. */
+    {
+      FT_Pos    a = y4 - 3*y3 + 3*y2 - y1;
+      FT_Pos    b = y3 - 2*y2 + y1;
+      FT_Pos    c = y2 - y1;
+      FT_Pos    d;
+      FT_Fixed  t;
+
+
+      /* We need to solve `ax^2+2bx+c' here, without floating points!      */
+      /* The trick is to normalize to a different representation in order  */
+      /* to use our 16.16 fixed point routines.                            */
+      /*                                                                   */
+      /* We compute FT_MulFix(b,b) and FT_MulFix(a,c) after normalization. */
+      /* These values must fit into a single 16.16 value.                  */
+      /*                                                                   */
+      /* We normalize a, b, and c to `8.16' fixed float values to ensure   */
+      /* that its product is held in a `16.16' value.                      */
+
+      {
+        FT_ULong  t1, t2;
+        int       shift = 0;
+
+
+        /* The following computation is based on the fact that for   */
+        /* any value `y', if `n' is the position of the most         */
+        /* significant bit of `abs(y)' (starting from 0 for the      */
+        /* least significant bit), then `y' is in the range          */
+        /*                                                           */
+        /*   -2^n..2^n-1                                             */
+        /*                                                           */
+        /* We want to shift `a', `b', and `c' concurrently in order  */
+        /* to ensure that they all fit in 8.16 values, which maps    */
+        /* to the integer range `-2^23..2^23-1'.                     */
+        /*                                                           */
+        /* Necessarily, we need to shift `a', `b', and `c' so that   */
+        /* the most significant bit of its absolute values is at     */
+        /* _most_ at position 23.                                    */
+        /*                                                           */
+        /* We begin by computing `t1' as the bitwise `OR' of the     */
+        /* absolute values of `a', `b', `c'.                         */
+
+        t1  = (FT_ULong)( ( a >= 0 ) ? a : -a );
+        t2  = (FT_ULong)( ( b >= 0 ) ? b : -b );
+        t1 |= t2;
+        t2  = (FT_ULong)( ( c >= 0 ) ? c : -c );
+        t1 |= t2;
+
+        /* Now we can be sure that the most significant bit of `t1'  */
+        /* is the most significant bit of either `a', `b', or `c',   */
+        /* depending on the greatest integer range of the particular */
+        /* variable.                                                 */
+        /*                                                           */
+        /* Next, we compute the `shift', by shifting `t1' as many    */
+        /* times as necessary to move its MSB to position 23.  This  */
+        /* corresponds to a value of `t1' that is in the range       */
+        /* 0x40_0000..0x7F_FFFF.                                     */
+        /*                                                           */
+        /* Finally, we shift `a', `b', and `c' by the same amount.   */
+        /* This ensures that all values are now in the range         */
+        /* -2^23..2^23, i.e., they are now expressed as 8.16         */
+        /* fixed-float numbers.  This also means that we are using   */
+        /* 24 bits of precision to compute the zeros, independently  */
+        /* of the range of the original polynomial coefficients.     */
+        /*                                                           */
+        /* This algorithm should ensure reasonably accurate values   */
+        /* for the zeros.  Note that they are only expressed with    */
+        /* 16 bits when computing the extrema (the zeros need to     */
+        /* be in 0..1 exclusive to be considered part of the arc).   */
+
+        if ( t1 == 0 )  /* all coefficients are 0! */
+          return;
+
+        if ( t1 > 0x7FFFFFUL )
+        {
+          do
+          {
+            shift++;
+            t1 >>= 1;
+
+          } while ( t1 > 0x7FFFFFUL );
+
+          /* this loses some bits of precision, but we use 24 of them */
+          /* for the computation anyway                               */
+          a >>= shift;
+          b >>= shift;
+          c >>= shift;
+        }
+        else if ( t1 < 0x400000UL )
+        {
+          do
+          {
+            shift++;
+            t1 <<= 1;
+
+          } while ( t1 < 0x400000UL );
+
+          a <<= shift;
+          b <<= shift;
+          c <<= shift;
+        }
+      }
+
+      /* handle a == 0 */
+      if ( a == 0 )
+      {
+        if ( b != 0 )
+        {
+          t = - FT_DivFix( c, b ) / 2;
+          test_cubic_extrema( y1, y2, y3, y4, t, min, max );
+        }
+      }
+      else
+      {
+        /* solve the equation now */
+        d = FT_MulFix( b, b ) - FT_MulFix( a, c );
+        if ( d < 0 )
+          return;
+
+        if ( d == 0 )
+        {
+          /* there is a single split point at -b/a */
+          t = - FT_DivFix( b, a );
+          test_cubic_extrema( y1, y2, y3, y4, t, min, max );
+        }
+        else
+        {
+          /* there are two solutions; we need to filter them */
+          d = FT_SqrtFixed( (FT_Int32)d );
+          t = - FT_DivFix( b - d, a );
+          test_cubic_extrema( y1, y2, y3, y4, t, min, max );
+
+          t = - FT_DivFix( b + d, a );
+          test_cubic_extrema( y1, y2, y3, y4, t, min, max );
+        }
+      }
+    }
+a362 2
+#endif
+
+d398 3
+a400 2
+    /* we don't need to check `to' since it is always an `on' point, thus */
+    /* within the bbox                                                    */
+d425 10
+a434 6
+FT_DEFINE_OUTLINE_FUNCS(bbox_interface,
+    (FT_Outline_MoveTo_Func) BBox_Move_To,
+    (FT_Outline_LineTo_Func) BBox_Move_To,
+    (FT_Outline_ConicTo_Func)BBox_Conic_To,
+    (FT_Outline_CubicTo_Func)BBox_Cubic_To,
+    0, 0
+d437 1
+d444 4
+a447 2
+    FT_BBox     cbox;
+    FT_BBox     bbox;
+d453 1
+a453 1
+      return FT_Err_Invalid_Argument;
+d456 1
+a456 1
+      return FT_Err_Invalid_Outline;
+d463 1
+a471 3
+    bbox.xMin = bbox.xMax = cbox.xMin = cbox.xMax = vec->x;
+    bbox.yMin = bbox.yMax = cbox.yMin = cbox.yMax = vec->y;
+    vec++;
+d473 1
+a473 1
+    for ( n = 1; n < outline->n_points; n++ )
+d475 1
+a475 10
+      FT_Pos  x = vec->x;
+      FT_Pos  y = vec->y;
+
+
+      /* update control box */
+      if ( x < cbox.xMin ) cbox.xMin = x;
+      if ( x > cbox.xMax ) cbox.xMax = x;
+
+      if ( y < cbox.yMin ) cbox.yMin = y;
+      if ( y > cbox.yMax ) cbox.yMax = y;
+d478 1
+a478 8
+      {
+        /* update bbox for `on' points only */
+        if ( x < bbox.xMin ) bbox.xMin = x;
+        if ( x > bbox.xMax ) bbox.xMax = x;
+
+        if ( y < bbox.yMin ) bbox.yMin = y;
+        if ( y > bbox.yMax ) bbox.yMax = y;
+      }
+d494 4
+a497 2
+      FT_Outline_Funcs bbox_interface;
+      Init_Class_bbox_interface(&bbox_interface);
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2004, 2006 by                               */
+d32 1
+d143 1
+a143 1
+  /*    FT_Raster_Decompose().  It checks a conic Bezier curve with the    */
+d510 1
+a510 1
+  /*    FT_Raster_Decompose().  It checks a cubic Bezier curve with the    */
+d563 7
+a638 9
+      static const FT_Outline_Funcs  bbox_interface =
+      {
+        (FT_Outline_MoveTo_Func) BBox_Move_To,
+        (FT_Outline_LineTo_Func) BBox_Move_To,
+        (FT_Outline_ConicTo_Func)BBox_Conic_To,
+        (FT_Outline_CubicTo_Func)BBox_Cubic_To,
+        0, 0
+      };
+
+d642 4
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2004 by                                     */
+d306 1
+a306 1
+    /* The polynom is                         */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d51 1
+a51 1
+  /*    the cbox as the starting bbox which must be refined.               */
+d91 1
+d93 1
+d98 1
+d108 4
+a111 1
+    if ( y1 <= y3 )
+d113 1
+a113 6
+      if ( y2 == y1 )               /* Flat arc */
+        goto Suite;
+    }
+    else if ( y1 < y3 )
+    {
+      if ( y2 >= y1 && y2 <= y3 )   /* Ascending arc */
+d118 1
+a118 1
+      if ( y2 >= y3 && y2 <= y1 )   /* Descending arc */
+d148 1
+a169 1
+
+a176 1
+
+d197 1
+a197 1
+  /*    don't want to use square roots and extra accuracies.               */
+d201 1
+d203 1
+d205 1
+d210 1
+d213 1
+d215 1
+d244 1
+a244 1
+        if ( y1 == y2 && y1 == y3 )                         /* Flat */
+d249 1
+a249 1
+        if ( y2 >= y1 && y2 <= y4 && y3 >= y1 && y3 <= y4 ) /* Ascending */
+d254 1
+a254 1
+        if ( y2 >= y4 && y2 <= y1 && y3 >= y4 && y3 <= y1 ) /* Descending */
+d263 1
+a263 1
+      /* Unknown direction -- split the arc in two */
+d284 1
+d306 13
+a318 11
+    /* The polynom is                       */
+    /*                                      */
+    /*   a*x^3 + 3b*x^2 + 3c*x + d      .   */
+    /*                                      */
+    /* However, we also have                */
+    /*                                      */
+    /*   dP/dx(u) = 0       ,               */
+    /*                                      */
+    /* which implies that                   */
+    /*                                      */
+    /*   P(u) = b*u^2 + 2c*u + d            */
+d369 1
+a369 1
+      /* We need to solve "ax^2+2bx+c" here, without floating points!      */
+d373 2
+a374 6
+      /* We compute FT_MulFix(b,b) and FT_MulFix(a,c) after the            */
+      /* the normalization.  These values must fit into a single 16.16     */
+      /* value.                                                            */
+      /*                                                                   */
+      /* We normalize a, b, and c to "8.16" fixed float values to ensure   */
+      /* that their product is held in a "16.16" value.                    */
+d376 3
+d384 20
+a403 22
+        /* Technical explanation of what's happening there.            */
+        /*                                                             */
+        /*   The following computation is based on the fact that for   */
+        /*   any value "y", if "n" is the position of the most         */
+        /*   significant bit of "abs(y)" (starting from 0 for the      */
+        /*   least significant bit), then y is in the range            */
+        /*                                                             */
+        /*                  "-2^n..2^n-1"                              */
+        /*                                                             */
+        /*   We want to shift "a", "b" and "c" concurrently in order   */
+        /*   to ensure that they all fit in 8.16 values, which maps    */
+        /*   to the integer range "-2^23..2^23-1".                     */
+        /*                                                             */
+        /*   Necessarily, we need to shift "a", "b" and "c" so that    */
+        /*   the most significant bit of their absolute values is at   */
+        /*   _most_ at position 23.                                    */
+        /*                                                             */
+        /*   We begin by computing "t1" as the bitwise "or" of the     */
+        /*   absolute values of "a", "b", "c".                         */
+        /*                                                             */
+        t1  = (FT_ULong)((a >= 0) ? a : -a );
+        t2  = (FT_ULong)((b >= 0) ? b : -b );
+d405 1
+a405 1
+        t2  = (FT_ULong)((c >= 0) ? c : -c );
+d408 22
+a429 24
+        /*   Now, the most significant bit of "t1" is sure to be the   */
+        /*   msb of one of "a", "b", "c", depending on which one is    */
+        /*   expressed in the greatest integer range.                  */
+        /*                                                             */
+        /*   We now compute the "shift", by shifting "t1" as many      */
+        /*   times as necessary to move its msb to position 23.        */
+        /*                                                             */
+        /*   This corresponds to a value of t1 that is in the range    */
+        /*   0x40_0000..0x7F_FFFF.                                     */
+        /*                                                             */
+        /*   Finally, we shift "a", "b" and "c" by the same amount.    */
+        /*   This ensures that all values are now in the range         */
+        /*   -2^23..2^23, i.e. that they are now expressed as 8.16     */
+        /*   fixed float numbers.                                      */
+        /*                                                             */
+        /*   This also means that we are using 24 bits of precision    */
+        /*   to compute the zeros, independently of the range of       */
+        /*   the original polynom coefficients.                        */
+        /*                                                             */
+        /*   This should ensure reasonably accurate values for the     */
+        /*   zeros.  Note that the latter are only expressed with      */
+        /*   16 bits when computing the extrema (the zeros need to     */
+        /*   be in 0..1 exclusive to be considered part of the arc).   */
+        /*                                                             */
+d439 1
+d442 2
+a443 2
+          /* losing some bits of precision, but we use 24 of them */
+          /* for the computation anyway.                          */
+d454 1
+d487 1
+a487 1
+          /* there are two solutions; we need to filter them though */
+d515 1
+d517 1
+d528 1
+a528 1
+  /*    extremum coordinates, we subdivise instead.                        */
+d541 6
+a546 7
+
+        BBox_Cubic_Check( user->last.x,
+                          control1->x,
+                          control2->x,
+                          to->x,
+                          &user->bbox.xMin,
+                          &user->bbox.xMax );
+d550 6
+a555 7
+
+        BBox_Cubic_Check( user->last.y,
+                          control1->y,
+                          control2->y,
+                          to->y,
+                          &user->bbox.yMin,
+                          &user->bbox.yMax );
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2004, 2006 by                               */
+d51 1
+a51 1
+  /*    use the cbox as the starting bbox which must be refined.           */
+a90 1
+  /*                                                                       */
+a91 1
+  /*                                                                       */
+a95 1
+  /*                                                                       */
+d105 6
+a110 4
+    if ( y1 <= y3 && y2 == y1 )     /* flat arc */
+      goto Suite;
+
+    if ( y1 < y3 )
+d112 1
+a112 1
+      if ( y2 >= y1 && y2 <= y3 )   /* ascending arc */
+d117 1
+a117 1
+      if ( y2 >= y3 && y2 <= y1 )   /* descending arc */
+a146 1
+  /*                                                                       */
+d168 1
+d176 1
+d197 1
+a197 1
+  /*    don't want to use square roots and extra accuracy.                 */
+a200 1
+  /*                                                                       */
+a201 1
+  /*                                                                       */
+a202 1
+  /*                                                                       */
+a206 1
+  /*                                                                       */
+a208 1
+
+a209 1
+
+d238 1
+a238 1
+        if ( y1 == y2 && y1 == y3 )                         /* flat */
+d243 1
+a243 1
+        if ( y2 >= y1 && y2 <= y4 && y3 >= y1 && y3 <= y4 ) /* ascending */
+d248 1
+a248 1
+        if ( y2 >= y4 && y2 <= y1 && y3 >= y4 && y3 <= y1 ) /* descending */
+d257 1
+a257 1
+      /* unknown direction -- split the arc in two */
+a277 1
+
+d299 11
+a309 13
+    /* The polynomial is                      */
+    /*                                        */
+    /*    P(x) = a*x^3 + 3b*x^2 + 3c*x + d  , */
+    /*                                        */
+    /*   dP/dx = 3a*x^2 + 6b*x + 3c         . */
+    /*                                        */
+    /* However, we also have                  */
+    /*                                        */
+    /*   dP/dx(u) = 0                       , */
+    /*                                        */
+    /* which implies by subtraction that      */
+    /*                                        */
+    /*   P(u) = b*u^2 + 2c*u + d            . */
+d360 1
+a360 1
+      /* We need to solve `ax^2+2bx+c' here, without floating points!      */
+d364 6
+a369 2
+      /* We compute FT_MulFix(b,b) and FT_MulFix(a,c) after normalization. */
+      /* These values must fit into a single 16.16 value.                  */
+a370 3
+      /* We normalize a, b, and c to `8.16' fixed float values to ensure   */
+      /* that its product is held in a `16.16' value.                      */
+
+d376 22
+a397 20
+        /* The following computation is based on the fact that for   */
+        /* any value `y', if `n' is the position of the most         */
+        /* significant bit of `abs(y)' (starting from 0 for the      */
+        /* least significant bit), then `y' is in the range          */
+        /*                                                           */
+        /*   -2^n..2^n-1                                             */
+        /*                                                           */
+        /* We want to shift `a', `b', and `c' concurrently in order  */
+        /* to ensure that they all fit in 8.16 values, which maps    */
+        /* to the integer range `-2^23..2^23-1'.                     */
+        /*                                                           */
+        /* Necessarily, we need to shift `a', `b', and `c' so that   */
+        /* the most significant bit of its absolute values is at     */
+        /* _most_ at position 23.                                    */
+        /*                                                           */
+        /* We begin by computing `t1' as the bitwise `OR' of the     */
+        /* absolute values of `a', `b', `c'.                         */
+
+        t1  = (FT_ULong)( ( a >= 0 ) ? a : -a );
+        t2  = (FT_ULong)( ( b >= 0 ) ? b : -b );
+d399 1
+a399 1
+        t2  = (FT_ULong)( ( c >= 0 ) ? c : -c );
+d402 24
+a425 22
+        /* Now we can be sure that the most significant bit of `t1'  */
+        /* is the most significant bit of either `a', `b', or `c',   */
+        /* depending on the greatest integer range of the particular */
+        /* variable.                                                 */
+        /*                                                           */
+        /* Next, we compute the `shift', by shifting `t1' as many    */
+        /* times as necessary to move its MSB to position 23.  This  */
+        /* corresponds to a value of `t1' that is in the range       */
+        /* 0x40_0000..0x7F_FFFF.                                     */
+        /*                                                           */
+        /* Finally, we shift `a', `b', and `c' by the same amount.   */
+        /* This ensures that all values are now in the range         */
+        /* -2^23..2^23, i.e., they are now expressed as 8.16         */
+        /* fixed-float numbers.  This also means that we are using   */
+        /* 24 bits of precision to compute the zeros, independently  */
+        /* of the range of the original polynomial coefficients.     */
+        /*                                                           */
+        /* This algorithm should ensure reasonably accurate values   */
+        /* for the zeros.  Note that they are only expressed with    */
+        /* 16 bits when computing the extrema (the zeros need to     */
+        /* be in 0..1 exclusive to be considered part of the arc).   */
+
+a434 1
+
+d437 2
+a438 2
+          /* this loses some bits of precision, but we use 24 of them */
+          /* for the computation anyway                               */
+a448 1
+
+d481 1
+a481 1
+          /* there are two solutions; we need to filter them */
+a508 1
+  /*                                                                       */
+a509 1
+  /*                                                                       */
+d520 1
+a520 1
+  /*    extremum coordinates, we subdivide instead.                        */
+d533 7
+a539 6
+      BBox_Cubic_Check( user->last.x,
+                        control1->x,
+                        control2->x,
+                        to->x,
+                        &user->bbox.xMin,
+                        &user->bbox.xMax );
+d543 7
+a549 6
+      BBox_Cubic_Check( user->last.y,
+                        control1->y,
+                        control2->y,
+                        to->y,
+                        &user->bbox.yMin,
+                        &user->bbox.yMax );
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2004 by                                     */
+d51 1
+a51 1
+  /*    use the cbox as the starting bbox which must be refined.           */
+a90 1
+  /*                                                                       */
+a91 1
+  /*                                                                       */
+a95 1
+  /*                                                                       */
+d105 6
+a110 4
+    if ( y1 <= y3 && y2 == y1 )     /* flat arc */
+      goto Suite;
+
+    if ( y1 < y3 )
+d112 1
+a112 1
+      if ( y2 >= y1 && y2 <= y3 )   /* ascending arc */
+d117 1
+a117 1
+      if ( y2 >= y3 && y2 <= y1 )   /* descending arc */
+a146 1
+  /*                                                                       */
+d168 1
+d176 1
+d197 1
+a197 1
+  /*    don't want to use square roots and extra accuracy.                 */
+a200 1
+  /*                                                                       */
+a201 1
+  /*                                                                       */
+a202 1
+  /*                                                                       */
+a206 1
+  /*                                                                       */
+a208 1
+
+a209 1
+
+d238 1
+a238 1
+        if ( y1 == y2 && y1 == y3 )                         /* flat */
+d243 1
+a243 1
+        if ( y2 >= y1 && y2 <= y4 && y3 >= y1 && y3 <= y4 ) /* ascending */
+d248 1
+a248 1
+        if ( y2 >= y4 && y2 <= y1 && y3 >= y4 && y3 <= y1 ) /* descending */
+d257 1
+a257 1
+      /* unknown direction -- split the arc in two */
+a277 1
+
+d299 11
+a309 13
+    /* The polynom is                         */
+    /*                                        */
+    /*    P(x) = a*x^3 + 3b*x^2 + 3c*x + d  , */
+    /*                                        */
+    /*   dP/dx = 3a*x^2 + 6b*x + 3c         . */
+    /*                                        */
+    /* However, we also have                  */
+    /*                                        */
+    /*   dP/dx(u) = 0                       , */
+    /*                                        */
+    /* which implies by subtraction that      */
+    /*                                        */
+    /*   P(u) = b*u^2 + 2c*u + d            . */
+d360 1
+a360 1
+      /* We need to solve `ax^2+2bx+c' here, without floating points!      */
+d364 6
+a369 2
+      /* We compute FT_MulFix(b,b) and FT_MulFix(a,c) after normalization. */
+      /* These values must fit into a single 16.16 value.                  */
+a370 3
+      /* We normalize a, b, and c to `8.16' fixed float values to ensure   */
+      /* that its product is held in a `16.16' value.                      */
+
+d376 22
+a397 20
+        /* The following computation is based on the fact that for   */
+        /* any value `y', if `n' is the position of the most         */
+        /* significant bit of `abs(y)' (starting from 0 for the      */
+        /* least significant bit), then `y' is in the range          */
+        /*                                                           */
+        /*   -2^n..2^n-1                                             */
+        /*                                                           */
+        /* We want to shift `a', `b', and `c' concurrently in order  */
+        /* to ensure that they all fit in 8.16 values, which maps    */
+        /* to the integer range `-2^23..2^23-1'.                     */
+        /*                                                           */
+        /* Necessarily, we need to shift `a', `b', and `c' so that   */
+        /* the most significant bit of its absolute values is at     */
+        /* _most_ at position 23.                                    */
+        /*                                                           */
+        /* We begin by computing `t1' as the bitwise `OR' of the     */
+        /* absolute values of `a', `b', `c'.                         */
+
+        t1  = (FT_ULong)( ( a >= 0 ) ? a : -a );
+        t2  = (FT_ULong)( ( b >= 0 ) ? b : -b );
+d399 1
+a399 1
+        t2  = (FT_ULong)( ( c >= 0 ) ? c : -c );
+d402 24
+a425 22
+        /* Now we can be sure that the most significant bit of `t1'  */
+        /* is the most significant bit of either `a', `b', or `c',   */
+        /* depending on the greatest integer range of the particular */
+        /* variable.                                                 */
+        /*                                                           */
+        /* Next, we compute the `shift', by shifting `t1' as many    */
+        /* times as necessary to move its MSB to position 23.  This  */
+        /* corresponds to a value of `t1' that is in the range       */
+        /* 0x40_0000..0x7F_FFFF.                                     */
+        /*                                                           */
+        /* Finally, we shift `a', `b', and `c' by the same amount.   */
+        /* This ensures that all values are now in the range         */
+        /* -2^23..2^23, i.e., they are now expressed as 8.16         */
+        /* fixed-float numbers.  This also means that we are using   */
+        /* 24 bits of precision to compute the zeros, independently  */
+        /* of the range of the original polynomial coefficients.     */
+        /*                                                           */
+        /* This algorithm should ensure reasonably accurate values   */
+        /* for the zeros.  Note that they are only expressed with    */
+        /* 16 bits when computing the extrema (the zeros need to     */
+        /* be in 0..1 exclusive to be considered part of the arc).   */
+
+a434 1
+
+d437 2
+a438 2
+          /* this loses some bits of precision, but we use 24 of them */
+          /* for the computation anyway                               */
+a448 1
+
+d481 1
+a481 1
+          /* there are two solutions; we need to filter them */
+a508 1
+  /*                                                                       */
+a509 1
+  /*                                                                       */
+d520 1
+a520 1
+  /*    extremum coordinates, we subdivide instead.                        */
+d533 7
+a539 6
+      BBox_Cubic_Check( user->last.x,
+                        control1->x,
+                        control2->x,
+                        to->x,
+                        &user->bbox.xMin,
+                        &user->bbox.xMax );
+d543 7
+a549 6
+      BBox_Cubic_Check( user->last.y,
+                        control1->y,
+                        control2->y,
+                        to->y,
+                        &user->bbox.yMin,
+                        &user->bbox.yMax );
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2004, 2006, 2010 by                         */
+a31 1
+#include FT_INTERNAL_OBJECTS_H
+d142 1
+a142 1
+  /*    FT_Outline_Decompose().  It checks a conic Bezier curve with the   */
+d306 1
+a306 1
+    /* The polynomial is                      */
+d509 1
+a509 1
+  /*    FT_Outline_Decompose().  It checks a cubic Bezier curve with the   */
+a561 7
+FT_DEFINE_OUTLINE_FUNCS(bbox_interface,
+    (FT_Outline_MoveTo_Func) BBox_Move_To,
+    (FT_Outline_LineTo_Func) BBox_Move_To,
+    (FT_Outline_ConicTo_Func)BBox_Conic_To,
+    (FT_Outline_CubicTo_Func)BBox_Cubic_To,
+    0, 0
+  )
+d631 9
+a642 4
+#ifdef FT_CONFIG_OPTION_PIC
+      FT_Outline_Funcs bbox_interface;
+      Init_Class_bbox_interface(&bbox_interface);
+#endif
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+a27 2
+#include FT_INTERNAL_DEBUG_H
+
+a42 19
+#define FT_UPDATE_BBOX( p, bbox ) \
+  FT_BEGIN_STMNT                  \
+    if ( p->x < bbox.xMin )       \
+      bbox.xMin = p->x;           \
+    if ( p->x > bbox.xMax )       \
+      bbox.xMax = p->x;           \
+    if ( p->y < bbox.yMin )       \
+      bbox.yMin = p->y;           \
+    if ( p->y > bbox.yMax )       \
+      bbox.yMax = p->y;           \
+  FT_END_STMNT
+
+#define CHECK_X( p, bbox )                         \
+          ( p->x < bbox.xMin || p->x > bbox.xMax )
+
+#define CHECK_Y( p, bbox )                         \
+          ( p->y < bbox.yMin || p->y > bbox.yMax )
+
+
+d49 1
+a49 1
+  /*    This function is used as a `move_to' emitter during                */
+d51 2
+a52 2
+  /*    in `user->last'. We also update bbox in case contour starts with   */
+  /*    an implicit `on' point.                                            */
+a66 2
+    FT_UPDATE_BBOX( to, user->bbox );
+
+d73 2
+a74 25
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    BBox_Line_To                                                       */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    This function is used as a `line_to' emitter during                */
+  /*    FT_Outline_Decompose().  It simply records the destination point   */
+  /*    in `user->last'; no further computations are necessary because     */
+  /*    bbox already contains both explicit ends of the line segment.      */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    to   :: A pointer to the destination vector.                       */
+  /*                                                                       */
+  /* <InOut>                                                               */
+  /*    user :: A pointer to the current walk context.                     */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    Always 0.  Needed for the interface only.                          */
+  /*                                                                       */
+  static int
+  BBox_Line_To( FT_Vector*  to,
+                TBBox_Rec*  user )
+  {
+    user->last = *to;
+d76 2
+a77 2
+    return 0;
+  }
+d86 1
+a86 1
+  /*    Find the extrema of a 1-dimensional conic Bezier curve and update  */
+d109 24
+a132 13
+    /* This function is only called when a control off-point is outside */
+    /* the bbox that contains all on-points.  It finds a local extremum */
+    /* within the segment, equal to (y1*y3 - y2*y2)/(y1 - 2*y2 + y3).   */
+    /* Or, offsetting from y2, we get                                   */
+
+    y1 -= y2;
+    y3 -= y2;
+    y2 += FT_MulDiv( y1, y3, y1 + y3 );
+
+    if ( y2 < *min )
+      *min = y2;
+    if ( y2 > *max )
+      *max = y2;
+d167 2
+a168 2
+    /* in case `to' is implicit and not included in bbox yet */
+    FT_UPDATE_BBOX( to, user->bbox );
+d196 3
+a198 3
+  /*    Find the extrema of a 1-dimensional cubic Bezier curve and         */
+  /*    update a bounding range.  This version uses iterative splitting    */
+  /*    because it is faster than the exact solution with square roots.    */
+d214 10
+a223 5
+  static FT_Pos
+  cubic_peak( FT_Pos  q1,
+              FT_Pos  q2,
+              FT_Pos  q3,
+              FT_Pos  q4 )
+d225 2
+a226 2
+    FT_Pos  peak = 0;
+    FT_Int  shift;
+d228 1
+d230 4
+a233 13
+    /* This function finds a peak of a cubic segment if it is above 0    */
+    /* using iterative bisection of the segment, or returns 0.           */
+    /* The fixed-point arithmetic of bisection is inherently stable      */
+    /* but may loose accuracy in the two lowest bits.  To compensate,    */
+    /* we upscale the segment if there is room.  Large values may need   */
+    /* to be downscaled to avoid overflows during bisection.             */
+    /* It is called with either q2 or q3 positive, which is necessary    */
+    /* for the peak to exist and avoids undefined FT_MSB.                */
+
+    shift = 27 - FT_MSB( (FT_UInt32)( FT_ABS( q1 ) |
+                                      FT_ABS( q2 ) |
+                                      FT_ABS( q3 ) |
+                                      FT_ABS( q4 ) ) );
+d235 1
+a235 1
+    if ( shift > 0 )
+d237 5
+a241 16
+      /* upscaling too much just wastes time */
+      if ( shift > 2 )
+        shift = 2;
+
+      q1 <<=  shift;
+      q2 <<=  shift;
+      q3 <<=  shift;
+      q4 <<=  shift;
+    }
+    else
+    {
+      q1 >>= -shift;
+      q2 >>= -shift;
+      q3 >>= -shift;
+      q4 >>= -shift;
+    }
+d243 1
+a243 6
+    /* for a peak to exist above 0, the cubic segment must have */
+    /* at least one of its control off-points above 0.          */
+    while ( q2 > 0 || q3 > 0 )
+    {
+      /* determine which half contains the maximum and split */
+      if ( q1 + q2 > q3 + q4 ) /* first half */
+d245 2
+a246 8
+        q4 = q4 + q3;
+        q3 = q3 + q2;
+        q2 = q2 + q1;
+        q4 = q4 + q3;
+        q3 = q3 + q2;
+        q4 = ( q4 + q3 ) / 8;
+        q3 = q3 / 4;
+        q2 = q2 / 2;
+d248 1
+a248 1
+      else                     /* second half */
+d250 2
+a251 8
+        q1 = q1 + q2;
+        q2 = q2 + q3;
+        q3 = q3 + q4;
+        q1 = q1 + q2;
+        q2 = q2 + q3;
+        q1 = ( q1 + q2 ) / 8;
+        q2 = q2 / 4;
+        q3 = q3 / 2;
+d253 1
+a253 3
+
+      /* check whether either end reached the maximum */
+      if ( q1 == q2 && q1 >= q3 )
+d255 7
+a261 2
+        peak = q1;
+        break;
+a262 6
+      if ( q3 == q4 && q2 <= q4 )
+      {
+        peak = q4;
+        break;
+      }
+    }
+d264 61
+a324 4
+    if ( shift > 0 )
+      peak >>=  shift;
+    else
+      peak <<= -shift;
+d326 3
+a328 1
+    return peak;
+d333 4
+a336 4
+  BBox_Cubic_Check( FT_Pos   p1,
+                    FT_Pos   p2,
+                    FT_Pos   p3,
+                    FT_Pos   p4,
+d340 158
+a497 11
+    /* This function is only called when a control off-point is outside  */
+    /* the bbox that contains all on-points.  So at least one of the     */
+    /* conditions below holds and cubic_peak is called with at least one */
+    /* non-zero argument.                                                */
+
+    if ( p2 > *max || p3 > *max )
+      *max += cubic_peak( p1 - *max, p2 - *max, p3 - *max, p4 - *max );
+
+    /* now flip the signs to update the minimum */
+    if ( p2 < *min || p3 < *min )
+      *min -= cubic_peak( *min - p1, *min - p2, *min - p3, *min - p4 );
+d500 2
+d537 2
+a538 3
+    /* We don't need to check `to' since it is always an on-point,    */
+    /* thus within the bbox.  Only segments with an off-point outside */
+    /* the bbox can possibly reach new extreme values.                */
+d563 6
+a568 10
+
+  FT_DEFINE_OUTLINE_FUNCS(
+    bbox_interface,
+
+    (FT_Outline_MoveTo_Func) BBox_Move_To,   /* move_to  */
+    (FT_Outline_LineTo_Func) BBox_Line_To,   /* line_to  */
+    (FT_Outline_ConicTo_Func)BBox_Conic_To,  /* conic_to */
+    (FT_Outline_CubicTo_Func)BBox_Cubic_To,  /* cubic_to */
+    0,                                       /* shift    */
+    0                                        /* delta    */
+a570 1
+
+d577 2
+a578 4
+    FT_BBox     cbox = {  0x7FFFFFFFL,  0x7FFFFFFFL,
+                         -0x7FFFFFFFL, -0x7FFFFFFFL };
+    FT_BBox     bbox = {  0x7FFFFFFFL,  0x7FFFFFFFL,
+                         -0x7FFFFFFFL, -0x7FFFFFFFL };
+d584 1
+a584 1
+      return FT_THROW( Invalid_Argument );
+d587 1
+a587 1
+      return FT_THROW( Invalid_Outline );
+a593 1
+
+d602 3
+d606 1
+a606 1
+    for ( n = 0; n < outline->n_points; n++ )
+d608 10
+a617 1
+      FT_UPDATE_BBOX( vec, cbox );
+d620 8
+a627 1
+        FT_UPDATE_BBOX( vec, bbox );
+d643 2
+a644 4
+      FT_Outline_Funcs  bbox_interface;
+
+
+      Init_Class_bbox_interface( &bbox_interface );
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

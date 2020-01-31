@@ -1,0 +1,1152 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.21.24;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.47.41;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.02.26.20.04.52;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.42;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.07;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.30;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.07;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.04;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.03;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.23;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftinit.c                                                               */
+/*                                                                         */
+/*    FreeType initialization layer (body).                                */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*  The purpose of this file is to implement the following two           */
+  /*  functions:                                                           */
+  /*                                                                       */
+  /*  FT_Add_Default_Modules():                                            */
+  /*     This function is used to add the set of default modules to a      */
+  /*     fresh new library object.  The set is taken from the header file  */
+  /*     `freetype/config/ftmodule.h'.  See the document `FreeType 2.0     */
+  /*     Build System' for more information.                               */
+  /*                                                                       */
+  /*  FT_Init_FreeType():                                                  */
+  /*     This function creates a system object for the current platform,   */
+  /*     builds a library out of it, then calls FT_Default_Drivers().      */
+  /*                                                                       */
+  /*  Note that even if FT_Init_FreeType() uses the implementation of the  */
+  /*  system object defined at build time, client applications are still   */
+  /*  able to provide their own `ftsystem.c'.                              */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_CONFIG_CONFIG_H
+#include FT_INTERNAL_OBJECTS_H
+#include FT_INTERNAL_DEBUG_H
+#include FT_MODULE_H
+#include "basepic.h"
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_init
+
+
+#ifndef FT_CONFIG_OPTION_PIC
+
+
+#undef  FT_USE_MODULE
+#ifdef __cplusplus
+#define FT_USE_MODULE( type, x )  extern "C" const type  x;
+#else
+#define FT_USE_MODULE( type, x )  extern const type  x;
+#endif
+
+#include FT_CONFIG_MODULES_H
+
+#undef  FT_USE_MODULE
+#define FT_USE_MODULE( type, x )  (const FT_Module_Class*)&(x),
+
+  static
+  const FT_Module_Class*  const ft_default_modules[] =
+  {
+#include FT_CONFIG_MODULES_H
+    0
+  };
+
+
+#else /* FT_CONFIG_OPTION_PIC */
+
+
+#ifdef __cplusplus
+#define FT_EXTERNC  extern "C"
+#else
+#define FT_EXTERNC  extern
+#endif
+
+  /* declare the module's class creation/destruction functions */
+#undef  FT_USE_MODULE
+#define FT_USE_MODULE( type, x )                            \
+  FT_EXTERNC FT_Error                                       \
+  FT_Create_Class_ ## x( FT_Library         library,        \
+                         FT_Module_Class*  *output_class ); \
+  FT_EXTERNC void                                           \
+  FT_Destroy_Class_ ## x( FT_Library        library,        \
+                          FT_Module_Class*  clazz );
+
+#include FT_CONFIG_MODULES_H
+
+  /* count all module classes */
+#undef  FT_USE_MODULE
+#define FT_USE_MODULE( type, x )  MODULE_CLASS_ ## x,
+
+  enum
+  {
+#include FT_CONFIG_MODULES_H
+    FT_NUM_MODULE_CLASSES
+  };
+
+  /* destroy all module classes */
+#undef  FT_USE_MODULE
+#define FT_USE_MODULE( type, x )                   \
+  if ( classes[i] )                                \
+  {                                                \
+    FT_Destroy_Class_ ## x( library, classes[i] ); \
+  }                                                \
+  i++;
+
+
+  FT_BASE_DEF( void )
+  ft_destroy_default_module_classes( FT_Library  library )
+  {
+    FT_Module_Class*  *classes;
+    FT_Memory          memory;
+    FT_UInt            i;
+    BasePIC*           pic_container = (BasePIC*)library->pic_container.base;
+
+
+    if ( !pic_container->default_module_classes )
+      return;
+
+    memory  = library->memory;
+    classes = pic_container->default_module_classes;
+    i       = 0;
+
+#include FT_CONFIG_MODULES_H
+
+    FT_FREE( classes );
+    pic_container->default_module_classes = NULL;
+  }
+
+
+  /* initialize all module classes and the pointer table */
+#undef  FT_USE_MODULE
+#define FT_USE_MODULE( type, x )                     \
+  error = FT_Create_Class_ ## x( library, &clazz );  \
+  if ( error )                                       \
+    goto Exit;                                       \
+  classes[i++] = clazz;
+
+
+  FT_BASE_DEF( FT_Error )
+  ft_create_default_module_classes( FT_Library  library )
+  {
+    FT_Error           error;
+    FT_Memory          memory;
+    FT_Module_Class*  *classes = NULL;
+    FT_Module_Class*   clazz;
+    FT_UInt            i;
+    BasePIC*           pic_container = (BasePIC*)library->pic_container.base;
+
+
+    memory = library->memory;
+
+    pic_container->default_module_classes = NULL;
+
+    if ( FT_ALLOC( classes, sizeof ( FT_Module_Class* ) *
+                              ( FT_NUM_MODULE_CLASSES + 1 ) ) )
+      return error;
+
+    /* initialize all pointers to 0, especially the last one */
+    for ( i = 0; i < FT_NUM_MODULE_CLASSES; i++ )
+      classes[i] = NULL;
+    classes[FT_NUM_MODULE_CLASSES] = NULL;
+
+    i = 0;
+
+#include FT_CONFIG_MODULES_H
+
+  Exit:
+    if ( error )
+      ft_destroy_default_module_classes( library );
+    else
+      pic_container->default_module_classes = classes;
+
+    return error;
+  }
+
+
+#endif /* FT_CONFIG_OPTION_PIC */
+
+
+  /* documentation is in ftmodapi.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Add_Default_Modules( FT_Library  library )
+  {
+    FT_Error                       error;
+    const FT_Module_Class* const*  cur;
+
+
+    /* FT_DEFAULT_MODULES_GET dereferences `library' in PIC mode */
+#ifdef FT_CONFIG_OPTION_PIC
+    if ( !library )
+      return;
+#endif
+
+    /* GCC 4.6 warns the type difference:
+     *   FT_Module_Class** != const FT_Module_Class* const*
+     */
+    cur = (const FT_Module_Class* const*)FT_DEFAULT_MODULES_GET;
+
+    /* test for valid `library' delayed to FT_Add_Module() */
+    while ( *cur )
+    {
+      error = FT_Add_Module( library, *cur );
+      /* notify errors, but don't stop */
+      if ( error )
+        FT_TRACE0(( "FT_Add_Default_Module:"
+                    " Cannot install `%s', error = 0x%x\n",
+                    (*cur)->module_name, error ));
+      cur++;
+    }
+  }
+
+
+#ifdef FT_CONFIG_OPTION_ENVIRONMENT_PROPERTIES
+
+#define MAX_LENGTH  128
+
+  /*
+   * Set default properties derived from the `FREETYPE_PROPERTIES'
+   * environment variable.
+   *
+   * `FREETYPE_PROPERTIES' has the following syntax form (broken here into
+   * multiple lines for better readability)
+   *
+   *   <optional whitespace>
+   *   <module-name1> ':'
+   *   <property-name1> '=' <property-value1>
+   *   <whitespace>
+   *   <module-name2> ':'
+   *   <property-name2> '=' <property-value2>
+   *   ...
+   *
+   * Example:
+   *
+   *   FREETYPE_PROPERTIES=truetype:interpreter-version=35 \
+   *                       cff:no-stem-darkening=1 \
+   *                       autofitter:warping=1
+   *
+   */
+
+  static void
+  ft_set_default_properties( FT_Library  library )
+  {
+    const char*  env;
+    const char*  p;
+    const char*  q;
+
+    char  module_name[MAX_LENGTH + 1];
+    char  property_name[MAX_LENGTH + 1];
+    char  property_value[MAX_LENGTH + 1];
+
+    int  i;
+
+
+    env = ft_getenv( "FREETYPE_PROPERTIES" );
+    if ( !env )
+      return;
+
+    for ( p = env; *p; p++ )
+    {
+      /* skip leading whitespace and separators */
+      if ( *p == ' ' || *p == '\t' )
+        continue;
+
+      /* read module name, followed by `:' */
+      q = p;
+      for ( i = 0; i < MAX_LENGTH; i++ )
+      {
+        if ( !*p || *p == ':' )
+          break;
+        module_name[i] = *p++;
+      }
+      module_name[i] = '\0';
+
+      if ( !*p || *p != ':' || p == q )
+        break;
+
+      /* read property name, followed by `=' */
+      q = ++p;
+      for ( i = 0; i < MAX_LENGTH; i++ )
+      {
+        if ( !*p || *p == '=' )
+          break;
+        property_name[i] = *p++;
+      }
+      property_name[i] = '\0';
+
+      if ( !*p || *p != '=' || p == q )
+        break;
+
+      /* read property value, followed by whitespace (if any) */
+      q = ++p;
+      for ( i = 0; i < MAX_LENGTH; i++ )
+      {
+        if ( !*p || *p == ' ' || *p == '\t' )
+          break;
+        property_value[i] = *p++;
+      }
+      property_value[i] = '\0';
+
+      if ( !( *p == '\0' || *p == ' ' || *p == '\t' ) || p == q )
+        break;
+
+      /* we completely ignore errors */
+      ft_property_string_set( library,
+                              module_name,
+                              property_name,
+                              property_value );
+    }
+  }
+
+#else
+
+  static void
+  ft_set_default_properties( FT_Library  library )
+  {
+    FT_UNUSED( library );
+  }
+
+#endif
+
+
+  /* documentation is in freetype.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_Init_FreeType( FT_Library  *alibrary )
+  {
+    FT_Error   error;
+    FT_Memory  memory;
+
+
+    /* check of `alibrary' delayed to `FT_New_Library' */
+
+    /* First of all, allocate a new system object -- this function is part */
+    /* of the system-specific component, i.e. `ftsystem.c'.                */
+
+    memory = FT_New_Memory();
+    if ( !memory )
+    {
+      FT_ERROR(( "FT_Init_FreeType: cannot find memory manager\n" ));
+      return FT_THROW( Unimplemented_Feature );
+    }
+
+    /* build a library out of it, then fill it with the set of */
+    /* default drivers.                                        */
+
+    error = FT_New_Library( memory, alibrary );
+    if ( error )
+      FT_Done_Memory( memory );
+    else
+      FT_Add_Default_Modules( *alibrary );
+
+    ft_set_default_properties( *alibrary );
+
+    return error;
+  }
+
+
+  /* documentation is in freetype.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_Done_FreeType( FT_Library  library )
+  {
+    FT_Memory  memory;
+
+
+    if ( !library )
+      return FT_THROW( Invalid_Library_Handle );
+
+    memory = library->memory;
+
+    /* Discard the library object */
+    FT_Done_Library( library );
+
+    /* discard memory manager */
+    FT_Done_Memory( memory );
+
+    return FT_Err_Ok;
+  }
+
+
+/* END */
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005, 2007, 2009 by                         */
+d57 1
+d60 1
+a67 1
+
+a69 1
+
+d80 1
+d83 1
+d92 7
+a98 3
+#define FT_USE_MODULE( type, x )  \
+  FT_EXTERNC FT_Error FT_Create_Class_##x( FT_Library library, FT_Module_Class** output_class ); \
+  FT_EXTERNC void     FT_Destroy_Class_##x( FT_Library library, FT_Module_Class*  clazz );
+a101 1
+
+d104 1
+a104 1
+#define FT_USE_MODULE( type, x )  MODULE_CLASS_##x,
+d106 2
+a107 1
+  enum {
+d112 1
+a112 1
+  /* destroy all module classes */  
+d114 7
+a120 3
+#define FT_USE_MODULE( type, x )  \
+  if ( classes[i] ) { FT_Destroy_Class_##x(library, classes[i]); } \
+  i++;                                                             \
+d125 5
+a129 4
+    FT_Module_Class** classes;
+    FT_Memory         memory;
+    FT_UInt           i;
+    BasePIC*          pic_container = (BasePIC*)library->pic_container.base;
+d134 1
+a134 1
+    memory = library->memory;
+d136 1
+a136 1
+    i = 0;
+d141 1
+a141 1
+    pic_container->default_module_classes = 0;
+d144 1
+d147 4
+a150 3
+#define FT_USE_MODULE( type, x )                \
+  error = FT_Create_Class_##x(library, &clazz); \
+  if (error) goto Exit;                         \
+d153 1
+d157 6
+a162 6
+    FT_Error          error;
+    FT_Memory         memory;
+    FT_Module_Class** classes;
+    FT_Module_Class*  clazz;
+    FT_UInt           i;
+    BasePIC*          pic_container = (BasePIC*)library->pic_container.base;
+a163 2
+    memory = library->memory;  
+    pic_container->default_module_classes = 0;
+d165 6
+a170 1
+    if ( FT_ALLOC(classes, sizeof(FT_Module_Class*) * (FT_NUM_MODULE_CLASSES + 1) ) )
+d172 1
+d174 3
+a176 3
+    for (i = 0; i < FT_NUM_MODULE_CLASSES; i++)
+      classes[i] = 0;
+    classes[FT_NUM_MODULE_CLASSES] = 0;
+d182 5
+a186 3
+Exit:    
+    if (error) ft_destroy_default_module_classes( library );
+    else pic_container->default_module_classes = classes;
+d188 1
+a188 1
+    return error;    
+d194 1
+d204 11
+a215 2
+
+    cur = FT_DEFAULT_MODULES_GET;
+d229 109
+d347 2
+d356 1
+a356 1
+      return FT_Err_Unimplemented_Feature;
+d368 2
+d379 2
+a380 3
+    if ( library )
+    {
+      FT_Memory  memory = library->memory;
+d382 2
+d385 1
+a385 2
+      /* Discard the library object */
+      FT_Done_Library( library );
+d387 5
+a391 3
+      /* discard memory manager */
+      FT_Done_Memory( memory );
+    }
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005, 2007 by                               */
+d45 1
+d57 2
+d61 1
+a61 1
+#define FT_USE_MODULE( x )  extern "C" const FT_Module_Class  x;
+d63 1
+a63 1
+#define FT_USE_MODULE( x )  extern const FT_Module_Class  x;
+d71 1
+a71 1
+#define FT_USE_MODULE( x )  (const FT_Module_Class*)&(x),
+d80 93
+d185 1
+a185 1
+    cur = ft_default_modules;
+d191 3
+a193 4
+      {
+        FT_ERROR(( "FT_Add_Default_Module: Cannot install `%s', error = 0x%x\n",
+                   (*cur)->module_name, error ));
+      }
+a224 5
+    {
+      (*alibrary)->version_major = FREETYPE_MAJOR;
+      (*alibrary)->version_minor = FREETYPE_MINOR;
+      (*alibrary)->version_patch = FREETYPE_PATCH;
+
+a225 1
+    }
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005 by                                     */
+d127 3
+a129 1
+    if ( !error )
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d58 1
+a58 1
+#define FT_USE_MODULE( x )  extern "C" const FT_Module_Class*  x;
+d60 1
+a60 1
+#define FT_USE_MODULE( x )  extern const FT_Module_Class*  x;
+d68 1
+a68 1
+#define FT_USE_MODULE( x )  (const FT_Module_Class*)&x,
+d78 1
+a78 1
+  /* documentation is in ftmodule.h */
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005, 2007 by                               */
+d58 1
+a58 1
+#define FT_USE_MODULE( x )  extern "C" const FT_Module_Class  x;
+d60 1
+a60 1
+#define FT_USE_MODULE( x )  extern const FT_Module_Class  x;
+d68 1
+a68 1
+#define FT_USE_MODULE( x )  (const FT_Module_Class*)&(x),
+d78 1
+a78 1
+  /* documentation is in ftmodapi.h */
+d127 1
+a127 3
+    if ( error )
+      FT_Done_Memory( memory );
+    else
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005 by                                     */
+d58 1
+a58 1
+#define FT_USE_MODULE( x )  extern "C" const FT_Module_Class  x;
+d60 1
+a60 1
+#define FT_USE_MODULE( x )  extern const FT_Module_Class  x;
+d68 1
+a68 1
+#define FT_USE_MODULE( x )  (const FT_Module_Class*)&(x),
+d78 1
+a78 1
+  /* documentation is in ftmodapi.h */
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005, 2007, 2009 by                         */
+a44 1
+#include "basepic.h"
+a55 2
+#ifndef FT_CONFIG_OPTION_PIC
+
+d58 1
+a58 1
+#define FT_USE_MODULE( type, x )  extern "C" const type  x;
+d60 1
+a60 1
+#define FT_USE_MODULE( type, x )  extern const type  x;
+d68 1
+a68 1
+#define FT_USE_MODULE( type, x )  (const FT_Module_Class*)&(x),
+a76 93
+#else /* FT_CONFIG_OPTION_PIC */
+
+#ifdef __cplusplus
+#define FT_EXTERNC  extern "C"
+#else
+#define FT_EXTERNC  extern
+#endif
+
+  /* declare the module's class creation/destruction functions */
+#undef  FT_USE_MODULE
+#define FT_USE_MODULE( type, x )  \
+  FT_EXTERNC FT_Error FT_Create_Class_##x( FT_Library library, FT_Module_Class** output_class ); \
+  FT_EXTERNC void     FT_Destroy_Class_##x( FT_Library library, FT_Module_Class*  clazz );
+
+#include FT_CONFIG_MODULES_H
+
+
+  /* count all module classes */
+#undef  FT_USE_MODULE
+#define FT_USE_MODULE( type, x )  MODULE_CLASS_##x,
+
+  enum {
+#include FT_CONFIG_MODULES_H
+    FT_NUM_MODULE_CLASSES
+  };
+
+  /* destroy all module classes */  
+#undef  FT_USE_MODULE
+#define FT_USE_MODULE( type, x )  \
+  if ( classes[i] ) { FT_Destroy_Class_##x(library, classes[i]); } \
+  i++;                                                             \
+
+  FT_BASE_DEF( void )
+  ft_destroy_default_module_classes( FT_Library  library )
+  {
+    FT_Module_Class** classes;
+    FT_Memory         memory;
+    FT_UInt           i;
+    BasePIC*          pic_container = (BasePIC*)library->pic_container.base;
+
+    if ( !pic_container->default_module_classes )
+      return;
+
+    memory = library->memory;
+    classes = pic_container->default_module_classes;
+    i = 0;
+
+#include FT_CONFIG_MODULES_H
+
+    FT_FREE( classes );
+    pic_container->default_module_classes = 0;
+  }
+
+  /* initialize all module classes and the pointer table */
+#undef  FT_USE_MODULE
+#define FT_USE_MODULE( type, x )                \
+  error = FT_Create_Class_##x(library, &clazz); \
+  if (error) goto Exit;                         \
+  classes[i++] = clazz;
+
+  FT_BASE_DEF( FT_Error )
+  ft_create_default_module_classes( FT_Library  library )
+  {
+    FT_Error          error;
+    FT_Memory         memory;
+    FT_Module_Class** classes;
+    FT_Module_Class*  clazz;
+    FT_UInt           i;
+    BasePIC*          pic_container = (BasePIC*)library->pic_container.base;
+
+    memory = library->memory;  
+    pic_container->default_module_classes = 0;
+
+    if ( FT_ALLOC(classes, sizeof(FT_Module_Class*) * (FT_NUM_MODULE_CLASSES + 1) ) )
+      return error;
+    /* initialize all pointers to 0, especially the last one */
+    for (i = 0; i < FT_NUM_MODULE_CLASSES; i++)
+      classes[i] = 0;
+    classes[FT_NUM_MODULE_CLASSES] = 0;
+
+    i = 0;
+
+#include FT_CONFIG_MODULES_H
+
+Exit:    
+    if (error) ft_destroy_default_module_classes( library );
+    else pic_container->default_module_classes = classes;
+
+    return error;    
+  }
+
+
+#endif /* FT_CONFIG_OPTION_PIC */
+d89 1
+a89 1
+    cur = FT_DEFAULT_MODULES_GET;
+d95 4
+a98 3
+        FT_TRACE0(( "FT_Add_Default_Module:"
+                    " Cannot install `%s', error = 0x%x\n",
+                    (*cur)->module_name, error ));
+d127 6
+a132 3
+    if ( error )
+      FT_Done_Memory( memory );
+    else
+d134 1
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+a56 1
+
+a58 1
+
+d66 1
+d69 1
+a79 1
+
+a81 1
+
+d90 3
+a92 7
+#define FT_USE_MODULE( type, x )                            \
+  FT_EXTERNC FT_Error                                       \
+  FT_Create_Class_ ## x( FT_Library         library,        \
+                         FT_Module_Class*  *output_class ); \
+  FT_EXTERNC void                                           \
+  FT_Destroy_Class_ ## x( FT_Library        library,        \
+                          FT_Module_Class*  clazz );
+d96 1
+d99 1
+a99 1
+#define FT_USE_MODULE( type, x )  MODULE_CLASS_ ## x,
+d101 1
+a101 2
+  enum
+  {
+d106 1
+a106 1
+  /* destroy all module classes */
+d108 3
+a110 7
+#define FT_USE_MODULE( type, x )                   \
+  if ( classes[i] )                                \
+  {                                                \
+    FT_Destroy_Class_ ## x( library, classes[i] ); \
+  }                                                \
+  i++;
+
+d115 4
+a118 5
+    FT_Module_Class*  *classes;
+    FT_Memory          memory;
+    FT_UInt            i;
+    BasePIC*           pic_container = (BasePIC*)library->pic_container.base;
+
+d123 1
+a123 1
+    memory  = library->memory;
+d125 1
+a125 1
+    i       = 0;
+d130 1
+a130 1
+    pic_container->default_module_classes = NULL;
+a132 1
+
+d135 3
+a137 4
+#define FT_USE_MODULE( type, x )                     \
+  error = FT_Create_Class_ ## x( library, &clazz );  \
+  if ( error )                                       \
+    goto Exit;                                       \
+a139 1
+
+d143 6
+a148 6
+    FT_Error           error;
+    FT_Memory          memory;
+    FT_Module_Class*  *classes = NULL;
+    FT_Module_Class*   clazz;
+    FT_UInt            i;
+    BasePIC*           pic_container = (BasePIC*)library->pic_container.base;
+d150 2
+d153 1
+a153 6
+    memory = library->memory;
+
+    pic_container->default_module_classes = NULL;
+
+    if ( FT_ALLOC( classes, sizeof ( FT_Module_Class* ) *
+                              ( FT_NUM_MODULE_CLASSES + 1 ) ) )
+a154 1
+
+d156 3
+a158 3
+    for ( i = 0; i < FT_NUM_MODULE_CLASSES; i++ )
+      classes[i] = NULL;
+    classes[FT_NUM_MODULE_CLASSES] = NULL;
+d164 3
+a166 5
+  Exit:
+    if ( error )
+      ft_destroy_default_module_classes( library );
+    else
+      pic_container->default_module_classes = classes;
+d168 1
+a168 1
+    return error;
+a173 1
+
+d183 1
+a183 10
+    /* FT_DEFAULT_MODULES_GET dereferences `library' in PIC mode */
+#ifdef FT_CONFIG_OPTION_PIC
+    if ( !library )
+      return;
+#endif
+
+    /* GCC 4.6 warns the type difference:
+     *   FT_Module_Class** != const FT_Module_Class* const*
+     */
+    cur = (const FT_Module_Class* const*)FT_DEFAULT_MODULES_GET;
+d185 1
+a185 1
+    /* test for valid `library' delayed to FT_Add_Module() */
+a198 109
+#ifdef FT_CONFIG_OPTION_ENVIRONMENT_PROPERTIES
+
+#define MAX_LENGTH  128
+
+  /*
+   * Set default properties derived from the `FREETYPE_PROPERTIES'
+   * environment variable.
+   *
+   * `FREETYPE_PROPERTIES' has the following syntax form (broken here into
+   * multiple lines for better readability)
+   *
+   *   <optional whitespace>
+   *   <module-name1> ':'
+   *   <property-name1> '=' <property-value1>
+   *   <whitespace>
+   *   <module-name2> ':'
+   *   <property-name2> '=' <property-value2>
+   *   ...
+   *
+   * Example:
+   *
+   *   FREETYPE_PROPERTIES=truetype:interpreter-version=35 \
+   *                       cff:no-stem-darkening=1 \
+   *                       autofitter:warping=1
+   *
+   */
+
+  static void
+  ft_set_default_properties( FT_Library  library )
+  {
+    const char*  env;
+    const char*  p;
+    const char*  q;
+
+    char  module_name[MAX_LENGTH + 1];
+    char  property_name[MAX_LENGTH + 1];
+    char  property_value[MAX_LENGTH + 1];
+
+    int  i;
+
+
+    env = ft_getenv( "FREETYPE_PROPERTIES" );
+    if ( !env )
+      return;
+
+    for ( p = env; *p; p++ )
+    {
+      /* skip leading whitespace and separators */
+      if ( *p == ' ' || *p == '\t' )
+        continue;
+
+      /* read module name, followed by `:' */
+      q = p;
+      for ( i = 0; i < MAX_LENGTH; i++ )
+      {
+        if ( !*p || *p == ':' )
+          break;
+        module_name[i] = *p++;
+      }
+      module_name[i] = '\0';
+
+      if ( !*p || *p != ':' || p == q )
+        break;
+
+      /* read property name, followed by `=' */
+      q = ++p;
+      for ( i = 0; i < MAX_LENGTH; i++ )
+      {
+        if ( !*p || *p == '=' )
+          break;
+        property_name[i] = *p++;
+      }
+      property_name[i] = '\0';
+
+      if ( !*p || *p != '=' || p == q )
+        break;
+
+      /* read property value, followed by whitespace (if any) */
+      q = ++p;
+      for ( i = 0; i < MAX_LENGTH; i++ )
+      {
+        if ( !*p || *p == ' ' || *p == '\t' )
+          break;
+        property_value[i] = *p++;
+      }
+      property_value[i] = '\0';
+
+      if ( !( *p == '\0' || *p == ' ' || *p == '\t' ) || p == q )
+        break;
+
+      /* we completely ignore errors */
+      ft_property_string_set( library,
+                              module_name,
+                              property_name,
+                              property_value );
+    }
+  }
+
+#else
+
+  static void
+  ft_set_default_properties( FT_Library  library )
+  {
+    FT_UNUSED( library );
+  }
+
+#endif
+
+
+a207 2
+    /* check of `alibrary' delayed to `FT_New_Library' */
+
+d215 1
+a215 1
+      return FT_THROW( Unimplemented_Feature );
+a226 2
+    ft_set_default_properties( *alibrary );
+
+d236 3
+a238 1
+    FT_Memory  memory;
+d241 2
+a242 2
+    if ( !library )
+      return FT_THROW( Invalid_Library_Handle );
+d244 3
+a246 7
+    memory = library->memory;
+
+    /* Discard the library object */
+    FT_Done_Library( library );
+
+    /* discard memory manager */
+    FT_Done_Memory( memory );
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

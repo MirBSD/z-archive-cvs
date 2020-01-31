@@ -1,0 +1,406 @@
+head	1.1;
+branch	1.1.109;
+access;
+symbols
+	lynx-2_8_8dev_16:1.1.109.4
+	lynx-2_8_8dev_15e:1.1.109.4
+	lynx-2_8_8dev_15:1.1.109.4
+	lynx-2_8_8dev_14:1.1.109.4
+	lynx-2_8_8dev_12:1.1.109.4
+	lynx-2_8_8dev_11:1.1.109.4
+	lynx-2_8_8dev_10a:1.1.109.4
+	lynx-2_8_8dev_7a:1.1.109.3
+	lynx-2_8_8dev_7:1.1.109.3
+	lynx-2_8_7rel_1:1.1.109.2
+	lynx-2_8_7dev_12:1.1.109.2
+	lynx-2_8_7dev_11a:1.1.109.2
+	MIRBSD_10:1.1.109.1.0.2
+	MIRBSD_10_BASE:1.1.109.1
+	lynx-2_8_7dev_8:1.1.109.1
+	lynx:1.1.109;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2008.03.09.17.32.16;	author tg;	state Exp;
+branches
+	1.1.109.1;
+next	;
+commitid	10047D41E626DF0F5D0;
+
+1.1.109.1
+date	2008.03.09.17.32.16;	author tg;	state Exp;
+branches;
+next	1.1.109.2;
+commitid	10047D41E626DF0F5D0;
+
+1.1.109.2
+date	2008.12.16.23.13.12;	author tg;	state Exp;
+branches;
+next	1.1.109.3;
+commitid	100494835F965A87026;
+
+1.1.109.3
+date	2010.12.19.18.12.49;	author tg;	state Exp;
+branches;
+next	1.1.109.4;
+commitid	1004D0E4B24304015D1;
+
+1.1.109.4
+date	2012.02.19.18.30.05;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004F413EF328BF0E26;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* $LynxId: LYSession.c,v 1.4 2008/02/11 00:00:19 Paul.B.Mahol Exp $ */
+
+#include <LYSession.h>
+
+#include <LYUtils.h>
+#include <LYStrings.h>
+#include <LYHistory.h>
+#include <LYGlobalDefs.h>
+#include <LYMainLoop.h>
+#include <GridText.h>
+
+#ifdef USE_SESSIONS
+
+/* Example of how a session file may look:
+ */
+
+/* # lynx session
+ * / files
+ * / hereby
+ * / reduce
+ * g file://localhost/COPYRIGHT
+ * g http://lynx.isc.org
+ * h 1 -1 file://localhost/COPYRIGHT       Entry into main screen
+ * h 1 0 LYNXCACHE:/       Cache Jar
+ * h 1 16 file://localhost/usr/local/share/lynx_help/Lynx_users_guide.html#Cache   Lynx Users Guide v2.8.6
+ * h 1 -1 file://localhost/COPYRIGHT       Entry into main screen
+ * h 1 2 file://localhost/tmp/lynxmSefvcbXes/L12110-6407TMP.html#current   Visited Links Page
+ * h 1 -1 file://localhost/COPYRIGHT       Entry into main screen
+ * h 1 -1 LYNXMESSAGES:/   Your recent statusline messages
+ * V 0 file://localhost/COPYRIGHT  Entry into main screen
+ * V 3 file://localhost/usr/local/share/lynx_help/Lynx_users_guide.html#Bookmarks  Lynx Users Guide v2.8.6
+ */
+
+static char *get_filename(char *given_name)
+{
+    char *actual_filename = given_name;
+
+    /*
+     * If the specific "-sessionin" or "-sessionout" value is not given,
+     * try the "-session" value (if the AUTO_SESSION configuration is set).
+     * Finally try the SESSION_FILE configuration value.
+     */
+    if (isEmpty(actual_filename)) {
+	actual_filename = session_file;
+	if (isEmpty(actual_filename)) {
+	    if (LYAutoSession) {
+		actual_filename = LYSessionFile;
+	    }
+	}
+    }
+
+    return actual_filename;
+}
+
+/* Restore session from file, pretty slow, but it should be fine
+ * for everyday, normal use.
+ */
+void RestoreSession(void)
+{
+    char *my_filename = get_filename(sessionin_file);
+    FILE *fp;
+    char *buffer = 0;
+    DocInfo doc;
+    VisitedLink *vl;
+    int i = 0;
+    short errors = 10;		/* how many syntax errors are allowed in
+
+				   session file before aborting. */
+    char *value1, *value2, *rsline, *linktext, *rslevel;
+
+    /*
+     * This should be done only once, here:  iff USE_SESSIONS is defined or: 
+     * in mainloop(), otherwise history entries are lost
+     */
+    nhist = 0;
+
+    if (my_filename == NULL) {
+	/* nothing to do, so exit */
+	return;
+    }
+
+    CTRACE((tfp, "RestoreSession %s\n", my_filename));
+    SetDefaultMode(O_TEXT);
+    if ((fp = fopen(my_filename, TXT_R)) != NULL) {
+
+	/*
+	 * This should be safe, entries are added to lynx until memory i
+	 * exhausteds
+	 */
+	while (LYSafeGets(&buffer, fp) != 0) {
+	    LYTrimNewline(buffer);
+	    if (*buffer == '/') {
+#ifdef SEARCH_OUT_SESSION
+		if ((value1 = strchr(buffer, ' ')) == 0) {
+		    continue;
+		} else {
+		    value1++;
+		    HTAddSearchQuery(value1);
+		}
+#endif /* SEARCH_OUT_SESSION */
+	    } else if (*buffer == 'g') {
+#ifdef GOTOURL_OUT_SESSION
+		if ((value1 = strchr(buffer, ' ')) == 0)
+		    continue;
+		else {
+		    value1++;
+		    HTAddGotoURL(value1);
+		}
+#endif /* GOTOURL_OUT_SESSION */
+	    } else if (*buffer == 'h') {
+#ifdef HISTORY_OUT_SESSION
+		if ((rsline = strchr(buffer, ' ')) == 0)
+		    continue;
+		else {
+		    rsline++;
+		    if ((linktext = strchr(rsline, ' ')) == 0)
+			continue;
+		    else
+			*linktext++ = 0;
+		    if ((value1 = strchr(linktext, ' ')) == 0)
+			continue;
+		    else
+			*value1++ = 0;
+		    if ((value2 = strchr(value1, '\t')) != 0) {
+			*value2++ = 0;
+			doc.line = atoi(rsline);
+			doc.link = atoi(linktext);
+			StrAllocCopy(doc.address, value1);
+			StrAllocCopy(doc.title, value2);
+			LYpush(&doc, TRUE);
+		    }
+		}
+#endif /* HISTORY_OUT_SESSION */
+	    } else if (*buffer == 'V') {
+#ifdef VLINK_OUT_SESSION
+		if ((rslevel = strchr(buffer, ' ')) == 0)
+		    continue;
+		else {
+		    rslevel++;
+		    if ((value1 = strchr(rslevel, ' ')) == 0)
+			continue;
+		    else
+			*value1++ = 0;
+		    if ((value2 = strchr(value1, '\t')) != 0) {
+			*value2++ = 0;
+			StrAllocCopy(doc.address, value1);
+			StrAllocCopy(doc.title, value2);
+			LYAddVisitedLink(&doc);
+			vl = (VisitedLink *)
+			    HTList_objectAt(Visited_Links, i);
+			if (vl != NULL) {
+			    vl->level = atoi(rslevel);
+			    i++;
+			}
+		    }
+		}
+#endif /* VLINK_OUT_SESSION */
+	    } else if (*buffer == '#') {
+		/* This is comment; ignore it */
+		continue;
+	    } else if (errors-- < 0) {
+		FREE(buffer);
+		break;
+	    } else
+		continue;
+	}
+
+	LYCloseOutput(fp);
+    }
+    SetDefaultMode(O_BINARY);
+}
+
+/*
+ * Save session to file, overwriting one.
+ */
+void SaveSession(void)
+{
+    char *my_filename = get_filename(sessionout_file);
+    FILE *fp;
+    VisitedLink *vl;
+    int i, j, k;
+
+    if (my_filename == NULL) {
+	/* nothing to do, so exit */
+	return;
+    }
+
+    CTRACE((tfp, "SaveSession %s\n", my_filename));
+
+    SetDefaultMode(O_TEXT);
+    if ((fp = fopen(my_filename, TXT_W)) != NULL) {
+
+	fprintf(fp, "# lynx session\n");	/* @@@@@@ simple for now */
+
+	/* Note use of session_limit, the most recent entries in list,
+	 * from the end of list, are saved.
+	 */
+
+#ifdef SEARCH_IN_SESSION
+	k = HTList_count(search_queries);
+	if (k > session_limit)
+	    j = k - session_limit;
+	else
+	    j = 0;
+	for (i = j; i < k; i++) {
+	    fprintf(fp, "/ ");
+	    fputs((char *) HTList_objectAt(search_queries, i), fp);
+	    fprintf(fp, "\n");
+	}
+#endif /* SEARCH_IN_SESSION */
+
+#ifdef GOTOURL_IN_SESSION
+	k = HTList_count(Goto_URLs);
+	if (k > session_limit)
+	    j = k - session_limit;
+	else
+	    j = 0;
+	for (i = j; i < k; i++) {
+	    fprintf(fp, "g ");
+	    fputs((char *) HTList_objectAt(Goto_URLs, i), fp);
+	    fprintf(fp, "\n");
+	}
+#endif /* GOTOURL_IN_SESSION */
+
+#ifdef HISTORY_IN_SESSION
+	k = nhist + nhist_extra;
+	if (k > session_limit)
+	    j = k - session_limit;
+	else
+	    j = 0;
+
+	for (i = j; i < k; i++) {
+	    fprintf(fp, "h %d %d ", HDOC(i).line, HDOC(i).link);
+	    fputs(HDOC(i).address, fp);
+	    fprintf(fp, "\t");
+	    fputs(HDOC(i).title, fp);
+	    fprintf(fp, "\n");
+	}
+#endif /* HISTORY_IN_SESSION */
+
+#ifdef VLINK_IN_SESSION
+	k = HTList_count(Visited_Links);
+	if (k > session_limit)
+	    j = k - session_limit;
+	else
+	    j = 0;
+
+	for (i = j; i < k; i++) {
+	    vl = (VisitedLink *) HTList_objectAt(Visited_Links, i);
+	    fprintf(fp, "V %d ", vl->level);
+	    fputs(vl->address, fp);
+	    fprintf(fp, "\t");
+	    fputs(vl->title, fp);
+	    fprintf(fp, "\n");
+	}
+	LYCloseOutput(fp);
+#endif /* VLINK_IN_SESSION */
+
+    }
+    SetDefaultMode(O_BINARY);
+}
+
+#endif /* USE_SESSIONS */
+@
+
+
+1.1.109.1
+log
+@Import Lynx 2.8.7dev.8
+@
+text
+@@
+
+
+1.1.109.2
+log
+@Import Lynx 2.8.7dev.11a via eMail from Tom Dickey:
+Message-ID: <20081215010313.GA8373@@invisible-island.net>
+Message-ID: <20081216012408.GA15364@@invisible-island.net>
+@
+text
+@d1 1
+a1 1
+/* $LynxId: LYSession.c,v 1.6 2008/07/02 21:24:27 Paul.B.Mahol Exp $ */
+d66 1
+a66 1
+    short errors = 10;		/* how many syntax errors are allowed in */
+d68 1
+a68 1
+    /* session file before aborting. */
+d87 2
+a88 2
+	 * This should be safe, entries are added to lynx until memory is
+	 * exhausted
+d250 5
+a254 7
+	    if (vl != NULL) {
+		fprintf(fp, "V %d ", vl->level);
+		fputs(vl->address, fp);
+		fprintf(fp, "\t");
+		fputs(vl->title, fp);
+		fprintf(fp, "\n");
+	    }
+d256 1
+a258 1
+	LYCloseOutput(fp);
+@
+
+
+1.1.109.3
+log
+@Import lynx-current
+@
+text
+@d1 1
+a1 1
+/* $LynxId: LYSession.c,v 1.7 2010/10/31 18:15:33 Paul.B.Mahol Exp $ */
+d66 3
+a68 2
+    short errors = 10;		/* how many syntax errors are allowed in
+				 * session file before aborting. */
+a70 2
+    memset(&doc, 0, sizeof(doc));
+
+@
+
+
+1.1.109.4
+log
+@Import Lynx 2.8.8dev.10 plus dev.10a patch from invisible-island plus
+fix for “lynx -help” output by KIHARA Hideto, by import-3rdpty,v 1.43
+@
+text
+@d1 1
+a1 1
+/* $LynxId: LYSession.c,v 1.8 2012/02/09 20:00:59 tom Exp $ */
+a4 1
+#include <LYLeaks.h>
+@
+
+

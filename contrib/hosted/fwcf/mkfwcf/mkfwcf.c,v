@@ -1,0 +1,563 @@
+head	1.13;
+access;
+symbols
+	FWCF_1_06:1.13
+	FWCF_1_05:1.13
+	FWCF_1_04:1.13
+	FWCF_1_03:1.13
+	FWCF_1_01:1.13
+	FWCF_1_00:1.13;
+locks; strict;
+comment	@ * @;
+
+
+1.13
+date	2006.09.24.20.35.00;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	1004516EBC4399F582B;
+
+1.12
+date	2006.09.24.19.11.57;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	1004516D8645DBACA09;
+
+1.11
+date	2006.09.23.23.04.16;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1004515BD810059F9C6;
+
+1.10
+date	2006.09.23.22.05.26;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004515AFA04C63C9B9;
+
+1.9
+date	2006.09.16.07.09.49;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	100450BA34B6AE3B0F3;
+
+1.8
+date	2006.09.16.06.18.58;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	100450B975E603852FA;
+
+1.7
+date	2006.09.16.04.40.25;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100450B800C0C9AC337;
+
+1.6
+date	2006.09.16.03.51.06;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100450B74B35ACD016A;
+
+1.5
+date	2006.09.16.03.50.25;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100450B748F4FA4FB0E;
+
+1.4
+date	2006.09.16.03.17.03;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100450B6CBA79B39CC1;
+
+1.3
+date	2006.09.16.01.55.24;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100450B598527EA0606;
+
+1.2
+date	2006.09.16.00.52.13;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100450B4ACC7A493A21;
+
+1.1
+date	2006.09.15.21.11.24;	author tg;	state Exp;
+branches;
+next	;
+commitid	100450B16F309C2883E;
+
+
+desc
+@@
+
+
+1.13
+log
+@* join mkfwcf.c, unfwcf.c, fwcf.helper.c into a single file tool.c
+  which builds a combinded mkfwcf+unfwcf for the host normally, and
+  a stripped-down tool for the target #ifdef SMALL (code sharing ;)
+* enhance the tool by recompress functionality
+
+Note: mkfwcf and unfwcf are kept for now
+@
+text
+@/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.12 2006/09/24 19:11:57 tg Exp $ */
+
+/*-
+ * Copyright (c) 2006
+ *	Thorsten Glaser <tg@@mirbsd.de>
+ *
+ * Licensee is hereby permitted to deal in this work without restric-
+ * tion, including unlimited rights to use, publicly perform, modify,
+ * merge, distribute, sell, give away or sublicence, provided all co-
+ * pyright notices above, these terms and the disclaimer are retained
+ * in all redistributions or reproduced in accompanying documentation
+ * or other materials provided with binary redistributions.
+ *
+ * Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+ * express, or implied, to the maximum extent permitted by applicable
+ * law, without malicious intent or gross negligence; in no event may
+ * licensor, an author or contributor be held liable for any indirect
+ * or other damage, or direct damage except proven a consequence of a
+ * direct error of said person and intended use of this work, loss or
+ * other issues arising in any way out of its use, even if advised of
+ * the possibility of such damage or existence of a defect.
+ */
+
+#include <sys/param.h>
+#include <err.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#include "defs.h"
+#include "compress.h"
+#include "pack.h"
+
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.12 2006/09/24 19:11:57 tg Exp $");
+
+static int mkfwcf(int, const char *, int);
+static __dead void usage(void);
+
+int
+main(int argc, char *argv[])
+{
+	int c;
+	int fd = STDOUT_FILENO, docompress = 0, doempty = 0;
+	const char *file_root = NULL, *outfile = NULL;
+
+	while ((c = getopt(argc, argv, "C:celo:")) != -1)
+		switch (c) {
+		case 'C':
+			if (!(docompress = strtonum(optarg, 1, 255, NULL)))
+				usage();
+			break;
+		case 'c':
+			docompress = 1;
+			break;
+		case 'e':
+			doempty = 1;
+			break;
+		case 'l':
+			return (list_compressors());
+		case 'o':
+			outfile = optarg;
+			break;
+		default:
+			usage();
+		}
+	argc -= optind;
+	argv += optind;
+
+	if ((argc < 0) || (argc > 1))
+		usage();
+
+	if (argc && doempty)
+		usage();
+
+	if (argc)
+		file_root = *argv;
+
+	if (outfile != NULL)
+		if ((fd = open(outfile, O_WRONLY | O_CREAT | O_TRUNC,
+		    0666)) < 0)
+			err(1, "open %s", outfile);
+
+	if ((file_root == NULL) && !doempty)
+		if ((file_root = getcwd(NULL, 0)) == NULL)
+			err(1, "cannot determine current working directory");
+
+	return (mkfwcf(fd, doempty ? NULL : file_root, docompress));
+}
+
+static __dead void
+usage(void)
+{
+	extern const char *__progname;
+
+	fprintf(stderr, "Usage:\t%s [-e] [-c | -C <algorithm-number>] [-o <outfile>]"
+	    "\n\t    [<directory>]\n\t%s -l\n", __progname, __progname);
+	exit(1);
+}
+
+static int
+mkfwcf(int fd, const char *dir, int algo)
+{
+	size_t sz;
+	char *data;
+
+	data = fwcf_packm(dir, algo, &sz);
+	return ((size_t)write(fd, data, sz) == sz ? 0 : 1);
+}
+@
+
+
+1.12
+log
+@* compress.h: describe stable plug-in API for use by compression
+  plugins (whose licence can be proprietary, e.g. GPL, as well)
+* mkfwcf.c, unfwcf.c: include defs.h to increase chances they'll work on GNU
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.11 2006/09/23 23:04:16 tg Exp $ */
+d35 1
+a35 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.11 2006/09/23 23:04:16 tg Exp $");
+d107 1
+a107 1
+	data = fwcf_pack(dir, algo, &sz);
+@
+
+
+1.11
+log
+@test fwcf.helper locally
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.10 2006/09/23 22:05:26 tg Exp $ */
+d31 1
+d35 1
+a35 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.10 2006/09/23 22:05:26 tg Exp $");
+@
+
+
+1.10
+log
+@implement the ability to create empty filesystems
+implement linux sysdeps for random
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.9 2006/09/16 07:09:49 tg Exp $ */
+d34 1
+a34 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.9 2006/09/16 07:09:49 tg Exp $");
+d72 3
+@
+
+
+1.9
+log
+@more code-sharing
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.8 2006/09/16 06:18:58 tg Exp $ */
+d34 1
+a34 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.8 2006/09/16 06:18:58 tg Exp $");
+d43 1
+a43 1
+	int fd = STDOUT_FILENO, docompress = 0;
+d46 1
+a46 1
+	while ((c = getopt(argc, argv, "C:clo:")) != -1)
+d55 3
+d80 1
+a80 1
+	if (file_root == NULL)
+d84 1
+a84 1
+	return (mkfwcf(fd, file_root, docompress));
+d92 1
+a92 1
+	fprintf(stderr, "Usage:\t%s [-c | -C <algorithm-number>] [-o <outfile>]"
+@
+
+
+1.8
+log
+@code sharing and cleanup
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.7 2006/09/16 04:40:25 tg Exp $ */
+a24 1
+#include <sys/stat.h>
+a28 1
+#include <string.h>
+a30 1
+#include "defs.h"
+a31 1
+#include "fts_subs.h"
+d34 1
+a34 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.7 2006/09/16 04:40:25 tg Exp $");
+a36 1
+static int list_compressors(void);
+d97 2
+a98 42
+	size_t i, k, sz;
+	int j;
+	char *data, *cdata;
+
+	ftsf_start(dir);
+	data = ft_packm();
+	i = *(size_t *)data - sizeof (size_t);
+	if (i > 0xFFFFFF)
+		errx(1, "inner size of %d too large", i);
+
+	if ((j = compressor_get(algo)->compress(&cdata, data + sizeof (size_t),
+	    i)) == -1)
+		errx(1, "%s compression failed", compressor_get(algo)->name);
+	free(data);
+
+	/* 12 bytes header, padding to 4-byte boundary, 4 bytes trailer */
+	k = ((j + 19) / 4) * 4;
+#if DEF_FLASHPART > 0xFFFFFF
+# error DEF_FLASHPART too large
+#endif
+	if (k > DEF_FLASHPART)
+		errx(1, "%d bytes too large for flash partition of %d KiB",
+		    k, DEF_FLASHPART / 1024);
+	/* padded to size of flash block */
+#if (DEF_FLASHBLOCK & 3)
+# error DEF_FLASHBLOCK must be dword-aligned
+#endif
+	sz = ((i + (DEF_FLASHBLOCK - 1)) / DEF_FLASHBLOCK) * DEF_FLASHBLOCK;
+	if ((data = malloc(sz)) == NULL)
+		err(1, "malloc");
+	mkheader(data, sz, k, i, algo);
+	memcpy(data + 12, cdata, j);
+	free(cdata);
+	k = j + 12;
+	while (k & 3)
+		data[k++] = 0;
+	mktrailer(data, k);
+	k += 4;
+	while (k < sz) {
+		*(uint32_t *)(data + k) = arc4random();
+		k += 4;
+	}
+d100 1
+a102 11
+
+static int
+list_compressors(void)
+{
+	int rv;
+
+	printf("List of registered compressors:\n");
+	if ((rv = compress_list()))
+		printf("No compressor registered!\n");
+	return (rv);
+}
+@
+
+
+1.7
+log
+@* fix prototype for compression functions: must use 'char *' for consistency
+* add my own small adler32 implementation, after src/bin/md5/ad32-x86.S
+* implement full enclosure with sanity checks
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.6 2006/09/16 03:51:06 tg Exp $ */
+d38 1
+a38 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.6 2006/09/16 03:51:06 tg Exp $");
+a104 1
+	fwcf_compressor *complist;
+d112 3
+a114 10
+	if ((complist = compress_enumerate()) == NULL)
+		errx(1, "compress_enumerate");
+	if (complist[algo].name == NULL)
+		errx(1, "compression algorithm %02Xh not found", algo);
+	if (complist[algo].init())
+		errx(1, "cannot initialise %s compression",
+		     complist[algo].name);
+	if ((j = complist[algo].compress(&cdata, data + sizeof (size_t), i))
+	    == -1)
+		errx(1, "%s compression failed", complist[algo].name);
+@
+
+
+1.6
+log
+@put the STORE* macros into pack.h
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.4 2006/09/16 03:17:03 tg Exp $ */
+d30 1
+d38 1
+a38 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.4 2006/09/16 03:17:03 tg Exp $");
+d102 1
+a102 1
+	size_t i, k;
+d110 2
+d126 5
+a130 2
+	i = ((j + 19) / 4) * 4;
+	if (i > DEF_FLASHPART)
+d132 1
+a132 1
+		    i, DEF_FLASHPART / 1024);
+d134 5
+a138 2
+	k = ((i + (DEF_FLASHBLOCK - 1)) / DEF_FLASHBLOCK) * DEF_FLASHBLOCK;
+	if ((data = malloc(k)) == NULL)
+d140 12
+d153 1
+a153 3
+
+
+	return ((size_t)write(fd, data + sizeof (size_t), i) == i ? 0 : 1);
+@
+
+
+1.5
+log
+@rename ft_pack.h to pack.h
+@
+text
+@d32 1
+d99 1
+a99 1
+mkfwcf(int fd, const char *dir, int algo __attribute__((unused)))
+d101 4
+a104 2
+	size_t i;
+	char *data;
+d109 25
+@
+
+
+1.4
+log
+@implement "inner packing" as per the spec
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.3 2006/09/16 01:55:24 tg Exp $ */
+d34 1
+a34 1
+#include "ft_pack.h"
+d36 1
+a36 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.3 2006/09/16 01:55:24 tg Exp $");
+@
+
+
+1.3
+log
+@* implement packing of single files into the fwcf filesystem inner format
+* spec: implementing hardlinks is of course optional for the WRITER
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.2 2006/09/16 00:52:13 tg Exp $ */
+d36 1
+a36 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.2 2006/09/16 00:52:13 tg Exp $");
+d98 1
+a98 1
+mkfwcf(int fd __attribute__((unused)), const char *dir, int algo __attribute__((unused)))
+d100 2
+a101 2
+	ftsf_entry e;
+	int i;
+d104 3
+a106 4
+	while ((i = ftsf_next(&e)) > 0)
+		ftsf_debugent(&e);
+
+	return (i == 0 ? 0 : 1);
+@
+
+
+1.2
+log
+@implement initial compressor hook list
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.1 2006/09/15 21:11:24 tg Exp $ */
+d34 1
+d36 1
+a36 1
+__RCSID("$MirOS: contrib/hosted/fwcf/mkfwcf/mkfwcf.c,v 1.1 2006/09/15 21:11:24 tg Exp $");
+@
+
+
+1.1
+log
+@begin operating on file tree traversal, not finished yet
+mkfwcf.c will only be enhanced by the compression functions
+later, it's almost finished
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/share/misc/licence.template,v 1.14 2006/08/09 19:35:23 tg Rel $ */
+d32 1
+d35 1
+a35 1
+__RCSID("$MirOS$");
+d37 3
+a39 2
+int mkfwcf(int, const char *, int);
+__dead void usage(void);
+d48 1
+a48 1
+	while ((c = getopt(argc, argv, "cC:o:")) != -1)
+a49 3
+		case 'c':
+			docompress = 1;
+			break;
+d54 5
+d86 1
+a86 1
+__dead void
+d89 1
+a89 1
+	extern const char __progname[];
+d92 1
+a92 1
+	    "\n\t    [<directory>]\n", __progname);
+d96 1
+a96 1
+int
+d108 11
+@
+

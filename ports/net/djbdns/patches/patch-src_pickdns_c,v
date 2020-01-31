@@ -1,0 +1,73 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2016.03.26.17.29.23;	author tg;	state Exp;
+branches;
+next	;
+commitid	10056F6C535787D61F0;
+
+
+desc
+@@
+
+
+1.1
+log
+@complete overhaul of djbdns port:
+
+• merge t4/t6 flavours back into one binary
+  ‣ greatly simplify IPv6 handling, too; drop code for v6-less OSes
+• merge v4/v6 dnsroots back into one, update all of them
+• improve documentation a bit
+• apply two patches from http://www.your.org/dnscache/ (SECURITY):
+  ‣ merge identical outgoing requests
+  ‣ allow caching SOA responses
+• update to Fefe’s djbdns-1.05-test27.diff.bz2
+  ‣ fixes recursively resolving hosts behind IPv6-only nameservers;
+    spotted by Natureshadow (for Teckids’ Lunatics network) and via
+    http://serverfault.com/q/627912/189656 (which I’ll answer RSN)
+  ⚠ fix with “one second” CDB validity patch
+  ⚠ adapt for OpenBSD-style IPv6
+• drop ip6.int. reverse v6 DNS for good
+• improve dealing with mixing v4/v6 transport
+  ⇒ TODO add IP4SEND/IP6SEND support; currently; if IPSEND is v6
+    but we send to a v4 server, we use INADDR_ANY for outgoing,
+    as automatic fallback address
+@
+text
+@$MirOS$
+--- src/pickdns.c.orig	Sun Feb 11 21:11:23 2001
++++ src/pickdns.c	Sat Mar 26 17:10:07 2016
+@@@@ -20,7 +20,7 @@@@ static struct cdb c;
+ static char key[258];
+ static char data[512];
+ 
+-static int doit(char *q,char qtype[2],char ip[4])
++static int doit(char *q,char qtype[2],char ip[16])
+ {
+   int r;
+   uint32 dlen;
+@@@@ -37,7 +37,7 @@@@ static int doit(char *q,char qtype[2],ch
+   if (!flaga && !flagmx) goto REFUSE;
+ 
+   key[0] = '%';
+-  byte_copy(key + 1,4,ip);
++  byte_copy(key + 1,4,ip+12);
+ 
+   r = cdb_find(&c,key,5);
+   if (!r) r = cdb_find(&c,key,4);
+@@@@ -86,7 +86,7 @@@@ static int doit(char *q,char qtype[2],ch
+   return 1;
+ }
+ 
+-int respond(char *q,char qtype[2],char ip[4])
++int respond(char *q,char qtype[2],char ip[16])
+ {
+   int fd;
+   int result;
+@

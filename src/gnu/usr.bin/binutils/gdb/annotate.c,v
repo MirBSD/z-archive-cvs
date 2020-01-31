@@ -1,0 +1,863 @@
+head	1.1;
+branch	1.1.101;
+access;
+symbols
+	MIRBSD_10:1.1.101.2.0.4
+	MIRBSD_10_BASE:1.1.101.2
+	MIRBSD_9_BASE:1.1.101.2
+	MIRBSD_8:1.1.101.2.0.2
+	MIRBSD_8_BASE:1.1.101.2
+	binutils-20050707:1.1.101.2
+	gdb-20050107:1.1.101.1
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.02.05.00.21.05;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.02.05.00.21.05;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.05.14.16.36.43;	author tg;	state Exp;
+branches;
+next	;
+commitid	2ced428628ec0160;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* Annotation routines for GDB.
+   Copyright 1986, 1989, 1990, 1991, 1992, 1994, 1995, 1996, 1998, 1999,
+   2000 Free Software Foundation, Inc.
+
+   This file is part of GDB.
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 59 Temple Place - Suite 330,
+   Boston, MA 02111-1307, USA.  */
+
+#include "defs.h"
+#include "annotate.h"
+#include "value.h"
+#include "target.h"
+#include "gdbtypes.h"
+#include "breakpoint.h"
+
+
+/* Prototypes for local functions. */
+
+extern void _initialize_annotate (void);
+
+static void print_value_flags (struct type *);
+
+static void breakpoint_changed (struct breakpoint *);
+
+void (*deprecated_annotate_starting_hook) (void);
+void (*deprecated_annotate_stopped_hook) (void);
+void (*deprecated_annotate_signalled_hook) (void);
+void (*deprecated_annotate_signal_hook) (void);
+void (*deprecated_annotate_exited_hook) (void);
+
+static int ignore_count_changed = 0;
+
+static void
+print_value_flags (struct type *t)
+{
+  if (can_dereference (t))
+    printf_filtered ("*");
+  else
+    printf_filtered ("-");
+}
+
+void
+breakpoints_changed (void)
+{
+  if (annotation_level > 1)
+    {
+      target_terminal_ours ();
+      printf_unfiltered ("\n\032\032breakpoints-invalid\n");
+      if (ignore_count_changed)
+	ignore_count_changed = 0;	/* Avoid multiple break annotations. */
+    }
+}
+
+/* The GUI needs to be informed of ignore_count changes, but we don't
+   want to provide successive multiple breakpoints-invalid messages
+   that are all caused by the fact that the ignore count is changing
+   (which could keep the GUI very busy).  One is enough, after the
+   target actually "stops". */
+
+void
+annotate_ignore_count_change (void)
+{
+  if (annotation_level > 1)
+    ignore_count_changed = 1;
+}
+
+void
+annotate_breakpoint (int num)
+{
+  if (annotation_level > 1)
+    printf_filtered ("\n\032\032breakpoint %d\n", num);
+}
+
+void
+annotate_catchpoint (int num)
+{
+  if (annotation_level > 1)
+    printf_filtered ("\n\032\032catchpoint %d\n", num);
+}
+
+void
+annotate_watchpoint (int num)
+{
+  if (annotation_level > 1)
+    printf_filtered ("\n\032\032watchpoint %d\n", num);
+}
+
+void
+annotate_starting (void)
+{
+
+  if (deprecated_annotate_starting_hook)
+    deprecated_annotate_starting_hook ();
+  else
+    {
+      if (annotation_level > 1)
+	{
+	  printf_filtered ("\n\032\032starting\n");
+	}
+    }
+}
+
+void
+annotate_stopped (void)
+{
+  if (deprecated_annotate_stopped_hook)
+    deprecated_annotate_stopped_hook ();
+  else
+    {
+      if (annotation_level > 1)
+	printf_filtered ("\n\032\032stopped\n");
+    }
+  if (annotation_level > 1 && ignore_count_changed)
+    {
+      ignore_count_changed = 0;
+      breakpoints_changed ();
+    }
+}
+
+void
+annotate_exited (int exitstatus)
+{
+  if (deprecated_annotate_exited_hook)
+    deprecated_annotate_exited_hook ();
+  else
+    {
+      if (annotation_level > 1)
+	printf_filtered ("\n\032\032exited %d\n", exitstatus);
+    }
+}
+
+void
+annotate_signalled (void)
+{
+  if (deprecated_annotate_signalled_hook)
+    deprecated_annotate_signalled_hook ();
+
+  if (annotation_level > 1)
+    printf_filtered ("\n\032\032signalled\n");
+}
+
+void
+annotate_signal_name (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032signal-name\n");
+}
+
+void
+annotate_signal_name_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032signal-name-end\n");
+}
+
+void
+annotate_signal_string (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032signal-string\n");
+}
+
+void
+annotate_signal_string_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032signal-string-end\n");
+}
+
+void
+annotate_signal (void)
+{
+  if (deprecated_annotate_signal_hook)
+    deprecated_annotate_signal_hook ();
+
+  if (annotation_level > 1)
+    printf_filtered ("\n\032\032signal\n");
+}
+
+void
+annotate_breakpoints_headers (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032breakpoints-headers\n");
+}
+
+void
+annotate_field (int num)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032field %d\n", num);
+}
+
+void
+annotate_breakpoints_table (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032breakpoints-table\n");
+}
+
+void
+annotate_record (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032record\n");
+}
+
+void
+annotate_breakpoints_table_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032breakpoints-table-end\n");
+}
+
+void
+annotate_frames_invalid (void)
+{
+  if (annotation_level > 1)
+    {
+      target_terminal_ours ();
+      printf_unfiltered ("\n\032\032frames-invalid\n");
+    }
+}
+
+void
+annotate_field_begin (struct type *type)
+{
+  if (annotation_level == 2)
+    {
+      printf_filtered ("\n\032\032field-begin ");
+      print_value_flags (type);
+      printf_filtered ("\n");
+    }
+}
+
+void
+annotate_field_name_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032field-name-end\n");
+}
+
+void
+annotate_field_value (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032field-value\n");
+}
+
+void
+annotate_field_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032field-end\n");
+}
+
+void
+annotate_quit (void)
+{
+  if (annotation_level > 1)
+    printf_filtered ("\n\032\032quit\n");
+}
+
+void
+annotate_error (void)
+{
+  if (annotation_level > 1)
+    printf_filtered ("\n\032\032error\n");
+}
+
+void
+annotate_error_begin (void)
+{
+  if (annotation_level > 1)
+    fprintf_filtered (gdb_stderr, "\n\032\032error-begin\n");
+}
+
+void
+annotate_value_history_begin (int histindex, struct type *type)
+{
+  if (annotation_level == 2)
+    {
+      printf_filtered ("\n\032\032value-history-begin %d ", histindex);
+      print_value_flags (type);
+      printf_filtered ("\n");
+    }
+}
+
+void
+annotate_value_begin (struct type *type)
+{
+  if (annotation_level == 2)
+    {
+      printf_filtered ("\n\032\032value-begin ");
+      print_value_flags (type);
+      printf_filtered ("\n");
+    }
+}
+
+void
+annotate_value_history_value (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032value-history-value\n");
+}
+
+void
+annotate_value_history_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032value-history-end\n");
+}
+
+void
+annotate_value_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032value-end\n");
+}
+
+void
+annotate_display_begin (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032display-begin\n");
+}
+
+void
+annotate_display_number_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032display-number-end\n");
+}
+
+void
+annotate_display_format (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032display-format\n");
+}
+
+void
+annotate_display_expression (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032display-expression\n");
+}
+
+void
+annotate_display_expression_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032display-expression-end\n");
+}
+
+void
+annotate_display_value (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032display-value\n");
+}
+
+void
+annotate_display_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032display-end\n");
+}
+
+void
+annotate_arg_begin (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032arg-begin\n");
+}
+
+void
+annotate_arg_name_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032arg-name-end\n");
+}
+
+void
+annotate_arg_value (struct type *type)
+{
+  if (annotation_level == 2)
+    {
+      printf_filtered ("\n\032\032arg-value ");
+      print_value_flags (type);
+      printf_filtered ("\n");
+    }
+}
+
+void
+annotate_arg_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032arg-end\n");
+}
+
+void
+annotate_source (char *filename, int line, int character, int mid, CORE_ADDR pc)
+{
+  if (annotation_level > 1)
+    printf_filtered ("\n\032\032source ");
+  else
+    printf_filtered ("\032\032");
+
+  printf_filtered ("%s:%d:%d:%s:0x", filename,
+		   line, character,
+		   mid ? "middle" : "beg");
+  print_address_numeric (pc, 0, gdb_stdout);
+  printf_filtered ("\n");
+}
+
+void
+annotate_frame_begin (int level, CORE_ADDR pc)
+{
+  if (annotation_level == 2)
+    {
+      printf_filtered ("\n\032\032frame-begin %d 0x", level);
+      print_address_numeric (pc, 0, gdb_stdout);
+      printf_filtered ("\n");
+    }
+}
+
+void
+annotate_function_call (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032function-call\n");
+}
+
+void
+annotate_signal_handler_caller (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032signal-handler-caller\n");
+}
+
+void
+annotate_frame_address (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-address\n");
+}
+
+void
+annotate_frame_address_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-address-end\n");
+}
+
+void
+annotate_frame_function_name (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-function-name\n");
+}
+
+void
+annotate_frame_args (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-args\n");
+}
+
+void
+annotate_frame_source_begin (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-source-begin\n");
+}
+
+void
+annotate_frame_source_file (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-source-file\n");
+}
+
+void
+annotate_frame_source_file_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-source-file-end\n");
+}
+
+void
+annotate_frame_source_line (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-source-line\n");
+}
+
+void
+annotate_frame_source_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-source-end\n");
+}
+
+void
+annotate_frame_where (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-where\n");
+}
+
+void
+annotate_frame_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032frame-end\n");
+}
+
+void
+annotate_array_section_begin (int index, struct type *elttype)
+{
+  if (annotation_level == 2)
+    {
+      printf_filtered ("\n\032\032array-section-begin %d ", index);
+      print_value_flags (elttype);
+      printf_filtered ("\n");
+    }
+}
+
+void
+annotate_elt_rep (unsigned int repcount)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032elt-rep %u\n", repcount);
+}
+
+void
+annotate_elt_rep_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032elt-rep-end\n");
+}
+
+void
+annotate_elt (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032elt\n");
+}
+
+void
+annotate_array_section_end (void)
+{
+  if (annotation_level == 2)
+    printf_filtered ("\n\032\032array-section-end\n");
+}
+
+static void
+breakpoint_changed (struct breakpoint *b)
+{
+  breakpoints_changed ();
+}
+
+void
+_initialize_annotate (void)
+{
+  if (annotation_level > 1)
+    {
+      deprecated_delete_breakpoint_hook = breakpoint_changed;
+      deprecated_modify_breakpoint_hook = breakpoint_changed;
+    }
+}
+@
+
+
+1.1.101.1
+log
+@The GNU Debugger, CVS version matching binutils
+@
+text
+@@
+
+
+1.1.101.2
+log
+@The GNU Debugger, today's -current (mainline) snapshot
+Some directories removed as usual
+@
+text
+@d50 1
+a50 1
+    printf_filtered (("*"));
+d52 1
+a52 1
+    printf_filtered (("-"));
+d61 1
+a61 1
+      printf_unfiltered (("\n\032\032breakpoints-invalid\n"));
+d84 1
+a84 1
+    printf_filtered (("\n\032\032breakpoint %d\n"), num);
+d91 1
+a91 1
+    printf_filtered (("\n\032\032catchpoint %d\n"), num);
+d98 1
+a98 1
+    printf_filtered (("\n\032\032watchpoint %d\n"), num);
+d111 1
+a111 1
+	  printf_filtered (("\n\032\032starting\n"));
+d124 1
+a124 1
+	printf_filtered (("\n\032\032stopped\n"));
+d141 1
+a141 1
+	printf_filtered (("\n\032\032exited %d\n"), exitstatus);
+d152 1
+a152 1
+    printf_filtered (("\n\032\032signalled\n"));
+d159 1
+a159 1
+    printf_filtered (("\n\032\032signal-name\n"));
+d166 1
+a166 1
+    printf_filtered (("\n\032\032signal-name-end\n"));
+d173 1
+a173 1
+    printf_filtered (("\n\032\032signal-string\n"));
+d180 1
+a180 1
+    printf_filtered (("\n\032\032signal-string-end\n"));
+d190 1
+a190 1
+    printf_filtered (("\n\032\032signal\n"));
+d197 1
+a197 1
+    printf_filtered (("\n\032\032breakpoints-headers\n"));
+d204 1
+a204 1
+    printf_filtered (("\n\032\032field %d\n"), num);
+d211 1
+a211 1
+    printf_filtered (("\n\032\032breakpoints-table\n"));
+d218 1
+a218 1
+    printf_filtered (("\n\032\032record\n"));
+d225 1
+a225 1
+    printf_filtered (("\n\032\032breakpoints-table-end\n"));
+d234 1
+a234 1
+      printf_unfiltered (("\n\032\032frames-invalid\n"));
+d243 1
+a243 1
+      printf_filtered (("\n\032\032field-begin "));
+d245 1
+a245 1
+      printf_filtered (("\n"));
+d253 1
+a253 1
+    printf_filtered (("\n\032\032field-name-end\n"));
+d260 1
+a260 1
+    printf_filtered (("\n\032\032field-value\n"));
+d267 1
+a267 1
+    printf_filtered (("\n\032\032field-end\n"));
+d274 1
+a274 1
+    printf_filtered (("\n\032\032quit\n"));
+d281 1
+a281 1
+    printf_filtered (("\n\032\032error\n"));
+d296 1
+a296 1
+      printf_filtered (("\n\032\032value-history-begin %d "), histindex);
+d298 1
+a298 1
+      printf_filtered (("\n"));
+d307 1
+a307 1
+      printf_filtered (("\n\032\032value-begin "));
+d309 1
+a309 1
+      printf_filtered (("\n"));
+d317 1
+a317 1
+    printf_filtered (("\n\032\032value-history-value\n"));
+d324 1
+a324 1
+    printf_filtered (("\n\032\032value-history-end\n"));
+d331 1
+a331 1
+    printf_filtered (("\n\032\032value-end\n"));
+d338 1
+a338 1
+    printf_filtered (("\n\032\032display-begin\n"));
+d345 1
+a345 1
+    printf_filtered (("\n\032\032display-number-end\n"));
+d352 1
+a352 1
+    printf_filtered (("\n\032\032display-format\n"));
+d359 1
+a359 1
+    printf_filtered (("\n\032\032display-expression\n"));
+d366 1
+a366 1
+    printf_filtered (("\n\032\032display-expression-end\n"));
+d373 1
+a373 1
+    printf_filtered (("\n\032\032display-value\n"));
+d380 1
+a380 1
+    printf_filtered (("\n\032\032display-end\n"));
+d387 1
+a387 1
+    printf_filtered (("\n\032\032arg-begin\n"));
+d394 1
+a394 1
+    printf_filtered (("\n\032\032arg-name-end\n"));
+d402 1
+a402 1
+      printf_filtered (("\n\032\032arg-value "));
+d404 1
+a404 1
+      printf_filtered (("\n"));
+d412 1
+a412 1
+    printf_filtered (("\n\032\032arg-end\n"));
+d419 1
+a419 1
+    printf_filtered (("\n\032\032source "));
+d421 1
+a421 1
+    printf_filtered (("\032\032"));
+d423 1
+a423 1
+  printf_filtered (("%s:%d:%d:%s:0x"), filename,
+d426 2
+a427 2
+  deprecated_print_address_numeric (pc, 0, gdb_stdout);
+  printf_filtered (("\n"));
+d435 3
+a437 3
+      printf_filtered (("\n\032\032frame-begin %d 0x"), level);
+      deprecated_print_address_numeric (pc, 0, gdb_stdout);
+      printf_filtered (("\n"));
+d445 1
+a445 1
+    printf_filtered (("\n\032\032function-call\n"));
+d452 1
+a452 1
+    printf_filtered (("\n\032\032signal-handler-caller\n"));
+d459 1
+a459 1
+    printf_filtered (("\n\032\032frame-address\n"));
+d466 1
+a466 1
+    printf_filtered (("\n\032\032frame-address-end\n"));
+d473 1
+a473 1
+    printf_filtered (("\n\032\032frame-function-name\n"));
+d480 1
+a480 1
+    printf_filtered (("\n\032\032frame-args\n"));
+d487 1
+a487 1
+    printf_filtered (("\n\032\032frame-source-begin\n"));
+d494 1
+a494 1
+    printf_filtered (("\n\032\032frame-source-file\n"));
+d501 1
+a501 1
+    printf_filtered (("\n\032\032frame-source-file-end\n"));
+d508 1
+a508 1
+    printf_filtered (("\n\032\032frame-source-line\n"));
+d515 1
+a515 1
+    printf_filtered (("\n\032\032frame-source-end\n"));
+d522 1
+a522 1
+    printf_filtered (("\n\032\032frame-where\n"));
+d529 1
+a529 1
+    printf_filtered (("\n\032\032frame-end\n"));
+d537 1
+a537 1
+      printf_filtered (("\n\032\032array-section-begin %d "), index);
+d539 1
+a539 1
+      printf_filtered (("\n"));
+d547 1
+a547 1
+    printf_filtered (("\n\032\032elt-rep %u\n"), repcount);
+d554 1
+a554 1
+    printf_filtered (("\n\032\032elt-rep-end\n"));
+d561 1
+a561 1
+    printf_filtered (("\n\032\032elt\n"));
+d568 1
+a568 1
+    printf_filtered (("\n\032\032array-section-end\n"));
+@
+

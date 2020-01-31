@@ -1,0 +1,352 @@
+head	1.6;
+access;
+symbols
+	zlib-1_2_8:1.1.117.2
+	MIRBSD_10:1.1.117.1.0.2
+	MIRBSD_10_BASE:1.1.117.1
+	zlib-1_2_3:1.1.117.1
+	libz:1.1.117;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2013.08.06.17.13.06;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10052012E9F67D27FA9;
+
+1.5
+date	2013.08.05.21.27.34;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520018AA4F2BDEB7;
+
+1.4
+date	2008.08.01.15.43.04;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10048932F1A59DCFB2A;
+
+1.3
+date	2008.08.01.14.59.58;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100489324F4472E9C7F;
+
+1.2
+date	2008.08.01.13.46.10;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100489313B0766D4103;
+
+1.1
+date	2007.02.06.20.09.46;	author tg;	state Exp;
+branches
+	1.1.117.1;
+next	;
+commitid	10045C8E09012013E61;
+
+1.1.117.1
+date	2007.02.06.20.09.46;	author tg;	state Exp;
+branches;
+next	1.1.117.2;
+commitid	10045C8E09012013E61;
+
+1.1.117.2
+date	2013.08.05.19.24.25;	author tg;	state Exp;
+branches;
+next	;
+commitid	10051FFFBFC7B2E5803;
+
+
+desc
+@@
+
+
+1.6
+log
+@bootloader (-DSMALL) doesn’t deflate nor compile zutil.c
+so it’s fine to move that stuff back to inflate code only
+@
+text
+@/* $MirOS$ */
+
+#ifdef SMALL
+ZEXTERN const char zERRMSG[];
+#define zSETSMSG(x)	strm->msg = zERRMSG
+#else
+#define zSETSMSG(x)	strm->msg = x
+#endif
+
+/* inflate.h -- internal inflate state definition
+ * Copyright (C) 1995-2009 Mark Adler
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ */
+
+/* WARNING: this file should *not* be used by applications. It is
+   part of the implementation of the compression library and is
+   subject to change. Applications should only use zlib.h.
+ */
+
+/* define NO_GZIP when compiling if you want to disable gzip header and
+   trailer decoding by inflate().  NO_GZIP would be used to avoid linking in
+   the crc code when it is not needed.  For shared libraries, gzip decoding
+   should be left enabled. */
+#ifndef NO_GZIP
+#  define GUNZIP
+#endif
+
+/* Possible inflate modes between inflate() calls */
+typedef enum {
+    HEAD,       /* i: waiting for magic header */
+    FLAGS,      /* i: waiting for method and flags (gzip) */
+    TIME,       /* i: waiting for modification time (gzip) */
+    OS,         /* i: waiting for extra flags and operating system (gzip) */
+    EXLEN,      /* i: waiting for extra length (gzip) */
+    EXTRA,      /* i: waiting for extra bytes (gzip) */
+    NAME,       /* i: waiting for end of file name (gzip) */
+    COMMENT,    /* i: waiting for end of comment (gzip) */
+    HCRC,       /* i: waiting for header crc (gzip) */
+    DICTID,     /* i: waiting for dictionary check value */
+    DICT,       /* waiting for inflateSetDictionary() call */
+        TYPE,       /* i: waiting for type bits, including last-flag bit */
+        TYPEDO,     /* i: same, but skip check to exit inflate on new block */
+        STORED,     /* i: waiting for stored size (length and complement) */
+        COPY_,      /* i/o: same as COPY below, but only first time in */
+        COPY,       /* i/o: waiting for input or output to copy stored block */
+        TABLE,      /* i: waiting for dynamic block table lengths */
+        LENLENS,    /* i: waiting for code length code lengths */
+        CODELENS,   /* i: waiting for length/lit and distance code lengths */
+            LEN_,       /* i: same as LEN below, but only first time in */
+            LEN,        /* i: waiting for length/lit/eob code */
+            LENEXT,     /* i: waiting for length extra bits */
+            DIST,       /* i: waiting for distance code */
+            DISTEXT,    /* i: waiting for distance extra bits */
+            MATCH,      /* o: waiting for output space to copy string */
+            LIT,        /* o: waiting for output space to write literal */
+    CHECK,      /* i: waiting for 32-bit check value */
+    LENGTH,     /* i: waiting for 32-bit length (gzip) */
+    DONE,       /* finished check, done -- remain here until reset */
+    BAD,        /* got a data error -- remain here until reset */
+    MEM,        /* got an inflate() memory error -- remain here until reset */
+    SYNC        /* looking for synchronization bytes to restart inflate() */
+} inflate_mode;
+
+/*
+    State transitions between above modes -
+
+    (most modes can go to BAD or MEM on error -- not shown for clarity)
+
+    Process header:
+        HEAD -> (gzip) or (zlib) or (raw)
+        (gzip) -> FLAGS -> TIME -> OS -> EXLEN -> EXTRA -> NAME -> COMMENT ->
+                  HCRC -> TYPE
+        (zlib) -> DICTID or TYPE
+        DICTID -> DICT -> TYPE
+        (raw) -> TYPEDO
+    Read deflate blocks:
+            TYPE -> TYPEDO -> STORED or TABLE or LEN_ or CHECK
+            STORED -> COPY_ -> COPY -> TYPE
+            TABLE -> LENLENS -> CODELENS -> LEN_
+            LEN_ -> LEN
+    Read deflate codes in fixed or dynamic block:
+                LEN -> LENEXT or LIT or TYPE
+                LENEXT -> DIST -> DISTEXT -> MATCH -> LEN
+                LIT -> LEN
+    Process trailer:
+        CHECK -> LENGTH -> DONE
+ */
+
+/* state maintained between inflate() calls.  Approximately 10K bytes. */
+struct inflate_state {
+    inflate_mode mode;          /* current inflate mode */
+    int last;                   /* true if processing last block */
+    int wrap;                   /* bit 0 true for zlib, bit 1 true for gzip */
+    int havedict;               /* true if dictionary provided */
+    int flags;                  /* gzip header method and flags (0 if zlib) */
+    unsigned dmax;              /* zlib header max distance (INFLATE_STRICT) */
+    unsigned long check;        /* protected copy of check value */
+    unsigned long total;        /* protected copy of output count */
+    gz_headerp head;            /* where to save gzip header information */
+        /* sliding window */
+    unsigned wbits;             /* log base 2 of requested window size */
+    unsigned wsize;             /* window size or zero if not using window */
+    unsigned whave;             /* valid bytes in the window */
+    unsigned wnext;             /* window write index */
+    unsigned char FAR *window;  /* allocated sliding window, if needed */
+        /* bit accumulator */
+    unsigned long hold;         /* input bit accumulator */
+    unsigned bits;              /* number of bits in "in" */
+        /* for string and stored block copying */
+    unsigned length;            /* literal or length of data to copy */
+    unsigned offset;            /* distance back to copy string from */
+        /* for table and code decoding */
+    unsigned extra;             /* extra bits needed */
+        /* fixed and dynamic code tables */
+    code const FAR *lencode;    /* starting table for length/literal codes */
+    code const FAR *distcode;   /* starting table for distance codes */
+    unsigned lenbits;           /* index bits for lencode */
+    unsigned distbits;          /* index bits for distcode */
+        /* dynamic table building */
+    unsigned ncode;             /* number of code length code lengths */
+    unsigned nlen;              /* number of length code lengths */
+    unsigned ndist;             /* number of distance code lengths */
+    unsigned have;              /* number of code lengths in lens[] */
+    code FAR *next;             /* next available space in codes[] */
+    unsigned short lens[320];   /* temporary storage for code lengths */
+    unsigned short work[288];   /* work area for code table building */
+    code codes[ENOUGH];         /* space for code tables */
+    int sane;                   /* if false, allow invalid distance too far */
+    int back;                   /* bits back of last unprocessed length/lit */
+    unsigned was;               /* initial length of match */
+};
+@
+
+
+1.5
+log
+@begin updating zlib
+
+XXX ZCONST is gone, check the tree for it
+XXX textproc/libxml* need updates, says zlib upstream
+@
+text
+@d1 9
+@
+
+
+1.4
+log
+@make bootloader-able
+@
+text
+@a0 2
+/* $MirOS: src/kern/z/inflate.h,v 1.3 2008/08/01 14:59:58 tg Exp $ */
+
+d2 1
+a2 1
+ * Copyright (C) 1995-2004 Mark Adler
+d35 1
+d40 2
+a41 1
+            LEN,        /* i: waiting for length/lit code */
+d58 1
+a58 1
+    (most modes can go to the BAD or MEM mode -- not shown for clarity)
+d61 3
+a63 3
+        HEAD -> (gzip) or (zlib)
+        (gzip) -> FLAGS -> TIME -> OS -> EXLEN -> EXTRA -> NAME
+        NAME -> COMMENT -> HCRC -> TYPE
+d66 1
+d68 5
+a72 4
+            TYPE -> STORED or TABLE or LEN or CHECK
+            STORED -> COPY -> TYPE
+            TABLE -> LENLENS -> CODELENS -> LEN
+    Read deflate codes:
+d80 1
+a80 1
+/* state maintained between inflate() calls.  Approximately 7K bytes. */
+d95 1
+a95 1
+    unsigned write;             /* window write index */
+d119 3
+a122 7
+
+#ifdef SMALL
+ZEXTERN ZCONST char zERRMSG[];
+#define zSETSMSG(x)	strm->msg = zERRMSG
+#else
+#define zSETSMSG(x)	strm->msg = (ZCONST char *)x
+#endif
+@
+
+
+1.3
+log
+@merge functionality from src/lib/libz/ and __CRAZY cleanliness; fix build
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/inflate.h,v 1.2 2008/08/01 13:46:10 tg Exp $ */
+d120 1
+a120 1
+ZEXTERN ZCONST char zERRMSG[] = "error";
+@
+
+
+1.2
+log
+@RCS ID and include police
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d118 7
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+@
+
+
+1.1.117.1
+log
+@Import the necessary parts of current zlib distribution and some of their docs
+@
+text
+@@
+
+
+1.1.117.2
+log
+@update zlib
+@
+text
+@d2 1
+a2 1
+ * Copyright (C) 1995-2009 Mark Adler
+a34 1
+        COPY_,      /* i/o: same as COPY below, but only first time in */
+d39 1
+a39 2
+            LEN_,       /* i: same as LEN below, but only first time in */
+            LEN,        /* i: waiting for length/lit/eob code */
+d56 1
+a56 1
+    (most modes can go to BAD or MEM on error -- not shown for clarity)
+d59 3
+a61 3
+        HEAD -> (gzip) or (zlib) or (raw)
+        (gzip) -> FLAGS -> TIME -> OS -> EXLEN -> EXTRA -> NAME -> COMMENT ->
+                  HCRC -> TYPE
+a63 1
+        (raw) -> TYPEDO
+d65 4
+a68 5
+            TYPE -> TYPEDO -> STORED or TABLE or LEN_ or CHECK
+            STORED -> COPY_ -> COPY -> TYPE
+            TABLE -> LENLENS -> CODELENS -> LEN_
+            LEN_ -> LEN
+    Read deflate codes in fixed or dynamic block:
+d76 1
+a76 1
+/* state maintained between inflate() calls.  Approximately 10K bytes. */
+d91 1
+a91 1
+    unsigned wnext;             /* window write index */
+a114 3
+    int sane;                   /* if false, allow invalid distance too far */
+    int back;                   /* bits back of last unprocessed length/lit */
+    unsigned was;               /* initial length of match */
+@
+

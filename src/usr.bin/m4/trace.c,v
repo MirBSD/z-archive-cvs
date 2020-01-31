@@ -1,0 +1,386 @@
+head	1.4;
+access;
+symbols
+	cvs-200911172100:1.1.1.3
+	cvs-200908101645:1.1.1.3
+	cvs-200810051545:1.1.1.3
+	MIRBSD_10:1.1.1.3.0.2
+	MIRBSD_10_BASE:1.1.1.3
+	OPENBSD_4_0:1.1.1.3
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	cvs-200504170300:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2016.10.22.21.25.20;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100580BD95570B7AB60;
+
+1.3
+date	2009.11.22.14.39.59;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004B094D4B2DC70993;
+
+1.2
+date	2009.11.21.21.24.17;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004B085A9138025CCC;
+
+1.1
+date	2005.02.05.17.29.42;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.42;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.17.03.31.27;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2006.09.20.19.06.52;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045119150397FC669;
+
+
+desc
+@@
+
+
+1.4
+log
+@make __CRAZY=Yes ready
+@
+text
+@/* $OpenBSD: trace.c,v 1.15 2006/03/24 08:03:44 espie Exp $ */
+/*
+ * Copyright (c) 2001 Marc Espie.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE OPENBSD PROJECT AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OPENBSD
+ * PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <err.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "mdef.h"
+#include "stdd.h"
+#include "extern.h"
+
+__RCSID("$MirOS: src/usr.bin/m4/trace.c,v 1.3 2009/11/22 14:39:59 tg Exp $");
+
+FILE *traceout;
+
+#define TRACE_ARGS 	1
+#define TRACE_EXPANSION 2
+#define TRACE_QUOTE	4
+#define TRACE_FILENAME	8
+#define TRACE_LINENO	16
+#define TRACE_CONT	32
+#define TRACE_ID	64
+#define TRACE_NEWFILE	128	/* not implemented yet */
+#define TRACE_INPUT	256	/* not implemented yet */
+
+static unsigned int letter_to_flag(int);
+static void print_header(struct input_file *);
+static int frame_level(void);
+
+
+unsigned int trace_flags = TRACE_QUOTE | TRACE_EXPANSION;
+
+void
+trace_file(const char *name)
+{
+
+	if (traceout && traceout != stderr)
+		fclose(traceout);
+	traceout = fopen(name, "w");
+	if (!traceout)
+		err(1, "can't open %s", name);
+}
+
+static unsigned int
+letter_to_flag(int c)
+{
+	switch(c) {
+	case 'a':
+		return TRACE_ARGS;
+	case 'e':
+		return TRACE_EXPANSION;
+	case 'q':
+		return TRACE_QUOTE;
+	case 'c':
+		return TRACE_CONT;
+	case 'x':
+		return TRACE_ID;
+	case 'f':
+		return TRACE_FILENAME;
+	case 'l':
+		return TRACE_LINENO;
+	case 'p':
+		return TRACE_NEWFILE;
+	case 'i':
+		return TRACE_INPUT;
+	case 't':
+		return TRACE_ALL;
+	case 'V':
+		return ~0;
+	default:
+		return 0;
+	}
+}
+
+void
+set_trace_flags(const char *s)
+{
+	char mode = 0;
+	unsigned int f = 0;
+
+	if (*s == '+' || *s == '-')
+		mode = *s++;
+	while (*s)
+		f |= letter_to_flag(*s++);
+	switch(mode) {
+	case 0:
+		trace_flags = f;
+		break;
+	case '+':
+		trace_flags |= f;
+		break;
+	case '-':
+		trace_flags &= ~f;
+		break;
+	}
+}
+
+static int
+frame_level(void)
+{
+	int level;
+	int framep;
+
+	for (framep = fp, level = 0; framep != 0; 
+		level++,framep = mstack[framep-3].sfra)
+		;
+	return level;
+}
+
+static void
+print_header(struct input_file *inp)
+{
+	fprintf(traceout, "m4trace:");
+	if (trace_flags & TRACE_FILENAME)
+		fprintf(traceout, "%s:", inp->name);
+	if (trace_flags & TRACE_LINENO)
+		fprintf(traceout, "%lu:", TOKEN_LINE(inp));
+	fprintf(traceout, " -%d- ", frame_level());
+	if (trace_flags & TRACE_ID)
+		fprintf(traceout, "id %lu: ", expansion_id);
+}
+
+size_t 
+trace(const char *argv[], int argc, struct input_file *inp)
+{
+	if (!traceout)
+		traceout = stderr;
+	print_header(inp);
+	if (trace_flags & TRACE_CONT) {
+		fprintf(traceout, "%s ...\n", argv[1]);
+		print_header(inp);
+	}
+	fprintf(traceout, "%s", argv[1]);
+	if ((trace_flags & TRACE_ARGS) && argc > 2) {
+		char delim[3];
+		int i;
+
+		delim[0] = LPAREN;
+		delim[1] = EOS;
+		for (i = 2; i < argc; i++) {
+			fprintf(traceout, "%s%s%s%s", delim, 
+			    (trace_flags & TRACE_QUOTE) ? lquote : "", 
+			    argv[i], 
+			    (trace_flags & TRACE_QUOTE) ? rquote : "");
+			delim[0] = COMMA;
+			delim[1] = ' ';
+			delim[2] = EOS;
+		}
+		fprintf(traceout, "%c", RPAREN);
+	}
+	if (trace_flags & TRACE_CONT) {
+		fprintf(traceout, " -> ???\n");
+		print_header(inp);
+		fprintf(traceout, argc > 2 ? "%s(...)" : "%s", argv[1]);
+	}
+	if (trace_flags & TRACE_EXPANSION)
+		return buffer_mark();
+	else {
+		fprintf(traceout, "\n");
+		return SIZE_MAX;
+	}
+}
+
+void 
+finish_trace(size_t mark)
+{
+	fprintf(traceout, " -> ");
+	if (trace_flags & TRACE_QUOTE)
+		fprintf(traceout, "%s", lquote);
+	dump_buffer(traceout, mark);
+	if (trace_flags & TRACE_QUOTE)
+		fprintf(traceout, "%s", rquote);
+	fprintf(traceout, "\n");
+}
+@
+
+
+1.3
+log
+@fix another line number problem with our m4(1)
+@
+text
+@d36 1
+a36 1
+__RCSID("$MirOS: src/usr.bin/m4/trace.c,v 1.2 2009/11/21 21:24:17 tg Exp $");
+d123 1
+a123 1
+frame_level()
+@
+
+
+1.2
+log
+@fix trace lineno output for 'macro\n'
+@
+text
+@d36 1
+a36 1
+__RCSID("$MirOS$");
+d141 1
+a141 2
+		fprintf(traceout, "%lu:", inp->lineno -
+		    ((bp > bufbase && bp[-1] == '\n') ? 1 : 0));
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: trace.c,v 1.10 2003/06/30 22:13:33 espie Exp $ */
+d27 1
+a27 1
+#include <sys/types.h>
+d29 1
+a30 1
+#include <err.h>
+d36 3
+a38 1
+FILE *traceout = stderr;
+a51 1
+static struct t *find_trace_entry(const char *);
+d61 1
+a61 1
+	if (traceout != stderr)
+d141 2
+a142 1
+		fprintf(traceout, "%lu:", inp->lineno);
+d148 1
+a148 1
+ssize_t 
+d151 2
+d185 1
+a185 1
+		return -1;
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@some more updates/fixes from obsd
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: trace.c,v 1.12 2005/01/21 19:11:02 espie Exp $ */
+d36 1
+a36 1
+FILE *traceout;
+d50 1
+d60 1
+a60 1
+	if (traceout && traceout != stderr)
+a148 2
+	if (!traceout)
+		traceout = stderr;
+@
+
+
+1.1.1.3
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: trace.c,v 1.15 2006/03/24 08:03:44 espie Exp $ */
+d27 1
+a27 1
+#include <err.h>
+a28 1
+#include <stdint.h>
+d30 1
+d145 1
+a145 1
+size_t 
+d182 1
+a182 1
+		return SIZE_MAX;
+@
+
+

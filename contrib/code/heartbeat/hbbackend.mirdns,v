@@ -1,0 +1,392 @@
+head	1.10;
+access;
+symbols
+	mirbsd:1.1.7;
+locks; strict;
+comment	@# @;
+
+
+1.10
+date	2006.03.29.01.33.28;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004429E3F72F54F2E2;
+
+1.9
+date	2006.03.29.01.32.08;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004429E39748B28C8F;
+
+1.8
+date	2006.03.20.02.11.59;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	100441E0F82147F1237;
+
+1.7
+date	2006.03.20.01.27.06;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100441E04F53B5BB339;
+
+1.6
+date	2006.03.20.01.13.26;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100441E01CD17236D63;
+
+1.5
+date	2006.03.20.00.23.31;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100441DF603719BE462;
+
+1.4
+date	2005.12.20.00.49.35;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10043A755255BF8F564;
+
+1.3
+date	2005.12.17.05.46.07;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10043A3A3E65E20A413;
+
+1.2
+date	2005.05.25.23.50.29;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	715c42950f4ccef2;
+
+1.1
+date	2005.02.05.02.36.15;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.02.05.02.36.15;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.10
+log
+@sync all+dist action between both scripts
+@
+text
+@#!/bin/mksh
+# $MirOS: contrib/code/heartbeat/hbbackend.mirdns,v 1.9 2006/03/29 01:32:08 tg Exp $
+#-
+# Copyright (c) 2006
+#	Thorsten Glaser <tg@@mirbsd.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+# Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+# express, or implied, to the maximum extent permitted by applicable
+# law, without malicious intent or gross negligence; in no event may
+# licensor, an author or contributor be held liable for any indirect
+# or other damage, or direct damage except proven a consequence of a
+# direct error of said person and intended use of this work, loss or
+# other issues arising in any way out of its use, even if advised of
+# the possibility of such damage or existence of a nontrivial bug.
+#-
+# This MirOS hbServer backend operates MirDNS #3 on DJB tinydns with
+# DJB and BIND slaves.
+
+myuser=
+mypass=
+mystat=DOWN
+mydown=
+let thecookie=0
+
+tinydns=/service/tinymaster/root
+
+function triggerdown
+{
+	trap 'exit 0' USR1
+	sleep 202 & wait %sleep
+	s="DISABLE TUNNEL $myuser nothing $(date +%s)"
+	sc="$s $mypass"
+	sp="$s $(print -nr -- $sc | md5)"
+	print -n -- "${sp}\0" | nc -4nuw0 127.0.0.1 3740
+	print -r -- timeout, disabling $myuser | logger -t mirdnsd
+}
+
+function do_heartbeat
+{
+	state=$1
+	if [[ -n $mydown ]]; then
+		kill -USR1 $mydown
+		mydown=
+	fi
+	chstate $state
+	triggerdown &
+	mydown=$!
+	mystat=UP
+}
+
+function do_idle
+{
+	[[ $mystat = UP ]] || return
+	if [[ -n $mydown ]]; then
+		kill -USR1 $mydown
+		mydown=
+	fi
+	triggerdown &
+	mydown=$!
+}
+
+function do_down
+{
+	if [[ -n $mydown ]]; then
+		kill -USR1 $mydown
+		mydown=
+	fi
+	chstate DOWN
+	mystat=DOWN
+}
+
+function chstate
+{
+	state=$1
+	case $state {
+	DOWN)
+		dns_write 0.0.0.0
+		;;
+	IP*)
+		dns_write ${state#IP}
+		;;
+	QUIT)
+		# nothing, for now
+		;;
+	*)
+		# invalid state
+		;;
+	}
+}
+
+function dns_write
+{
+	print $1 >$tinydns/U-$myuser.txt
+	if (( thecookie )); then
+		print -n ACTION CALL $thecookie MirDNSv3 $myuser \
+		    | nc -4nuw0 127.0.0.1 3740
+	else
+		# ensure this doesn't take more than a second or so
+		./make.sh all dist
+	fi
+}
+
+function do_quit
+{
+	[[ $mystat = UP ]] && do_down
+	chstate QUIT
+	exit 0
+}
+
+
+while read line; do
+	case $line {
+	DOWN)
+		do_down
+		;;
+	IDLE)
+		do_idle
+		;;
+	INIT*)
+		set -A foo -- $line
+		myuser=${foo[1]}
+		mypass=${foo[2]}
+		;;
+	IP*)
+		do_heartbeat $line
+		;;
+	PASS)
+		set -A foo -- $line
+		mypass=${foo[1]}
+		;;
+	SETCOOKIE*)
+		set -A foo -- $line
+		let thecookie=${foo[1]}
+		;;
+	QUIT)
+		do_quit
+		;;
+	}
+done
+do_quit
+@
+
+
+1.9
+log
+@'exit' aborts the whole programme, but we want to use
+'return' which only exits(sic!) the function.
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.mirdns,v 1.8 2006/03/20 02:11:59 tg Exp $
+d109 2
+a110 2
+		mksh $tinydns/make.sh
+		mksh $tinydns/distribute.sh &
+@
+
+
+1.8
+log
+@get rid of do_dnsup, do it in dns_write
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.mirdns,v 1.7 2006/03/20 01:27:06 tg Exp $
+d64 1
+a64 1
+	[[ $mystat = UP ]] || exit
+@
+
+
+1.7
+log
+@move do_dnsup call into dns_write
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.mirdns,v 1.6 2006/03/20 01:13:26 tg Exp $
+a104 5
+	do_dnsup &
+}
+
+function do_dnsup
+{
+@
+
+
+1.6
+log
+@oops, no newline...
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.mirdns,v 1.5 2006/03/20 00:23:31 tg Exp $
+a59 1
+	do_dnsup &
+d105 1
+@
+
+
+1.5
+log
+@use the action script framework in MirDNS v3
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.6 2006/01/24 22:24:02 tg Rel $
+d111 1
+a111 1
+		print ACTION CALL $thecookie MirDNSv3 $myuser \
+@
+
+
+1.4
+log
+@while I see it: ksh -> mksh
+they're a) out of date and b) no longer used tho
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.mirdns,v 1.3 2005/12/17 05:46:07 tg Exp $
+d4 2
+a5 2
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+d27 2
+a28 1
+# This MirOS hbServer backend operates MirDNS #2 on DJB tinydns.
+d34 1
+d110 7
+a116 2
+	mksh $tinydns/make.sh
+	mksh $tinydns/distribute.sh &
+d147 4
+@
+
+
+1.3
+log
+@big fat licence update (I left some which are bsiegert@@'s alone though)
+also, remove licence boilerplate from some .h files who don't deserve it
+and remove and add some advertising clauses because I say so
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.mirdns,v 1.2 2005/05/25 23:50:29 tg Exp $
+d108 2
+a109 2
+	ksh $tinydns/make.sh
+	ksh $tinydns/distribute.sh &
+@
+
+
+1.2
+log
+@mksh is pretty mature; switch most of contrib/ to it
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.mirdns,v 1.1.7.1 2005/02/05 02:36:15 tg Exp $
+d18 8
+a25 7
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+a2 2
+#!/bin/ksh
+# $MirOS$
+@
+
+
+1.1.7.1
+log
+@All the code in the contributed section
+@
+text
+@@

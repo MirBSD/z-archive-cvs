@@ -1,0 +1,608 @@
+head	1.20;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.20
+date	2017.04.24.21.24.05;	author tg;	state Exp;
+branches;
+next	1.19;
+commitid	10058FE6D0C026C8FE7;
+
+1.19
+date	2017.04.24.21.23.46;	author tg;	state Exp;
+branches;
+next	1.18;
+commitid	10058FE6CF97419A4D7;
+
+1.18
+date	2017.04.24.21.20.40;	author tg;	state Exp;
+branches;
+next	1.17;
+commitid	10058FE6C3E2A5633D3;
+
+1.17
+date	2017.04.24.21.19.59;	author tg;	state Exp;
+branches;
+next	1.16;
+commitid	10058FE6C1043D53938;
+
+1.16
+date	2017.04.24.21.19.10;	author tg;	state Exp;
+branches;
+next	1.15;
+commitid	10058FE6BDF10D5EE20;
+
+1.15
+date	2011.10.22.21.36.57;	author tg;	state Exp;
+branches;
+next	1.14;
+commitid	1004EA33783041752F4;
+
+1.14
+date	2009.11.22.22.22.58;	author tg;	state Exp;
+branches;
+next	1.13;
+commitid	1004B09B9D7684EE75E;
+
+1.13
+date	2009.11.22.22.20.21;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	1004B09B93B0D36C5B1;
+
+1.12
+date	2008.08.05.06.07.32;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	1004897EE14797653E9;
+
+1.11
+date	2008.07.03.17.24.31;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	100486D0B5B4793FDFD;
+
+1.10
+date	2007.11.18.21.58.46;	author bsiegert;	state Exp;
+branches;
+next	1.9;
+commitid	1004740B5AD00016555;
+
+1.9
+date	2007.11.18.21.56.22;	author bsiegert;	state Exp;
+branches;
+next	1.8;
+commitid	1004740B51D00016490;
+
+1.8
+date	2007.11.18.21.52.49;	author bsiegert;	state Exp;
+branches;
+next	1.7;
+commitid	1004740B44900016392;
+
+1.7
+date	2006.01.14.01.29.41;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10043C8540B77BC63EA;
+
+1.6
+date	2005.12.15.01.57.44;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10043A0CD900728D29D;
+
+1.5
+date	2005.12.06.23.26.09;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	315143961e1b0c56;
+
+1.4
+date	2005.12.06.00.33.53;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	6f274394dc7f5b91;
+
+1.3
+date	2005.12.06.00.31.54;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	2f7f4394dc0bc090;
+
+1.2
+date	2005.12.06.00.29.59;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	e174394db940dc6;
+
+1.1
+date	2005.12.05.21.25.09;	author tg;	state Exp;
+branches;
+next	;
+commitid	49854394b01a7fd0;
+
+
+desc
+@@
+
+
+1.20
+log
+@fix one newline too much
+@
+text
+@#!/usr/bin/env mksh
+# $MirOS: CVSROOT/genlog,v 1.17 2017/04/24 21:19:59 tg Exp $
+#-
+# Copyright (c) 2004, 2005, 2006, 2009, 2017
+#	Thorsten Glaser <tg@@mirbsd.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un-
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person's immediate fault when using the work as intended.
+#-
+# Check if log file is larger than a certain size, if yes, rename it
+# (locked); do the same for the history file.
+# Then append stdin to log file.
+#
+# Note: the aging works like this: foo.00 foo.01 ... foo.38 foo
+# The next rotation would rename foo into foo.39 and open a new foo,
+# which means files are only accessible with the number once complete.
+# This may be subject to change.
+
+export LC_ALL=C
+unset LANGUAGE
+
+stdin=$(unexpand -a; echo x)
+stdin=${stdin%x}
+
+if stat --help >/dev/null 2>&1; then
+	statcmd='stat -c %s'	# GNU stat
+else
+	statcmd='stat -f %z'	# BSD stat (or so we assume)
+fi
+
+f=${1:-ChangeLog}
+h=${2:-${f%ChangeLog}history}
+
+[[ $f = $h ]] && h=history
+
+if [[ -e $h.lock ]]; then
+	print '[genlog] sleeping 3 seconds in history'
+	sleep 3
+fi
+if [[ -e $h.lock ]]; then
+	print '[genlog] removing stale lock in history'
+	rm -f $h.lock
+fi
+print '[ continued ]' >$h.lock
+
+if [[ -e $h ]]; then
+	let s=$($statcmd $h)
+else
+	let s=0
+fi
+
+if (( s >= (362496 - 512) )); then
+	typeset -ui16 t=16#100
+	while [[ -e $h.${t#16#1} ]]; do
+		let t++
+		(( t == 16#200 )) && let t=16#1100
+	done
+	mv $h $h.${t#16#1}
+	if [[ -e $h.lock ]]; then
+		typeset -ui16 dt=$(date +%s)
+		print "%${dt#16#}|$USER|.|CVSROOT|continuing|$h.${t#16#1}" \
+		    >$h.lock
+		if [[ -e $h ]]; then
+			print '[genlog] danger, history appeared'
+		else
+			mv $h.lock $h
+		fi
+	else
+		:>>$h
+		print '[genlog] danger, lock vanished in history'
+	fi
+	chmod 664 $h
+	ls -l $h{,.${t#16#1}}
+fi
+
+rm -f $h.lock
+
+if [[ -e $f.lock ]]; then
+	print '[genlog] sleeping 3 seconds'
+	sleep 3
+fi
+if [[ -e $f.lock ]]; then
+	print '[genlog] removing stale lock'
+	rm -f $f.lock
+fi
+# strlen is 14 including trailing newline
+print '[ continued ]' >$f.lock
+
+if [[ -e $f ]]; then
+	let s=$($statcmd $f)
+else
+	let s=0
+fi
+
+# the 14 from above
+if (( s >= (730112 - ${#stdin} - 14) )); then
+	typeset -ui16 t=16#100
+	while [[ -e $f.${t#16#1} ]]; do
+		let t++
+		(( t == 16#200 )) && let t=16#1100
+	done
+	mv $f $f.${t#16#1}
+	if [[ -e $f.lock ]]; then
+		cat $f.lock >>$f.${t#16#1}
+		print "[ continuing from $f.${t#16#1} ]\n" >$f.lock
+		if [[ -e $f ]]; then
+			print '[genlog] danger, clog appeared'
+		else
+			mv $f.lock $f
+			typeset -ui16 dt=$(date +%s)
+			print "%${dt#16#}|$USER|.|Logs|rotated:old|$f" >>$h
+		fi
+	else
+		:>>$f
+		print '[genlog] danger, lock vanished'
+	fi
+	chmod 664 $f
+	typeset -ui16 dt=$(date +%s)
+	print "%${dt#16#}|$USER|.|Logs|rotated:new|$f.${t#16#1}" >>$h
+	ls -l $f{,.${t#16#1}}
+fi
+
+rm -f $f.lock
+
+print -nr -- "$stdin" >>$f
+exit 0
+@
+
+
+1.19
+log
+@more elaborate calculation
+@
+text
+@d137 1
+a137 1
+print -r -- "$stdin" >>$f
+@
+
+
+1.18
+log
+@we use chmod 664 now, never 666
+@
+text
+@d98 1
+d107 2
+a108 1
+if (( s >= (730112 - ${#stdin}) )); then
+@
+
+
+1.17
+log
+@subtract the real estimated log size, not a fixed value
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.14 2009/11/22 22:22:58 tg Exp $
+d84 1
+a84 1
+	chmod 666 $h
+@
+
+
+1.16
+log
+@get stdin early; no behavioural change (yet)
+@
+text
+@d106 1
+a106 1
+if (( s >= (730112 - 512) )); then
+@
+
+
+1.15
+log
+@document in comments some current shortcomings to be addressed soonish
+@
+text
+@d4 1
+a4 1
+# Copyright (c) 2004, 2005, 2006, 2009
+d34 3
+d135 1
+a135 1
+unexpand -a >>$f
+@
+
+
+1.14
+log
+@while here, cleanup
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $
+d25 5
+@
+
+
+1.13
+log
+@use stat(1)
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.12 2008/08/05 06:07:32 tg Exp $
+d4 2
+a5 2
+# Copyright (c) 2004, 2005, 2006
+#	Thorsten "mirabilos" Glaser <tg@@mirbsd.de>
+d65 2
+a66 1
+		print "%${dt#16#}|$USER|.|CVSROOT|continuing|$h.${t#16#1}" >$h.lock
+d73 1
+a73 1
+		print -n >>$h
+d77 1
+a77 1
+	/bin/ls -l $h{,.${t#16#1}}
+d116 1
+a116 1
+		print -n >>$f
+d122 1
+a122 1
+	/bin/ls -l $f{,.${t#16#1}}
+@
+
+
+1.12
+log
+@• set locale to "C" for !MirBSD
+• better warnings for the case of not finding the process group
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.11 2008/07/03 17:24:31 tg Exp $
+d29 6
+d51 1
+a51 2
+	set -A o -- $(/bin/ls -l $h)
+	let s=${o[4]}
+d92 1
+a92 2
+	set -A o -- $(/bin/ls -l $f)
+	let s=${o[4]}
+@
+
+
+1.11
+log
+@more licence updates and style improvements
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.10 2007/11/18 21:58:46 bsiegert Exp $
+d26 3
+@
+
+
+1.10
+log
+@Remove traces, hopefully everything runs now
+@
+text
+@d1 2
+a2 2
+#!/bin/mksh
+# $MirOS: CVSROOT/genlog,v 1.9 2007-11-18 21:56:22 bsiegert Exp $
+d5 1
+a5 1
+#	Thorsten "mirabile" Glaser <tg@@mirbsd.de>
+d7 5
+a11 6
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+d13 8
+a20 12
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+# Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+# express, or implied, to the maximum extent permitted by applicable
+# law, without malicious intent or gross negligence; in no event may
+# licensor, an author or contributor be held liable for any indirect
+# or other damage, or direct damage except proven a consequence of a
+# direct error of said person and intended use of this work, loss or
+# other issues arising in any way out of its use, even if advised of
+# the possibility of such damage or existence of a nontrivial bug.
+@
+
+
+1.9
+log
+@s/print/echo/ might fix some errors on hephaistos
+
+print is, ooddly enough, claimed by mailcap utils.
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.8 2007-11-18 21:52:49 bsiegert Exp $
+a30 2
+print genlog $*
+
+d44 1
+a44 1
+echo '[ continued ]' >$h.lock
+@
+
+
+1.8
+log
+@Add trace for genlog script
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.7 2006-01-14 01:29:41 tg Exp $
+d46 1
+a46 1
+print '[ continued ]' >$h.lock
+@
+
+
+1.7
+log
+@save space in ChangeLog files: use unexpand(1) -a
+(no added fork because we save a cat(1) invocation)
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.6 2005/12/15 01:57:44 tg Exp $
+d31 2
+@
+
+
+1.6
+log
+@* Unify my eMail address over all scripts
+  (I use the mirbsd.de as they end up on herc; everyone else
+   may use mirbsd.org or 66h.42h.de as they end up on thor.)
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.5 2005/12/06 23:26:09 tg Exp $
+d4 1
+a4 1
+# Copyright (c) 2004, 2005
+d124 1
+a124 1
+cat >>$f
+@
+
+
+1.5
+log
+@use $h instead of deriving history from ChangeLog path again(!)
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.4 2005/12/06 00:33:53 tg Exp $
+d5 1
+a5 1
+#	Thorsten "mirabile" Glaser <tg@@MirBSD.org>
+@
+
+
+1.4
+log
+@correctly tag ChangeLog rotations in the history file
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.3 2005/12/06 00:31:54 tg Exp $
+d110 1
+a110 2
+			print "%${dt#16#}|$USER|.|Logs|rotated:old|$f" \
+			    >>${f%/*}/history
+d118 1
+a118 2
+	print "%${dt#16#}|$USER|.|Logs|rotated:new|$f.${t#16#1}" \
+	    >>${f%/*}/history
+@
+
+
+1.3
+log
+@sync comments with reality
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.2 2005/12/06 00:29:59 tg Exp $
+d110 1
+a110 1
+			print "%${dt#16#}|$USER|.|CVSROOT|rotated:old|$f" \
+d119 1
+a119 1
+	print "%${dt#16#}|$USER|.|CVSROOT|rotated:new|$f.${t#16#1}" \
+@
+
+
+1.2
+log
+@move ChangeLog files to /cvs/Logs/ to keep them apart
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/genlog,v 1.1 2005/12/05 21:25:09 tg Exp $
+d27 2
+a28 1
+# Check if log file >= 1 MiB (IEC 60027-2), if yes, rename (locked).
+@
+
+
+1.1
+log
+@rename the files a bit (to clean the attic which moves into ocvs):
+* commit_prep2	-> tracker
+* log_accum2	-> mklogci
+* log_write2	-> genlog
+* tag_accum2	-> mklogtag
+@
+text
+@d2 1
+a2 1
+# $MirOS: CVSROOT/log_write2,v 1.4 2005/07/01 18:40:59 tg Exp $
+d18 8
+a25 7
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+d31 1
+a31 1
+h=${f%ChangeLog}history
+@
+

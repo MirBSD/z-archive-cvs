@@ -1,0 +1,1339 @@
+head	1.4;
+access;
+symbols
+	cvs-201210191930:1.1.1.6
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	cvs-200705171630:1.1.1.5
+	cvs-200702051630:1.1.1.5
+	MIRBSD_9_BASE:1.1.1.4
+	MIRBSD_8:1.1.1.4.0.2
+	MIRBSD_8_BASE:1.1.1.4
+	cvs-200507211800:1.1.1.4
+	cvs-200505050030:1.1.1.3
+	cvs-200504291700:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2014.03.12.23.45.11;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005320F19F6D6A9E6E;
+
+1.3
+date	2012.10.19.19.58.19;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005081B0E54727ACCA;
+
+1.2
+date	2007.05.17.17.15.35;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100464C8DC46A1A51B5;
+
+1.1
+date	2005.02.05.17.25.14;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.14;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.29.17.05.23;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2005.05.05.00.32.58;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	48e9427969c07d49;
+
+1.1.1.4
+date	2005.07.21.20.53.52;	author tg;	state Exp;
+branches;
+next	1.1.1.5;
+commitid	560042e0092f571e;
+
+1.1.1.5
+date	2007.02.05.16.38.52;	author tg;	state Exp;
+branches;
+next	1.1.1.6;
+commitid	10045C75DA6486B10AC;
+
+1.1.1.6
+date	2012.10.19.19.33.47;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005081AB336FC5E505;
+
+
+desc
+@@
+
+
+1.4
+log
+@eek! use arc4random_uniform()!
+@
+text
+@/*	$OpenBSD: poll.c,v 1.15 2010/04/21 20:02:40 nicm Exp $	*/
+
+/*
+ * Copyright 2000-2003 Niels Provos <provos@@citi.umich.edu>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
+#include <sys/types.h>
+#ifdef HAVE_SYS_TIME_H
+#include <sys/time.h>
+#else
+#include <sys/_libevent_time.h>
+#endif
+#include <sys/queue.h>
+#include <poll.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#ifdef CHECK_INVARIANTS
+#include <assert.h>
+#endif
+
+#include "event.h"
+#include "event-internal.h"
+#include "evsignal.h"
+#include "log.h"
+
+__RCSID("$MirOS$");
+
+struct pollop {
+	int event_count;		/* Highest number alloc */
+	int nfds;                       /* Size of event_* */
+	int fd_count;                   /* Size of idxplus1_by_fd */
+	struct pollfd *event_set;
+	struct event **event_r_back;
+	struct event **event_w_back;
+	int *idxplus1_by_fd; /* Index into event_set by fd; we add 1 so
+			      * that 0 (which is easy to memset) can mean
+			      * "no entry." */
+};
+
+static void *poll_init	(struct event_base *);
+static int poll_add		(void *, struct event *);
+static int poll_del		(void *, struct event *);
+static int poll_dispatch	(struct event_base *, void *, struct timeval *);
+static void poll_dealloc	(struct event_base *, void *);
+
+const struct eventop pollops = {
+	"poll",
+	poll_init,
+	poll_add,
+	poll_del,
+	poll_dispatch,
+	poll_dealloc,
+    0
+};
+
+static void *
+poll_init(struct event_base *base)
+{
+	struct pollop *pollop;
+
+	/* Disable poll when this environment variable is set */
+	if (evutil_getenv("EVENT_NOPOLL"))
+		return (NULL);
+
+	if (!(pollop = calloc(1, sizeof(struct pollop))))
+		return (NULL);
+
+	evsignal_init(base);
+
+	return (pollop);
+}
+
+#ifdef CHECK_INVARIANTS
+static void
+poll_check_ok(struct pollop *pop)
+{
+	int i, idx;
+	struct event *ev;
+
+	for (i = 0; i < pop->fd_count; ++i) {
+		idx = pop->idxplus1_by_fd[i]-1;
+		if (idx < 0)
+			continue;
+		assert(pop->event_set[idx].fd == i);
+		if (pop->event_set[idx].events & POLLIN) {
+			ev = pop->event_r_back[idx];
+			assert(ev);
+			assert(ev->ev_events & EV_READ);
+			assert(ev->ev_fd == i);
+		}
+		if (pop->event_set[idx].events & POLLOUT) {
+			ev = pop->event_w_back[idx];
+			assert(ev);
+			assert(ev->ev_events & EV_WRITE);
+			assert(ev->ev_fd == i);
+		}
+	}
+	for (i = 0; i < pop->nfds; ++i) {
+		struct pollfd *pfd = &pop->event_set[i];
+		assert(pop->idxplus1_by_fd[pfd->fd] == i+1);
+	}
+}
+#else
+#define poll_check_ok(pop)
+#endif
+
+static int
+poll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
+{
+	int res, i, j, msec = -1, nfds;
+	struct pollop *pop = arg;
+
+	poll_check_ok(pop);
+
+	if (tv != NULL)
+		msec = tv->tv_sec * 1000 + (tv->tv_usec + 999) / 1000;
+
+	nfds = pop->nfds;
+	res = poll(pop->event_set, nfds, msec);
+
+	if (res == -1) {
+		if (errno != EINTR) {
+                        event_warn("poll");
+			return (-1);
+		}
+
+		evsignal_process(base);
+		return (0);
+	} else if (base->sig.evsignal_caught) {
+		evsignal_process(base);
+	}
+
+	event_debug(("%s: poll reports %d", __func__, res));
+
+	if (res == 0 || nfds == 0)
+		return (0);
+
+	i = arc4random_uniform(nfds);
+	for (j = 0; j < nfds; j++) {
+		struct event *r_ev = NULL, *w_ev = NULL;
+		int what;
+		if (++i == nfds)
+			i = 0;
+		what = pop->event_set[i].revents;
+
+		if (!what)
+			continue;
+
+		res = 0;
+
+		/* If the file gets closed notify */
+		if (what & (POLLHUP|POLLERR))
+			what |= POLLIN|POLLOUT;
+		if (what & POLLIN) {
+			res |= EV_READ;
+			r_ev = pop->event_r_back[i];
+		}
+		if (what & POLLOUT) {
+			res |= EV_WRITE;
+			w_ev = pop->event_w_back[i];
+		}
+		if (res == 0)
+			continue;
+
+		if (r_ev && (res & r_ev->ev_events)) {
+			event_active(r_ev, res & r_ev->ev_events, 1);
+		}
+		if (w_ev && w_ev != r_ev && (res & w_ev->ev_events)) {
+			event_active(w_ev, res & w_ev->ev_events, 1);
+		}
+	}
+
+	return (0);
+}
+
+static int
+poll_add(void *arg, struct event *ev)
+{
+	struct pollop *pop = arg;
+	struct pollfd *pfd = NULL;
+	int i;
+
+	if (ev->ev_events & EV_SIGNAL)
+		return (evsignal_add(ev));
+	if (!(ev->ev_events & (EV_READ|EV_WRITE)))
+		return (0);
+
+	poll_check_ok(pop);
+	if (pop->nfds + 1 >= pop->event_count) {
+		struct pollfd *tmp_event_set;
+		struct event **tmp_event_r_back;
+		struct event **tmp_event_w_back;
+		int tmp_event_count;
+
+		if (pop->event_count < 32)
+			tmp_event_count = 32;
+		else
+			tmp_event_count = pop->event_count * 2;
+
+		/* We need more file descriptors */
+		tmp_event_set = realloc(pop->event_set,
+				 tmp_event_count * sizeof(struct pollfd));
+		if (tmp_event_set == NULL) {
+			event_warn("realloc");
+			return (-1);
+		}
+		pop->event_set = tmp_event_set;
+
+		tmp_event_r_back = realloc(pop->event_r_back,
+			    tmp_event_count * sizeof(struct event *));
+		if (tmp_event_r_back == NULL) {
+			/* event_set overallocated; that's okay. */
+			event_warn("realloc");
+			return (-1);
+		}
+		pop->event_r_back = tmp_event_r_back;
+
+		tmp_event_w_back = realloc(pop->event_w_back,
+			    tmp_event_count * sizeof(struct event *));
+		if (tmp_event_w_back == NULL) {
+			/* event_set and event_r_back overallocated; that's
+			 * okay. */
+			event_warn("realloc");
+			return (-1);
+		}
+		pop->event_w_back = tmp_event_w_back;
+
+		pop->event_count = tmp_event_count;
+	}
+	if (ev->ev_fd >= pop->fd_count) {
+		int *tmp_idxplus1_by_fd;
+		int new_count;
+		if (pop->fd_count < 32)
+			new_count = 32;
+		else
+			new_count = pop->fd_count * 2;
+		while (new_count <= ev->ev_fd)
+			new_count *= 2;
+		tmp_idxplus1_by_fd =
+			realloc(pop->idxplus1_by_fd, new_count * sizeof(int));
+		if (tmp_idxplus1_by_fd == NULL) {
+			event_warn("realloc");
+			return (-1);
+		}
+		pop->idxplus1_by_fd = tmp_idxplus1_by_fd;
+		memset(pop->idxplus1_by_fd + pop->fd_count,
+		       0, sizeof(int)*(new_count - pop->fd_count));
+		pop->fd_count = new_count;
+	}
+
+	i = pop->idxplus1_by_fd[ev->ev_fd] - 1;
+	if (i >= 0) {
+		pfd = &pop->event_set[i];
+	} else {
+		i = pop->nfds++;
+		pfd = &pop->event_set[i];
+		pfd->events = 0;
+		pfd->fd = ev->ev_fd;
+		pop->event_w_back[i] = pop->event_r_back[i] = NULL;
+		pop->idxplus1_by_fd[ev->ev_fd] = i + 1;
+	}
+
+	pfd->revents = 0;
+	if (ev->ev_events & EV_WRITE) {
+		pfd->events |= POLLOUT;
+		pop->event_w_back[i] = ev;
+	}
+	if (ev->ev_events & EV_READ) {
+		pfd->events |= POLLIN;
+		pop->event_r_back[i] = ev;
+	}
+	poll_check_ok(pop);
+
+	return (0);
+}
+
+/*
+ * Nothing to be done here.
+ */
+
+static int
+poll_del(void *arg, struct event *ev)
+{
+	struct pollop *pop = arg;
+	struct pollfd *pfd = NULL;
+	int i;
+
+	if (ev->ev_events & EV_SIGNAL)
+		return (evsignal_del(ev));
+
+	if (!(ev->ev_events & (EV_READ|EV_WRITE)))
+		return (0);
+
+	poll_check_ok(pop);
+	i = pop->idxplus1_by_fd[ev->ev_fd] - 1;
+	if (i < 0)
+		return (-1);
+
+	/* Do we still want to read or write? */
+	pfd = &pop->event_set[i];
+	if (ev->ev_events & EV_READ) {
+		pfd->events &= ~POLLIN;
+		pop->event_r_back[i] = NULL;
+	}
+	if (ev->ev_events & EV_WRITE) {
+		pfd->events &= ~POLLOUT;
+		pop->event_w_back[i] = NULL;
+	}
+	poll_check_ok(pop);
+	if (pfd->events)
+		/* Another event cares about that fd. */
+		return (0);
+
+	/* Okay, so we aren't interested in that fd anymore. */
+	pop->idxplus1_by_fd[ev->ev_fd] = 0;
+
+	--pop->nfds;
+	if (i != pop->nfds) {
+		/* 
+		 * Shift the last pollfd down into the now-unoccupied
+		 * position.
+		 */
+		memcpy(&pop->event_set[i], &pop->event_set[pop->nfds],
+		       sizeof(struct pollfd));
+		pop->event_r_back[i] = pop->event_r_back[pop->nfds];
+		pop->event_w_back[i] = pop->event_w_back[pop->nfds];
+		pop->idxplus1_by_fd[pop->event_set[i].fd] = i + 1;
+	}
+
+	poll_check_ok(pop);
+	return (0);
+}
+
+static void
+poll_dealloc(struct event_base *base, void *arg)
+{
+	struct pollop *pop = arg;
+
+	evsignal_dealloc(base);
+	if (pop->event_set)
+		free(pop->event_set);
+	if (pop->event_r_back)
+		free(pop->event_r_back);
+	if (pop->event_w_back)
+		free(pop->event_w_back);
+	if (pop->idxplus1_by_fd)
+		free(pop->idxplus1_by_fd);
+
+	memset(pop, 0, sizeof(struct pollop));
+	free(pop);
+}
+@
+
+
+1.3
+log
+@merge latest stable-1.4 libevent
+@
+text
+@d56 2
+d168 1
+a168 1
+	i = random() % nfds;
+@
+
+
+1.2
+log
+@__CRAZY=Yes clean, fixes a few real bugs
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: poll.c,v 1.13 2006/11/26 15:24:34 brad Exp $	*/
+d37 1
+a37 1
+#include <sys/_time.h>
+a39 1
+#include <sys/tree.h>
+a55 4
+__RCSID("$MirOS$");
+
+extern volatile sig_atomic_t evsignal_caught;
+
+a65 1
+	sigset_t evsigmask;
+d68 5
+a72 6
+void *poll_init	(void);
+int poll_add		(void *, struct event *);
+int poll_del		(void *, struct event *);
+int poll_recalc		(struct event_base *, void *, int);
+int poll_dispatch	(struct event_base *, void *, struct timeval *);
+void poll_dealloc	(void *);
+a78 1
+	poll_recalc,
+d80 2
+a81 1
+	poll_dealloc
+d84 2
+a85 2
+void *
+poll_init(void)
+d90 1
+a90 1
+	if (!issetugid() && getenv("EVENT_NOPOLL"))
+d96 1
+a96 1
+	evsignal_init(&pollop->evsigmask);
+a100 14
+/*
+ * Called with the highest fd that we know about.  If it is 0, completely
+ * recalculate everything.
+ */
+
+int
+poll_recalc(struct event_base *base __attribute__((unused)),
+    void *arg, int max __attribute__((unused)))
+{
+	struct pollop *pop = arg;
+
+	return (evsignal_recalc(&pop->evsigmask));
+}
+
+d135 2
+a136 3
+int
+poll_dispatch(struct event_base *base __attribute__((unused)),
+    void *arg, struct timeval *tv)
+d138 1
+a138 1
+	int res, i, sec, nfds;
+d141 4
+a144 2
+	if (evsignal_deliver(&pop->evsigmask) == -1)
+		return (-1);
+a145 2
+	poll_check_ok(pop);
+	sec = tv->tv_sec * 1000 + (tv->tv_usec + 999) / 1000;
+d147 1
+a147 4
+	res = poll(pop->event_set, nfds, sec);
+
+	if (evsignal_recalc(&pop->evsigmask) == -1)
+		return (-1);
+d155 1
+a155 1
+		evsignal_process();
+d157 3
+a159 2
+	} else if (evsignal_caught)
+		evsignal_process();
+d163 1
+a163 1
+	if (res == 0)
+d166 2
+a167 2
+	for (i = 0; i < nfds; i++) {
+		int what = pop->event_set[i].revents;
+d169 4
+a193 2
+			if (!(r_ev->ev_events & EV_PERSIST))
+				event_del(r_ev);
+a196 2
+			if (!(w_ev->ev_events & EV_PERSIST))
+				event_del(w_ev);
+d204 1
+a204 1
+int
+d212 1
+a212 1
+		return (evsignal_add(&pop->evsigmask, ev));
+d309 1
+a309 1
+int
+d317 1
+a317 1
+		return (evsignal_del(&pop->evsigmask, ev));
+d347 1
+a347 1
+		/*
+d362 2
+a363 2
+void
+poll_dealloc(void *arg)
+d367 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: poll.c,v 1.3 2004/04/28 06:53:12 brad Exp $	*/
+d40 1
+d48 2
+a49 7
+#include <err.h>
+
+#ifdef USE_LOG
+#include "log.h"
+#else
+#define LOG_DBG(x)
+#define log_error(x)	perror(x)
+d53 1
+d55 1
+d57 1
+a57 1
+extern struct event_list eventqueue;
+d63 2
+d66 5
+a70 1
+	struct event **event_back;
+d72 1
+a72 1
+} pollop;
+d77 3
+a79 2
+int poll_recalc	(void *, int);
+int poll_dispatch	(void *, struct timeval *);
+d81 1
+a81 1
+struct eventop pollops = {
+d87 2
+a88 1
+	poll_dispatch
+d94 3
+a96 1
+	/* Disable kqueue when this environment variable is set */
+d100 2
+a101 1
+	memset(&pollop, 0, sizeof(pollop));
+d103 1
+a103 1
+	evsignal_init(&pollop.evsigmask);
+d105 1
+a105 1
+	return (&pollop);
+d114 2
+a115 1
+poll_recalc(void *arg, int max)
+d122 3
+a124 2
+int
+poll_dispatch(void *arg, struct timeval *tv)
+d126 1
+a126 1
+	int res, i, count, sec, nfds;
+a127 1
+	struct pollop *pop = arg;
+d129 16
+a144 44
+	count = pop->event_count;
+	nfds = 0;
+	TAILQ_FOREACH(ev, &eventqueue, ev_next) {
+		if (nfds + 1 >= count) {
+			if (count < 32)
+				count = 32;
+			else
+				count *= 2;
+
+			/* We need more file descriptors */
+			pop->event_set = realloc(pop->event_set,
+			    count * sizeof(struct pollfd));
+			if (pop->event_set == NULL) {
+				log_error("realloc");
+				return (-1);
+			}
+			pop->event_back = realloc(pop->event_back,
+			    count * sizeof(struct event *));
+			if (pop->event_back == NULL) {
+				log_error("realloc");
+				return (-1);
+			}
+			pop->event_count = count;
+		}
+		if (ev->ev_events & EV_WRITE) {
+			struct pollfd *pfd = &pop->event_set[nfds];
+			pfd->fd = ev->ev_fd;
+			pfd->events = POLLOUT;
+			pfd->revents = 0;
+
+			pop->event_back[nfds] = ev;
+
+			nfds++;
+		}
+		if (ev->ev_events & EV_READ) {
+			struct pollfd *pfd = &pop->event_set[nfds];
+
+			pfd->fd = ev->ev_fd;
+			pfd->events = POLLIN;
+			pfd->revents = 0;
+
+			pop->event_back[nfds] = ev;
+
+			nfds++;
+d147 15
+d166 3
+a168 1
+	sec = tv->tv_sec * 1000 + tv->tv_usec / 1000;
+d176 1
+a176 1
+			log_error("poll");
+d185 1
+a185 1
+	LOG_DBG((LOG_MISC, 80, "%s: poll reports %d", __func__, res));
+d191 6
+a196 2
+                int what = pop->event_set[i].revents;
+		
+d200 1
+a200 1
+		if (what & POLLHUP)
+d202 1
+a202 3
+                if (what & POLLERR) 
+                        what |= POLLIN|POLLOUT;
+		if (what & POLLIN)
+d204 3
+a206 1
+		if (what & POLLOUT)
+d208 2
+d213 10
+a222 8
+		ev = pop->event_back[i];
+		res &= ev->ev_events;
+
+		if (res) {
+			if (!(ev->ev_events & EV_PERSIST))
+				event_del(ev);
+			event_active(ev, res, 1);
+		}	
+d232 2
+d237 88
+d337 5
+d343 1
+a343 1
+	if (!(ev->ev_events & EV_SIGNAL))
+d346 56
+a401 1
+	return (evsignal_del(&pop->evsigmask, ev));
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@improve my Frankenstein OS (*wink* you know who you are) further
+sans wchar_t of course
+
+this is the essence of reading >1200 commit messages which suck
+due to not having the new format of ours...
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: poll.c,v 1.6 2005/04/22 00:56:25 brad Exp $	*/
+a39 1
+#include <sys/tree.h>
+d47 8
+a56 1
+#include "event-internal.h"
+d58 2
+a59 1
+#include "log.h"
+d68 1
+a68 1
+};
+d73 2
+a74 2
+int poll_recalc		(struct event_base *, void *, int);
+int poll_dispatch	(struct event_base *, void *, struct timeval *);
+a87 2
+	struct pollop *pollop;
+
+d92 1
+a92 2
+	if (!(pollop = calloc(1, sizeof(struct pollop))))
+		return (NULL);
+d94 1
+a94 1
+	evsignal_init(&pollop->evsigmask);
+d96 1
+a96 1
+	return (pollop);
+d105 1
+a105 1
+poll_recalc(struct event_base *base, void *arg, int max)
+d113 1
+a113 1
+poll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
+d121 1
+a121 1
+	TAILQ_FOREACH(ev, &base->eventqueue, ev_next) {
+d132 1
+a132 1
+                                event_warn("realloc");
+d138 1
+a138 1
+				event_warn("realloc");
+d169 1
+a169 1
+	sec = tv->tv_sec * 1000 + (tv->tv_usec + 999) / 1000;
+d177 1
+a177 1
+                        event_warn("poll");
+d186 1
+a186 1
+	event_debug(("%s: poll reports %d", __func__, res));
+@
+
+
+1.1.1.3
+log
+@latest fixes
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: poll.c,v 1.7 2005/05/04 03:17:48 brad Exp $	*/
+a57 1
+	int fd_count;                   /* Size of idxplus1_by_fd */
+d59 1
+a59 5
+	struct event **event_r_back;
+	struct event **event_w_back;
+	int *idxplus1_by_fd; /* Index into event_set by fd; we add 1 so
+			      * that 0 (which is easy to memset) can mean
+			      * "no entry." */
+d111 1
+a111 1
+	int res, i, count, fd_count, sec, nfds;
+a113 1
+	int *idxplus1_by_fd;
+a115 3
+	fd_count = pop->fd_count;
+	idxplus1_by_fd = pop->idxplus1_by_fd;
+	memset(idxplus1_by_fd, 0, sizeof(int)*fd_count);
+a116 1
+
+a117 1
+		struct pollfd *pfd = NULL;
+d131 1
+a131 3
+			pop->event_r_back = realloc(pop->event_r_back,
+			    count * sizeof(struct event *));
+			pop->event_w_back = realloc(pop->event_w_back,
+d133 1
+a133 2
+			if (pop->event_r_back == NULL ||
+			    pop->event_w_back == NULL) {
+a138 31
+		if (!(ev->ev_events & (EV_READ|EV_WRITE)))
+			continue;
+		if (ev->ev_fd >= fd_count) {
+			int new_count;
+			if (fd_count < 32)
+				new_count = 32;
+			else
+				new_count = fd_count * 2;
+			while (new_count <= ev->ev_fd)
+				new_count *= 2;
+			idxplus1_by_fd = pop->idxplus1_by_fd =
+			  realloc(pop->idxplus1_by_fd, new_count*sizeof(int));
+			if (idxplus1_by_fd == NULL) {
+				event_warn("realloc");
+				return (-1);
+			}
+			memset(pop->idxplus1_by_fd + fd_count,
+			       0, sizeof(int)*(new_count-fd_count));
+			fd_count = pop->fd_count = new_count;
+		}
+		i = idxplus1_by_fd[ev->ev_fd] - 1;
+		if (i >= 0) {
+			pfd = &pop->event_set[i];
+		} else {
+			i = nfds++;
+			pfd = &pop->event_set[i];
+			pop->event_w_back[i] = pop->event_r_back[i] = NULL;
+			pfd->events = 0;
+			idxplus1_by_fd[ev->ev_fd] = i + 1;
+		}
+
+d140 1
+d142 1
+a142 1
+			pfd->events |= POLLOUT;
+d145 3
+a147 1
+			pop->event_w_back[i] = ev;
+d150 2
+d153 1
+a153 1
+			pfd->events |= POLLIN;
+d156 3
+a158 1
+			pop->event_r_back[i] = ev;
+d188 2
+a189 3
+		int what = pop->event_set[i].revents;
+		struct event *r_ev = NULL, *w_ev = NULL;
+
+d197 1
+a197 1
+		if (what & POLLIN) {
+d199 1
+a199 3
+			r_ev = pop->event_r_back[i];
+		}
+		if (what & POLLOUT) {
+a200 2
+			w_ev = pop->event_w_back[i];
+		}
+d204 8
+a211 10
+		if (r_ev && (res & r_ev->ev_events)) {
+			if (!(r_ev->ev_events & EV_PERSIST))
+				event_del(r_ev);
+			event_active(r_ev, res & r_ev->ev_events, 1);
+		}
+		if (w_ev && w_ev != r_ev && (res & w_ev->ev_events)) {
+			if (!(w_ev->ev_events & EV_PERSIST))
+				event_del(w_ev);
+			event_active(w_ev, res & w_ev->ev_events, 1);
+		}
+@
+
+
+1.1.1.4
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: poll.c,v 1.10 2005/07/02 07:15:13 grunk Exp $	*/
+a47 3
+#ifdef CHECK_INVARIANTS
+#include <assert.h>
+#endif
+a57 1
+	int nfds;                       /* Size of event_* */
+d88 1
+a88 1
+	/* Disable poll when this environment variable is set */
+d113 2
+a114 3
+#ifdef CHECK_INVARIANTS
+static void
+poll_check_ok(struct pollop *pop)
+d116 1
+a116 1
+	int i, idx;
+d118 2
+d121 33
+a153 3
+	for (i = 0; i < pop->fd_count; ++i) {
+		idx = pop->idxplus1_by_fd[i]-1;
+		if (idx < 0)
+d155 27
+a181 6
+		assert(pop->event_set[idx].fd == i);
+		if (pop->event_set[idx].events & POLLIN) {
+			ev = pop->event_r_back[idx];
+			assert(ev);
+			assert(ev->ev_events & EV_READ);
+			assert(ev->ev_fd == i);
+d183 14
+a196 5
+		if (pop->event_set[idx].events & POLLOUT) {
+			ev = pop->event_w_back[idx];
+			assert(ev);
+			assert(ev->ev_events & EV_WRITE);
+			assert(ev->ev_fd == i);
+a198 14
+	for (i = 0; i < pop->nfds; ++i) {
+		struct pollfd *pfd = &pop->event_set[i];
+		assert(pop->idxplus1_by_fd[pfd->fd] == i+1);
+	}
+}
+#else
+#define poll_check_ok(pop)
+#endif
+
+int
+poll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
+{
+	int res, i, sec, nfds;
+	struct pollop *pop = arg;
+a202 1
+	poll_check_ok(pop);
+a203 1
+	nfds = pop->nfds;
+a228 3
+		if (!what)
+			continue;
+
+d232 1
+a232 1
+		if (what & (POLLHUP|POLLERR))
+d234 2
+a265 2
+	struct pollfd *pfd = NULL;
+	int i;
+a268 68
+	if (!(ev->ev_events & (EV_READ|EV_WRITE)))
+		return (0);
+
+	poll_check_ok(pop);
+	if (pop->nfds + 1 >= pop->event_count) {
+		if (pop->event_count < 32)
+			pop->event_count = 32;
+		else
+			pop->event_count *= 2;
+
+		/* We need more file descriptors */
+		pop->event_set = realloc(pop->event_set,
+				 pop->event_count * sizeof(struct pollfd));
+		if (pop->event_set == NULL) {
+			event_warn("realloc");
+			return (-1);
+		}
+		pop->event_r_back = realloc(pop->event_r_back,
+			    pop->event_count * sizeof(struct event *));
+		pop->event_w_back = realloc(pop->event_w_back,
+			    pop->event_count * sizeof(struct event *));
+		if (pop->event_r_back == NULL ||
+		    pop->event_w_back == NULL) {
+			event_warn("realloc");
+			return (-1);
+		}
+	}
+	if (ev->ev_fd >= pop->fd_count) {
+		int new_count;
+		if (pop->fd_count < 32)
+			new_count = 32;
+		else
+			new_count = pop->fd_count * 2;
+		while (new_count <= ev->ev_fd)
+			new_count *= 2;
+		pop->idxplus1_by_fd =
+			realloc(pop->idxplus1_by_fd, new_count*sizeof(int));
+		if (pop->idxplus1_by_fd == NULL) {
+			event_warn("realloc");
+			return (-1);
+		}
+		memset(pop->idxplus1_by_fd + pop->fd_count,
+		       0, sizeof(int)*(new_count - pop->fd_count));
+		pop->fd_count = new_count;
+	}
+
+	i = pop->idxplus1_by_fd[ev->ev_fd] - 1;
+	if (i >= 0) {
+		pfd = &pop->event_set[i];
+	} else {
+		i = pop->nfds++;
+		pfd = &pop->event_set[i];
+		pfd->events = 0;
+		pfd->fd = ev->ev_fd;
+		pop->event_w_back[i] = pop->event_r_back[i] = NULL;
+		pop->idxplus1_by_fd[ev->ev_fd] = i + 1;
+	}
+
+	pfd->revents = 0;
+	if (ev->ev_events & EV_WRITE) {
+		pfd->events |= POLLOUT;
+		pop->event_w_back[i] = ev;
+	}
+	if (ev->ev_events & EV_READ) {
+		pfd->events |= POLLIN;
+		pop->event_r_back[i] = ev;
+	}
+	poll_check_ok(pop);
+a280 2
+	struct pollfd *pfd = NULL;
+	int i;
+d282 1
+a282 24
+	if (ev->ev_events & EV_SIGNAL)
+		return (evsignal_del(&pop->evsigmask, ev));
+
+	if (!(ev->ev_events & (EV_READ|EV_WRITE)))
+		return (0);
+
+	poll_check_ok(pop);
+	i = pop->idxplus1_by_fd[ev->ev_fd] - 1;
+	if (i < 0)
+		return (-1);
+
+	/* Do we still want to read or write? */
+	pfd = &pop->event_set[i];
+	if (ev->ev_events & EV_READ) {
+		pfd->events &= ~POLLIN;
+		pop->event_r_back[i] = NULL;
+	}
+	if (ev->ev_events & EV_WRITE) {
+		pfd->events &= ~POLLOUT;
+		pop->event_w_back[i] = NULL;
+	}
+	poll_check_ok(pop);
+	if (pfd->events)
+		/* Another event cares about that fd. */
+d285 1
+a285 18
+	/* Okay, so we aren't interested in that fd anymore. */
+	pop->idxplus1_by_fd[ev->ev_fd] = 0;
+
+	--pop->nfds;
+	if (i != pop->nfds) {
+		/*
+		 * Shift the last pollfd down into the now-unoccupied
+		 * position.
+		 */
+		memcpy(&pop->event_set[i], &pop->event_set[pop->nfds],
+		       sizeof(struct pollfd));
+		pop->event_r_back[i] = pop->event_r_back[pop->nfds];
+		pop->event_w_back[i] = pop->event_w_back[pop->nfds];
+		pop->idxplus1_by_fd[pop->event_set[i].fd] = i + 1;
+	}
+
+	poll_check_ok(pop);
+	return (0);
+@
+
+
+1.1.1.5
+log
+@Import libevent 1.1b+fixes from OpenBSD-current, thanks
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: poll.c,v 1.13 2006/11/26 15:24:34 brad Exp $	*/
+a76 1
+void poll_dealloc	(void *);
+d78 1
+a78 1
+const struct eventop pollops = {
+d84 1
+a84 2
+	poll_dispatch,
+	poll_dealloc
+a235 5
+		struct pollfd *tmp_event_set;
+		struct event **tmp_event_r_back;
+		struct event **tmp_event_w_back;
+		int tmp_event_count;
+
+d237 1
+a237 1
+			tmp_event_count = 32;
+d239 1
+a239 1
+			tmp_event_count = pop->event_count * 2;
+d242 3
+a244 3
+		tmp_event_set = realloc(pop->event_set,
+				 tmp_event_count * sizeof(struct pollfd));
+		if (tmp_event_set == NULL) {
+d248 6
+a253 6
+		pop->event_set = tmp_event_set;
+
+		tmp_event_r_back = realloc(pop->event_r_back,
+			    tmp_event_count * sizeof(struct event *));
+		if (tmp_event_r_back == NULL) {
+			/* event_set overallocated; that's okay. */
+a256 13
+		pop->event_r_back = tmp_event_r_back;
+
+		tmp_event_w_back = realloc(pop->event_w_back,
+			    tmp_event_count * sizeof(struct event *));
+		if (tmp_event_w_back == NULL) {
+			/* event_set and event_r_back overallocated; that's
+			 * okay. */
+			event_warn("realloc");
+			return (-1);
+		}
+		pop->event_w_back = tmp_event_w_back;
+
+		pop->event_count = tmp_event_count;
+a258 1
+		int *tmp_idxplus1_by_fd;
+d266 3
+a268 3
+		tmp_idxplus1_by_fd =
+			realloc(pop->idxplus1_by_fd, new_count * sizeof(int));
+		if (tmp_idxplus1_by_fd == NULL) {
+a271 1
+		pop->idxplus1_by_fd = tmp_idxplus1_by_fd;
+a358 18
+
+void
+poll_dealloc(void *arg)
+{
+	struct pollop *pop = arg;
+
+	if (pop->event_set)
+		free(pop->event_set);
+	if (pop->event_r_back)
+		free(pop->event_r_back);
+	if (pop->event_w_back)
+		free(pop->event_w_back);
+	if (pop->idxplus1_by_fd)
+		free(pop->idxplus1_by_fd);
+
+	memset(pop, 0, sizeof(struct pollop));
+	free(pop);
+}
+@
+
+
+1.1.1.6
+log
+@import latest stable 1.4 libevent, in the OpenBSD version (diff against portable version reviewed-okay)
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: poll.c,v 1.15 2010/04/21 20:02:40 nicm Exp $	*/
+d37 1
+a37 1
+#include <sys/_libevent_time.h>
+d40 1
+d57 2
+d69 1
+d72 6
+a77 5
+static void *poll_init	(struct event_base *);
+static int poll_add		(void *, struct event *);
+static int poll_del		(void *, struct event *);
+static int poll_dispatch	(struct event_base *, void *, struct timeval *);
+static void poll_dealloc	(struct event_base *, void *);
+d84 1
+d86 1
+a86 2
+	poll_dealloc,
+    0
+d89 2
+a90 2
+static void *
+poll_init(struct event_base *base)
+d95 1
+a95 1
+	if (evutil_getenv("EVENT_NOPOLL"))
+d101 1
+a101 1
+	evsignal_init(base);
+d106 13
+d153 1
+a153 1
+static int
+d156 1
+a156 1
+	int res, i, j, msec = -1, nfds;
+d159 3
+d163 3
+d167 2
+a168 5
+	if (tv != NULL)
+		msec = tv->tv_sec * 1000 + (tv->tv_usec + 999) / 1000;
+
+	nfds = pop->nfds;
+	res = poll(pop->event_set, nfds, msec);
+d176 1
+a176 1
+		evsignal_process(base);
+d178 2
+a179 3
+	} else if (base->sig.evsignal_caught) {
+		evsignal_process(base);
+	}
+d183 1
+a183 1
+	if (res == 0 || nfds == 0)
+d186 2
+a187 2
+	i = random() % nfds;
+	for (j = 0; j < nfds; j++) {
+a188 4
+		int what;
+		if (++i == nfds)
+			i = 0;
+		what = pop->event_set[i].revents;
+d210 2
+d215 2
+d224 1
+a224 1
+static int
+d232 1
+a232 1
+		return (evsignal_add(ev));
+d329 1
+a329 1
+static int
+d337 1
+a337 1
+		return (evsignal_del(ev));
+d367 1
+a367 1
+		/* 
+d382 2
+a383 2
+static void
+poll_dealloc(struct event_base *base, void *arg)
+a386 1
+	evsignal_dealloc(base);
+@
+
+

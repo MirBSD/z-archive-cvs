@@ -1,0 +1,489 @@
+head	1.9;
+access;
+symbols
+	start:1.1.1.1 tg:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.9
+date	2008.11.08.22.24.25;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004916117E0B020D70;
+
+1.8
+date	2008.05.03.01.09.27;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	100481BBB3B66CD6DBA;
+
+1.7
+date	2008.03.21.00.14.12;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10047E2FDD43CE3D911;
+
+1.6
+date	2008.03.20.21.26.46;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10047E2D6AD1FA31284;
+
+1.5
+date	2008.03.20.21.24.18;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10047E2D60556125B51;
+
+1.4
+date	2008.03.20.19.54.54;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10047E2C1222C89D73B;
+
+1.3
+date	2008.03.20.19.34.51;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10047E2BC6C1208E872;
+
+1.2
+date	2008.03.20.19.27.02;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10047E2BA9831C43DF5;
+
+1.1
+date	2008.03.20.19.19.51;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+commitid	10047E2B8E168C0FAA0;
+
+1.1.1.1
+date	2008.03.20.19.19.51;	author tg;	state Exp;
+branches;
+next	;
+commitid	10047E2B8E168C0FAA0;
+
+
+desc
+@@
+
+
+1.9
+log
+@mass conversion 66h.42h.de → mirbsd.org
+@
+text
+@/* $MirOS: contrib/code/lkm/rijndael/lkm_intf.c,v 1.8 2008/05/03 01:09:27 tg Exp $ */
+
+/*-
+ * Copyright (c) 2005, 2008
+ *	Thorsten "mirabilos" Glaser <tg@@mirbsd.org>
+ *
+ * Licensee is hereby permitted to deal in this work without restric-
+ * tion, including unlimited rights to use, publicly perform, modify,
+ * merge, distribute, sell, give away or sublicence, provided all co-
+ * pyright notices above, these terms and the disclaimer are retained
+ * in all redistributions or reproduced in accompanying documentation
+ * or other materials provided with binary redistributions.
+ *
+ * Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+ * express, or implied, to the maximum extent permitted by applicable
+ * law, without malicious intent or gross negligence; in no event may
+ * licensor, an author or contributor be held liable for any indirect
+ * or other damage, or direct damage except proven a consequence of a
+ * direct error of said person and intended use of this work, loss or
+ * other issues arising in any way out of its use, even if advised of
+ * the possibility of such damage or existence of a nontrivial bug.
+ *-
+ * Interface to the Terry Lambert LKM system (MirOS BSD, OpenBSD)
+ */
+
+#include <sys/param.h>
+#include <sys/conf.h>
+#include <sys/errno.h>
+#include <sys/exec.h>
+#include <sys/ioctl.h>
+#include <sys/systm.h>
+#include <sys/lkm.h>
+#include <crypto/rijndael.h>
+#include "rijndaellkm.h"
+
+struct cdevsw rijndael_cdevsw = cdev_rijndael_init(NRIJNDAEL, rijndael);
+
+rijndael_ctx thectx;
+u_char thedata[240];
+u_char thebuf[240];
+
+MOD_DEV("rijndael", LM_DT_CHAR, -1, &rijndael_cdevsw)
+
+static int rijndael_modload(struct lkm_table *, int);
+
+#define rlkm_minor(dev) (minor(dev) > 6 ? 0 : minor(dev))
+
+const char *minor_names[] = {
+	"invalid",
+	"soft_key",
+	"soft_encr",
+	"soft_decr",
+	"ptr_key",
+	"ptr_encr",
+	"ptr_decr"
+};
+
+int
+rijndael_lkmentry(struct lkm_table *lkmtp, int cmd, int ver)
+{
+	DISPATCH(lkmtp, cmd, ver, rijndael_modload, rijndael_modload, lkm_nofunc)
+}
+
+static int
+rijndael_modload(struct lkm_table *lkmtp, int cmd)
+{
+	switch (cmd) {
+	case LKM_E_LOAD:
+		_PD("rijndael: module loaded\n");
+		break;
+	case LKM_E_UNLOAD:
+		_PD("rijndael: module unloaded\n");
+		break;
+	default:
+		printf("rijndael: illegal modload operation %d\n", cmd);
+		return (EINVAL);
+	}
+	return (0);
+}
+
+int
+rijndaelopen(dev_t dev, int oflags, int devtype, struct proc *p)
+{
+	_PD("rijndael: device %s opened\n", minor_names[rlkm_minor(dev)]);
+	return (0);
+}
+
+int
+rijndaelclose(dev_t dev, int fflag, int devtype, struct proc *p)
+{
+	_PD("rijndael: device %s closed\n", minor_names[rlkm_minor(dev)]);
+	return (0);
+}
+
+int
+rijndaelread(dev_t dev, struct uio *uio, int ioflag)
+{
+	rijndael_do_cbc_t theop;
+	u32 iv[4] = { 0, 0, 0, 0 };
+
+	_PD("rijndael: device %s read %lu from\n",
+	    minor_names[rlkm_minor(dev)], (u_long)uio->uio_resid);
+
+	switch (minor(dev)) {
+	case RLKM_SW_KEY:
+	case RLKM_HW_KEY:
+		return (ENOCOFFEE);
+	case RLKM_SW_ENC:
+		theop = rijndael_cbc_encrypt;
+		break;
+	case RLKM_HW_ENC:
+		theop = rijndael_cbc_encrypt_fast;
+		break;
+	case RLKM_SW_DEC:
+		theop = rijndael_cbc_decrypt;
+		break;
+	case RLKM_HW_DEC:
+		theop = rijndael_cbc_decrypt_fast;
+		break;
+	default:
+		return (ENOCOFFEE);
+	}
+
+	(*theop)(&thectx, (u_char *)iv, thedata, thebuf, 1);
+	(*theop)(&thectx, (u_char *)iv, thedata + 16, thebuf + 16, 2);
+	(*theop)(&thectx, (u_char *)iv, thedata + 48, thebuf + 48, 3);
+	(*theop)(&thectx, (u_char *)iv, thedata + 96, thebuf + 96, 4);
+	(*theop)(&thectx, (u_char *)iv, thedata + 160, thebuf + 160, 5);
+	return (uiomove((caddr_t)thebuf,
+	    MIN(sizeof (thebuf), uio->uio_resid), uio));
+}
+
+int
+rijndaelwrite(dev_t dev, struct uio *uio, int ioflag)
+{
+	int rv, bits;
+	rijndael_setkey_t theop;
+	uint8_t thekey[256/8];
+
+	_PD("rijndael: device %s written %lu to\n",
+	    minor_names[rlkm_minor(dev)], (u_long)uio->uio_resid);
+
+	switch (minor(dev)) {
+	case RLKM_SW_KEY:
+		theop = rijndael_set_key;
+		break;
+	case RLKM_HW_KEY:
+		theop = rijndael_set_key_fast;
+		break;
+	case RLKM_SW_ENC:
+	case RLKM_HW_ENC:
+	case RLKM_SW_DEC:
+	case RLKM_HW_DEC:
+		return (uiomove((caddr_t)thedata,
+		    MIN(sizeof (thedata), uio->uio_resid), uio));
+	default:
+		return (ENOCOFFEE);
+	}
+
+	switch (uio->uio_resid) {
+	case 128/8:
+	case 192/8:
+	case 256/8:
+		bits = uio->uio_resid * 8;
+		break;
+	default:
+		return (EINVAL);
+	}
+	if ((rv = uiomove((caddr_t)thekey, uio->uio_resid, uio)))
+		return (rv);
+
+	if (((*theop)(&thectx, thekey, bits))) {
+		printf("rijndael: rijndael_set_key failed!\n");
+		return (EINVAL);
+	}
+	return (0);
+}
+
+int
+rijndaelioctl(dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc *p)
+{
+	_PD("rijndael: device %s ioctl called\n", minor_names[rlkm_minor(dev)]);
+	return (ENOCOFFEE);
+}
+@
+
+
+1.8
+log
+@remove advertising clause for all of contrib/ except
+‣ heartbeat server/client, for now
+‣ stuff in jupp that’ll be regenerated before next release anyway
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/lkm/rijndael/lkm_intf.c,v 1.7 2008/03/21 00:14:12 tg Exp $ */
+d5 1
+a5 1
+ *	Thorsten "mirabilos" Glaser <tg@@66h.42h.de>
+@
+
+
+1.7
+log
+@it works, at least on sparc… i386 is still compiling, that slow bastard!
+this was an error of mine: uio_move(9) changes uio->uio_resid
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/lkm/rijndael/lkm_intf.c,v 1.6 2008/03/20 21:26:46 tg Exp $ */
+a13 4
+ * All advertising materials mentioning features or use of this soft-
+ * ware must display the following acknowledgement:
+ *	This product includes material provided by Thorsten Glaser.
+ *
+@
+
+
+1.6
+log
+@more gcc shutup
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/lkm/rijndael/lkm_intf.c,v 1.5 2008/03/20 21:24:18 tg Exp $ */
+d140 1
+a140 1
+	int rv;
+d168 1
+d176 1
+a176 1
+	if (((*theop)(&thectx, thekey, uio->uio_resid * 8))) {
+@
+
+
+1.5
+log
+@• apparently, printf(9) doesn't do %zu
+• gcc warning shutup
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/lkm/rijndael/lkm_intf.c,v 1.4 2008/03/20 19:54:54 tg Exp $ */
+d128 5
+a132 5
+	(*theop)(&thectx, iv, thedata, thebuf, 1);
+	(*theop)(&thectx, iv, thedata + 16, thebuf + 16, 2);
+	(*theop)(&thectx, iv, thedata + 48, thebuf + 48, 3);
+	(*theop)(&thectx, iv, thedata + 96, thebuf + 96, 4);
+	(*theop)(&thectx, iv, thedata + 160, thebuf + 160, 5);
+@
+
+
+1.4
+log
+@implementation
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/lkm/rijndael/lkm_intf.c,v 1.3 2008/03/20 19:34:51 tg Exp $ */
+d43 2
+a44 2
+uint8_t thedata[240];
+uint8_t thebuf[240];
+d105 2
+a106 2
+	_PD("rijndael: device %s read %zu from\n",
+	    minor_names[rlkm_minor(dev)], uio->uio_resid);
+d144 2
+a145 2
+	_PD("rijndael: device %s written %zu to\n",
+	    minor_names[rlkm_minor(dev)], uio->uio_resid);
+@
+
+
+1.3
+log
+@support 6 different device minors
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/lkm/rijndael/lkm_intf.c,v 1.2 2008/03/20 19:27:02 tg Exp $ */
+d43 2
+d102 3
+d107 28
+a134 1
+	return (ENOCOFFEE);
+d140 4
+d146 34
+a179 1
+	return (ENOCOFFEE);
+@
+
+
+1.2
+log
+@simple string replacement
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/lkm/rijndael/lkm_intf.c,v 1.1.1.1 2008/03/20 19:19:51 tg Exp $ */
+d37 1
+d42 2
+d48 12
+d86 1
+a86 1
+	_PD("rijndael: device opened\n");
+d93 1
+a93 1
+	_PD("rijndael: device closed\n");
+d100 2
+a101 1
+	_PD("rijndael: device read from\n");
+d108 2
+a109 1
+	_PD("rijndael: device written to\n");
+d116 1
+a116 1
+	_PD("rijndael: device ioctl called\n");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/code/lkm/programmer/lkm_intf.c,v 1.2 2005/12/17 05:46:08 tg Exp $ */
+d4 2
+a5 2
+ * Copyright (c) 2005
+ *	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+d37 1
+a37 1
+#include "programmerlkm.h"
+d39 1
+a39 1
+struct cdevsw programmer_cdevsw = cdev_programmer_init(NPROGRAMMER, programmer);
+d41 1
+a41 1
+MOD_DEV("programmer", LM_DT_CHAR, -1, &programmer_cdevsw)
+d43 1
+a43 1
+static int programmer_modload(struct lkm_table *, int);
+d46 1
+a46 1
+programmer_lkmentry(struct lkm_table *lkmtp, int cmd, int ver)
+d48 1
+a48 1
+	DISPATCH(lkmtp, cmd, ver, programmer_modload, programmer_modload, lkm_nofunc)
+d52 1
+a52 1
+programmer_modload(struct lkm_table *lkmtp, int cmd)
+d56 1
+a56 1
+		_PD("programmer: module loaded\n");
+d59 1
+a59 1
+		_PD("programmer: module unloaded\n");
+d62 1
+a62 1
+		printf("programmer: illegal modload operation %d\n", cmd);
+d69 1
+a69 1
+programmeropen(dev_t dev, int oflags, int devtype, struct proc *p)
+d71 1
+a71 1
+	_PD("programmer: device opened\n");
+d76 1
+a76 1
+programmerclose(dev_t dev, int fflag, int devtype, struct proc *p)
+d78 1
+a78 1
+	_PD("programmer: device closed\n");
+d83 1
+a83 1
+programmerread(dev_t dev, struct uio *uio, int ioflag)
+d85 1
+a85 1
+	_PD("programmer: device read from\n");
+d90 1
+a90 1
+programmerwrite(dev_t dev, struct uio *uio, int ioflag)
+d92 1
+a92 1
+	_PD("programmer: device written to\n");
+d97 1
+a97 1
+programmerioctl(dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc *p)
+d99 1
+a99 1
+	_PD("programmer: device ioctl called\n");
+@
+
+
+1.1.1.1
+log
+@copy the “hungry programmer” LKM skeleton to the AES-Test LKM
+@
+text
+@@

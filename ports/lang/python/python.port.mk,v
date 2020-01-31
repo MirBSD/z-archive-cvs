@@ -1,0 +1,364 @@
+head	1.10;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.10
+date	2009.12.28.14.55.15;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004B38C6D25E238175;
+
+1.9
+date	2008.10.05.00.41.28;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10048E80D490E73828A;
+
+1.8
+date	2008.10.04.19.10.09;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10048E7BF8F5FE3E267;
+
+1.7
+date	2008.09.01.09.25.07;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10048BBB4ED58CC6937;
+
+1.6
+date	2008.08.27.09.55.13;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10048B5248E449EC031;
+
+1.5
+date	2008.08.12.08.38.45;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10048A14C1C0BCC53DD;
+
+1.4
+date	2008.05.02.15.10.40;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100481B2EDD3FE86B26;
+
+1.3
+date	2007.07.19.20.34.48;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	100469FCA890931ABBE;
+
+1.2
+date	2005.11.04.14.02.33;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	35cd436b691eab9c;
+
+1.1
+date	2005.03.18.15.47.49;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.47.49;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.10
+log
+@speed up recursive ops by use of .MAKEFLAGS (not MAKEFLAGS like TNF,
+since our make is different, apparently)
+@
+text
+@# $MirOS: ports/lang/python/python.port.mk,v 1.9 2008/10/05 00:41:28 tg Exp $
+# $OpenBSD: python.port.mk,v 1.10 2004/08/06 07:33:19 xsa Exp $
+
+CATEGORIES+=		lang/python
+
+MODPY_VERSION?=		2.5
+.if ${MODPY_VERSION} == "2.3"
+MODPY_MINPKG?=		2.3.5-1
+.elif ${MODPY_VERSION} == "2.5"
+MODPY_MINPKG?=		2.5.2-9
+.else
+MODPY_MINPKG?=		${MODPY_VERSION}
+.endif
+.ifndef MODPY_MAXPKG
+MODPY_MAXPKG!=		print ${MODPY_VERSION:R}.$$((${MODPY_VERSION:E} + 1))
+.MAKEFLAGS:=		${.MAKEFLAGS} MODPY_MAXPKG=${MODPY_MAXPKG:Q}
+.endif
+
+_MODPY_BUILD_DEPENDS=	:python->=${MODPY_MINPKG},<=${MODPY_MAXPKG}:lang/python/${MODPY_VERSION}
+
+.if ${NO_BUILD:L} == "no"
+BUILD_DEPENDS+=		${_MODPY_BUILD_DEPENDS}
+.endif
+RUN_DEPENDS+=		${_MODPY_BUILD_DEPENDS}
+
+.if defined(MODPY_SETUPTOOLS) && ${MODPY_SETUPTOOLS:U} == YES
+# The setuptools module provides a package locator (site.py) that is
+# required at runtime for the pkg_resources stuff to work
+MODPY_SETUPUTILS_DEPEND?=:py-setuptools-*:devel/py-setuptools
+MODPY_RUN_DEPENDS+=	${MODPY_SETUPUTILS_DEPEND}
+BUILD_DEPENDS+=		${MODPY_SETUPUTILS_DEPEND}
+# The setuptools uses test target
+REGRESS_TARGET?=	test
+.endif
+
+.if !defined(NO_SHARED_LIBS) || ${NO_SHARED_LIBS:U} != YES
+.  if ${MODPY_VERSION} != "2.5"
+MODPY_EXPAT_DEPENDS=	:python-expat-${MODPY_VERSION}*:lang/python/${MODPY_VERSION},-expat	
+MODPY_TKINTER_DEPENDS=	:python-tkinter-${MODPY_VERSION}*:lang/python/${MODPY_VERSION},-tkinter
+.  endif
+.endif
+
+MODPY_BIN=		${LOCALBASE}/bin/python${MODPY_VERSION}
+MODPY_INCDIR=		${LOCALBASE}/include/python${MODPY_VERSION}
+MODPY_LIBDIR=		${LOCALBASE}/lib/python${MODPY_VERSION}
+MODPY_SITEPKG=		${MODPY_LIBDIR}/site-packages
+
+SUBST_VARS:=		MODPY_EGG_VERSION MODPY_VERSION ${SUBST_VARS}
+
+#XXX What the F…?
+LDFLAGS+=		-L${MODPY_LIBDIR:Q}/config
+
+MODPY_USE_DISTUTILS?=	Yes
+
+.if ${MODPY_USE_DISTUTILS:L} == "yes"
+
+# usually setup.py but Setup.py can be found too
+MODPY_SETUP?=		setup.py
+
+# build or build_ext are commonly used
+MODPY_DISTUTILS_BUILD?=		build --build-base=${WRKSRC}
+
+.if defined(MODPY_SETUPTOOLS) && ${MODPY_SETUPTOOLS:U} == YES
+MODPY_DISTUTILS_INSTALL?=	install --prefix=${LOCALBASE} \
+				--root=${DESTDIR} \
+				--single-version-externally-managed
+.else
+MODPY_DISTUTILS_INSTALL?=	install --prefix=${PREFIX}
+.endif
+
+_MODPY_CMD=	@@cd ${WRKSRC} && ${SETENV} ${MAKE_ENV} \
+			${MODPY_BIN} ./${MODPY_SETUP}
+
+# dirty way to do it with no modifications in bsd.port.mk
+.  if !target(do-build)
+do-build:
+	${_MODPY_CMD} ${MODPY_DISTUTILS_BUILD} ${MODPY_DISTUTILS_BUILDARGS}
+.  endif
+
+# extra documentation or scripts should be installed via post-install
+.  if !target(do-install)
+do-install:
+	${_MODPY_CMD} ${MODPY_DISTUTILS_BUILD} ${MODPY_DISTUTILS_BUILDARGS} \
+		${MODPY_DISTUTILS_INSTALL} ${MODPY_DISTUTILS_INSTALLARGS}
+.  endif
+
+# setuptools supports regress testing from setup.py using a standard target
+.  if !target(do-regress) && \
+      defined(MODPY_SETUPTOOLS) && ${MODPY_SETUPTOOLS:U} == YES
+do-regress:
+	${_MODPY_CMD} ${REGRESS_TARGET}
+.  endif
+
+.endif
+@
+
+
+1.9
+log
+@unbreak BitTorrent 3.4.2 with Python 2.4+
+
+XXX upstream sucks, too…
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/python/python.port.mk,v 1.8 2008/10/04 19:10:09 tg Exp $
+d14 1
+d16 2
+@
+
+
+1.8
+log
+@• switch python default version from 2.3 to 2.5
+  agreed bsiegert@@
+• add a maximum package version, to avoid confusion
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/python/python.port.mk,v 1.7 2008/09/01 09:25:07 tg Exp $
+d10 1
+a10 1
+MODPY_MINPKG?=		2.5.2-8
+@
+
+
+1.7
+log
+@add more python crap, everything copy’n’paste from OpenBSD ports
+
+a big thanks to Martynas Venckus for saving me from having to do this work
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/python/python.port.mk,v 1.6 2008/08/27 09:55:13 tg Exp $
+d6 2
+a7 1
+MODPY_VERSION?=		2.3
+d9 6
+d16 1
+a16 1
+_MODPY_BUILD_DEPENDS=	:python->=${MODPY_MINPKG}:lang/python/${MODPY_VERSION}
+@
+
+
+1.6
+log
+@python 2.5 has no expat subpackage…
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/python/python.port.mk,v 1.5 2008/08/12 08:38:45 tg Exp $
+d16 10
+d40 3
+d52 6
+d59 1
+d77 7
+@
+
+
+1.5
+log
+@some improvements from openbsd python module
+XXX we might want a lot more of it
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/python/python.port.mk,v 1.4 2008/05/02 15:10:40 tg Exp $
+d17 1
+d20 1
+@
+
+
+1.4
+log
+@| B_R_DEPENDS+= ::python/2.3,no_cxx
+has _two_ effects:
+• if not installed, build no_cxx flavour by default – desired
+• if !no_cxx flavour is installed, fail – not quite so…
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/python/python.port.mk,v 1.3 2007/07/19 20:34:48 bsiegert Exp $
+d4 2
+d26 1
+a26 1
+SUBST_VARS+=		MODPY_VERSION
+@
+
+
+1.3
+log
+@python.port.mk: Depend on the new version from five minutes ago ;).
+Introduce MODPY_USE_DISTUTILS: distutils are only used if set to yes (which,
+incidentally, is the default).
+
+py-cairo, py-gobject: switch to python.port.mk w/ MODPY_USE_DISTUTILS=no,
+s/PYTHON_VERSION/MODPY_VERSION/ in PLIST
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/python/python.port.mk,v 1.2 2005/11/04 14:02:33 tg Exp $
+d7 1
+a7 1
+_MODPY_BUILD_DEPENDS=	:python->=${MODPY_MINPKG}:lang/python/${MODPY_VERSION},no_cxx
+@
+
+
+1.2
+log
+@Preliminary commit, to be ok'd by bsiegert@@ later
+* remove Python 2.1
+* remove Python 2.2
+* make the Python 2.3 Makefile easier by shoving stuff into Makefile.inc
+* sync patch-configure_in with OpenBSD
+  + cc -shared for a.out platforms on 3.8+
+  + support for 3.7, 3.8
+* add RCS IDs to all patches/files
+* sync port and Makefile.inc better against OpenBSD
+* sort flavours
+* sort Makefile.inc order
+* no_cxx flavour now implies _all_ other no_* (missed expat)
+* use ${PICFLAG} not -fPIC (invalid on e.g. Darwin, Interix)
+* by default, still pull in only the no_cxx flavour as a dependency
+  XXX should make no-no_cxx match no_cxx dependency
+* XXX update to 2.3.5 missing, will commit that (and 2.4) later
+  after this is ok'd by bsiegert@@
+
+untested, WIP
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/python/python.port.mk,v 1.1.7.1 2005/03/18 15:47:49 tg Exp $
+d5 1
+d7 1
+a7 1
+_MODPY_BUILD_DEPENDS=	:python-${MODPY_VERSION}*:lang/python/${MODPY_VERSION},no_cxx
+d24 6
+a39 2
+SUBST_VARS+=	MODPY_VERSION
+
+d41 1
+a41 1
+.if !target(do-build)
+d44 1
+a44 1
+.endif
+d47 1
+a47 1
+.if !target(do-install)
+d51 2
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+a2 2
+# $MirOS$
+# $OpenBSD: python.port.mk,v 1.8 2004/05/15 09:24:12 xsa Exp $
+d13 5
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

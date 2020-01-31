@@ -1,0 +1,180 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2011.11.20.04.57.08;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004EC8880406A80564;
+
+1.1
+date	2008.03.04.02.24.15;	author tg;	state Exp;
+branches;
+next	;
+commitid	10047CCB28038B13532;
+
+
+desc
+@@
+
+
+1.2
+log
+@first steps toward a new time API
+• no DJB code (actual code) any more, only reimplementation of algorithms
+  whose code is placed in USA PD
+• no struct returns any more
+• skip the extra tai_t step
+• no _t suffix for types I define
+• try to be a bit more elegant – I learned a lot since then, after all
+
+the old ABI is still provided until we bump libc major
+‣ the new API might wander off libc into libmbfun then, _too_
+
+goal is functional equivalence (after all, it’s been proven correct)
+@
+text
+@$MirOS: ports/net/tor/patches/patch-src_or_test_c,v 1.1 2008/03/04 02:24:15 tg Exp $
+
+	format_rfc1123_time() uses libc functions, while
+	parse_rfc1123_time() uses a private function taken
+	from Python and not supporting leap seconds, so this
+	test written by <censored /> would otherwise fail
+
+--- src/or/test.c.orig	Fri Nov 30 07:49:26 2007
++++ src/or/test.c	Sun Nov 20 04:51:54 2011
+@@@@ -583,6 +583,14 @@@@ _compare_without_first_ch(const void *a,
+   return strcasecmp(s1+1, s2);
+ }
+ 
++#ifdef SYSKERN_MIRTIME_H
++#define OS2UTC(x)	timet2posix(x)
++#define UTC2OS(x)	posix2timet(x)
++#else
++#define OS2UTC(x)	(x)
++#define UTC2OS(x)	(x)
++#endif
++
+ static void
+ test_util(void)
+ {
+@@@@ -622,6 +630,7 @@@@ test_util(void)
+ 
+   /* The test values here are confirmed to be correct on a platform
+    * with a working timegm. */
++  /* Note from MirBSD developers: yeah, sure... *pats head* */
+   a_time.tm_year = 2003-1900;
+   a_time.tm_mon = 7;
+   a_time.tm_mday = 30;
+@@@@ -637,7 +646,7 @@@@ test_util(void)
+ 
+   format_rfc1123_time(timestr, 0);
+   test_streq("Thu, 01 Jan 1970 00:00:00 GMT", timestr);
+-  format_rfc1123_time(timestr, (time_t)1091580502UL);
++  format_rfc1123_time(timestr, UTC2OS((time_t)1091580502UL));
+   test_streq("Wed, 04 Aug 2004 00:48:22 GMT", timestr);
+ 
+   t_res = 0;
+@
+
+
+1.1
+log
+@• update
+
+  Changes in version 0.1.2.19 - 2008-01-17
+
+  o Security fixes:
+    - Exit policies now reject connections that are addressed to a
+      relay's public (external) IP address too, unless
+      ExitPolicyRejectPrivate is turned off. We do this because too
+      many relays are running nearby to services that trust them based
+      on network address.
+
+  o Major bugfixes:
+    - When the clock jumps forward a lot, do not allow the bandwidth
+      buckets to become negative. Fixes bug 544.
+    - Fix a memory leak on exit relays; we were leaking a cached_resolve_t
+      on every successful resolve. Reported by Mike Perry.
+    - Purge old entries from the "rephist" database and the hidden
+      service descriptor database even when DirPort is zero.
+    - Stop thinking that 0.1.2.x directory servers can handle "begin_dir"
+      requests. Should ease bugs 406 and 419 where 0.1.2.x relays are
+      crashing or mis-answering these requests.
+    - When we decide to send a 503 response to a request for servers, do
+      not then also send the server descriptors: this defeats the whole
+      purpose. Fixes bug 539.
+
+  Changes in version 0.1.2.18 - 2007-10-28
+
+  o Major bugfixes (crashes):
+    - If a connection is shut down abruptly because of something that
+      happened inside connection_flushed_some(), do not call
+      connection_finished_flushing(). Should fix bug 451:
+      "connection_stop_writing: Assertion conn->write_event failed"
+      Bugfix on 0.1.2.7-alpha.
+    - Fix possible segfaults in functions called from
+      rend_process_relay_cell().
+
+  o Major bugfixes (hidden services):
+    - Hidden services were choosing introduction points uniquely by
+      hexdigest, but when constructing the hidden service descriptor
+      they merely wrote the (potentially ambiguous) nickname.
+    - Clients now use the v2 intro format for hidden service
+      connections: they specify their chosen rendezvous point by identity
+      digest rather than by (potentially ambiguous) nickname. These
+      changes could speed up hidden service connections dramatically.
+
+  o Major bugfixes (other):
+    - Stop publishing a new server descriptor just because we get a
+      HUP signal. This led (in a roundabout way) to some servers getting
+      dropped from the networkstatus lists for a few hours each day.
+    - When looking for a circuit to cannibalize, consider family as well
+      as identity. Fixes bug 438. Bugfix on 0.1.0.x (which introduced
+      circuit cannibalization).
+    - When a router wasn't listed in a new networkstatus, we were leaving
+      the flags for that router alone -- meaning it remained Named,
+      Running, etc -- even though absence from the networkstatus means
+      that it shouldn't be considered to exist at all anymore. Now we
+      clear all the flags for routers that fall out of the networkstatus
+      consensus. Fixes bug 529.
+
+• fix the regression test so that it can run on a platform honouring
+  the German law about measurement and time keeping instead of POSIX
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d9 2
+a10 13
++++ src/or/test.c	Tue Mar  4 02:20:28 2008
+@@@@ -27,6 +27,10 @@@@ const char test_c_id[] =
+ #include "../common/test.h"
+ #include "../common/torgzip.h"
+ 
++#ifdef HAVE_SYS_TAITIME_H
++#include <sys/taitime.h>
++#endif
++
+ int have_failed = 0;
+ 
+ /* These functions are file-local, but are exposed so we can test. */
+@@@@ -583,6 +587,14 @@@@ _compare_without_first_ch(const void *a,
+d14 3
+a16 3
++#ifdef __TAI64_BIAS
++#define OS2UTC(x)	((time_t)tai2utc(timet2tai(x)))
++#define UTC2OS(x)	((time_t)tai2timet(utc2tai(x)))
+d25 1
+a25 1
+@@@@ -622,6 +634,7 @@@@ test_util(void)
+d33 1
+a33 1
+@@@@ -637,7 +650,7 @@@@ test_util(void)
+@
+

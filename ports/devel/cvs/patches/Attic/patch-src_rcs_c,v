@@ -1,0 +1,712 @@
+head	1.10;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.10
+date	2012.02.11.19.30.00;	author tg;	state dead;
+branches;
+next	1.9;
+commitid	1004F36C11F02848ED5;
+
+1.9
+date	2011.06.11.03.55.37;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004DF2E74A6938C5EF;
+
+1.8
+date	2010.09.19.00.42.40;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004C955C69247794E9;
+
+1.7
+date	2010.09.18.23.14.07;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004C9547CD4D455210;
+
+1.6
+date	2010.09.15.20.57.02;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004C9132F41004B31C;
+
+1.5
+date	2009.09.06.11.51.01;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004AA3A2295C6D49FB;
+
+1.4
+date	2008.03.02.20.35.18;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10047CB0F9A59BAA10E;
+
+1.3
+date	2007.06.06.13.46.44;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004666BAAA7E1DD106;
+
+1.2
+date	2007.03.10.23.53.50;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045F344D65465EF23;
+
+1.1
+date	2006.10.02.05.59.18;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004520AAAB453C7791;
+
+
+desc
+@@
+
+
+1.10
+log
+@update the CVS package in MirPorts (to match base and Debian)
+
+• since the Debian cvs source package was taken over by this one,
+  reverse things and use the Debian *.diff.gz to get our patches
+  from ;-) saves tracking things in CVS thrice
+• since the Debian cvs binary package contains PDF documentation
+  generated from something with our patches, ship it instead of
+  the one from the vanilla CVS distfile
+• ship cvs-switchroot(1) from Debian, which is just a fancy name
+  for mircvs://src/scripts/mnt-cvsroot and has a manpage
+• move stuff from PREFIX/share/cvs to PREFIX/share/doc/cvs as is proper
+• fix regression testsuite on MirBSD as much as possible (same as base)
+@
+text
+@$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.9 2011/06/11 03:55:37 tg Exp $
+--- src/rcs.c.orig	Wed Sep 28 15:25:37 2005
++++ src/rcs.c	Sat Jun 11 03:06:19 2011
+@@@@ -33,6 +33,8 @@@@
+ # endif
+ #endif
+ 
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.9 2011/06/11 03:55:37 tg Exp $");
++
+ /* The RCS -k options, and a set of enums that must match the array.
+    These come first so that we can use enum kflag in function
+    prototypes.  */
+@@@@ -103,6 +105,7 @@@@ static char *RCS_addbranch (RCSNode *, c
+ static char *truncate_revnum_in_place (char *);
+ static char *truncate_revnum (const char *);
+ static char *printable_date (const char *);
++static char *mdoc_date (const char *);
+ static char *escape_keyword_value (const char *, int *);
+ static void expand_keywords (RCSNode *, RCSVers *, const char *,
+                              const char *, size_t, enum kflag, char *,
+@@@@ -2166,6 +2169,8 @@@@ RCS_getversion (RCSNode *rcs, const char
+ 
+ 	if (! RCS_nodeisbranch (rcs, tag))
+ 	{
++	    if (! strcmp (date, "BASE"))
++		return RCS_gettag (rcs, tag, force_tag_match, simple_tag);
+ 	    /* We can't get a particular date if the tag is not a
+                branch.  */
+ 	    return NULL;
+@@@@ -2177,6 +2182,15 @@@@ RCS_getversion (RCSNode *rcs, const char
+ 	else
+ 	    branch = xstrdup (tag);
+ 
++	if (! strcmp (date, "BASE"))
++	{
++	    /* Cut off the branch suffix and return.  */
++	    rev = strrchr (branch, '.');
++	    if (rev)
++		*rev = '\0';
++	    return branch;
++	}
++
+ 	/* Fetch the revision of branch as of date.  */
+ 	rev = RCS_getdatebranch (rcs, date, branch);
+ 	free (branch);
+@@@@ -3120,6 +3134,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+     struct timespec revdate;
+     Node *p;
+     RCSVers *vers;
++    int y;
+ 
+     /* make sure we have something to look at... */
+     assert (rcs != NULL);
+@@@@ -3134,7 +3149,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+     vers = p->data;
+ 
+     /* split up the date */
+-    if (sscanf (vers->date, SDATEFORM, &xtm.tm_year, &xtm.tm_mon,
++    if (sscanf (vers->date, SDATEFORM, &y, &xtm.tm_mon,
+ 		&xtm.tm_mday, &xtm.tm_hour, &xtm.tm_min, &xtm.tm_sec) != 6)
+ 	error (1, 0, "%s: invalid date for revision %s (%s)", rcs->print_path,
+ 	       rev, vers->date);
+@@@@ -3144,15 +3159,14 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+        2000+, RCS files contain all four digits and we subtract 1900,
+        because the tm_year field should contain years since 1900.  */
+ 
+-    if (xtm.tm_year >= 100 && xtm.tm_year < 2000)
++    if (y >= 100 && y < 2000)
+ 	error (0, 0, "%s: non-standard date format for revision %s (%s)",
+ 	       rcs->print_path, rev, vers->date);
+-    if (xtm.tm_year >= 1900)
+-	xtm.tm_year -= 1900;
++    xtm.tm_year = y - ((y >= 1900) ? 1900 : 0);
+ 
+     /* put the date in a form getdate can grok */
+-    tdate = Xasprintf ("%d-%d-%d %d:%d:%d -0000",
+-		       xtm.tm_year + 1900, xtm.tm_mon, xtm.tm_mday,
++    tdate = Xasprintf ("%ld-%d-%d %d:%d:%d -0000",
++		       (long)xtm.tm_year + 1900, xtm.tm_mon, xtm.tm_mday,
+ 		       xtm.tm_hour, xtm.tm_min, xtm.tm_sec);
+ 
+     /* Turn it into seconds since the epoch.
+@@@@ -3173,7 +3187,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+ 	/* Put an appropriate string into `date', if we were given one. */
+ 	ftm = gmtime (&revdate.tv_sec);
+ 	(void) sprintf (date, DATEFORM,
+-			ftm->tm_year + (ftm->tm_year < 100 ? 0 : 1900),
++			(long)ftm->tm_year + (ftm->tm_year < 100 ? 0L : 1900L),
+ 			ftm->tm_mon + 1, ftm->tm_mday, ftm->tm_hour,
+ 			ftm->tm_min, ftm->tm_sec);
+     }
+@@@@ -3475,6 +3489,7 @@@@ enum keyword
+     KEYWORD_REVISION,
+     KEYWORD_SOURCE,
+     KEYWORD_STATE,
++    KEYWORD_MDOCDATE,
+     KEYWORD_LOCALID
+ };
+ struct rcs_keyword
+@@@@ -3511,6 +3526,7 @@@@ new_keywords (void)
+     KEYWORD_INIT (new, KEYWORD_REVISION, "Revision");
+     KEYWORD_INIT (new, KEYWORD_SOURCE, "Source");
+     KEYWORD_INIT (new, KEYWORD_STATE, "State");
++    KEYWORD_INIT (new, KEYWORD_MDOCDATE, "Mdocdate");
+ 
+     return new;
+ }
+@@@@ -3544,6 +3560,30 @@@@ printable_date (const char *rcs_date)
+ 
+ 
+ 
++/* Convert an RCS date string into an mdoc string.  This is like
++   the RCS date2str function, but for manual pages.  */
++static char *
++mdoc_date (const char *rcs_date)
++{
++    int year, mon, mday, hour, min, sec;
++    char buf[100];
++    const char *months[] = { "January", "February", "March", "April",
++	"May", "June", "July", "August",
++	"September", "October", "November", "December",
++	"corrupt" };
++
++    (void) sscanf (rcs_date, SDATEFORM, &year, &mon, &mday, &hour, &min,
++		   &sec);
++    if (mon < 1 || mon > 12)
++	mon = 13;
++    if (year < 1900)
++	year += 1900;
++    sprintf (buf, "%s %d %04d", months[mon - 1], mday, year);
++    return xstrdup (buf);
++}
++
++
++
+ /* Escape the characters in a string so that it can be included in an
+    RCS value.  */
+ static char *
+@@@@ -3680,13 +3720,13 @@@@ expand_keywords (RCSNode *rcs, RCSVers *
+ 	srch_len -= (srch_next + 1) - srch;
+ 	srch = srch_next + 1;
+ 
+-	/* Look for the first non alphabetic character after the '$'.  */
++	/* Look for the first non alphanumeric character after the '$'.  */
+ 	send = srch + srch_len;
+ 	for (s = srch; s < send; s++)
+-	    if (! isalpha ((unsigned char) *s))
++	    if (! isalnum ((unsigned char) *s))
+ 		break;
+ 
+-	/* If the first non alphabetic character is not '$' or ':',
++	/* If the first non alphanumeric character is not '$' or ':',
+            then this is not an RCS keyword.  */
+ 	if (s == send || (*s != '$' && *s != ':'))
+ 	    continue;
+@@@@ -3741,6 +3781,11 @@@@ expand_keywords (RCSNode *rcs, RCSVers *
+ 		free_value = 1;
+ 		break;
+ 
++	    case KEYWORD_MDOCDATE:
++		value = mdoc_date (ver->date);
++		free_value = 1;
++		break;
++
+ 	    case KEYWORD_CVSHEADER:
+ 	    case KEYWORD_HEADER:
+ 	    case KEYWORD_ID:
+@@@@ -4177,6 +4222,9 @@@@ RCS_checkout (RCSNode *rcs, const char *
+ 	       : (sout != RUN_TTY ? sout
+ 		  : "(stdout)"))));
+ 
++    if (rev && *rev == '-')
++	++rev;
++
+     assert (rev == NULL || isdigit ((unsigned char) *rev));
+ 
+     if (noexec && !server_active && workfile != NULL)
+@@@@ -5081,7 +5129,7 @@@@ RCS_checkin (RCSNode *rcs, const char *u
+ 	(void) time (&modtime);
+     ftm = gmtime (&modtime);
+     delta->date = Xasprintf (DATEFORM,
+-			     ftm->tm_year + (ftm->tm_year < 100 ? 0 : 1900),
++			     (long)ftm->tm_year + (ftm->tm_year < 100 ? 0L : 1900L),
+ 			     ftm->tm_mon + 1, ftm->tm_mday, ftm->tm_hour,
+ 			     ftm->tm_min, ftm->tm_sec);
+     if (flags & RCS_FLAGS_DEAD)
+@@@@ -7235,6 +7283,7 @@@@ rcs_change_text (const char *name, char 
+ /* Walk the deltas in RCS to get to revision VERSION.
+ 
+    If OP is RCS_ANNOTATE, then write annotations using cvs_output.
++   If OP is RCS_ANNOTATE_BACKWARDS, do the same backwards.
+ 
+    If OP is RCS_FETCH, then put the contents of VERSION into a
+    newly-malloc'd array and put a pointer to it in *TEXT.  Each line
+@@@@ -7263,6 +7312,7 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+     RCSVers *vers;
+     RCSVers *prev_vers;
+     RCSVers *trunk_vers;
++    RCSVers *top_vers;
+     char *next;
+     int ishead, isnext, isversion, onbranch;
+     Node *node;
+@@@@ -7285,6 +7335,7 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+     vers = NULL;
+     prev_vers = NULL;
+     trunk_vers = NULL;
++    top_vers = NULL;
+     next = NULL;
+     onbranch = 0;
+     foundhead = 0;
+@@@@ -7332,12 +7383,31 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+ 	    vers = node->data;
+ 	    next = vers->next;
+ 
++	    /* The top version is either HEAD or
++	       the last version on the branch.  */
++	    if (top_vers == NULL ||
++		(onbranch && (op == RCS_ANNOTATE_BACKWARDS)))
++		top_vers = vers;
++
+ 	    /* Compare key and trunkversion now, because key points to
+ 	       storage controlled by rcsbuf_getkey.  */
+ 	    if (STREQ (branchversion, key))
+ 	        isversion = 1;
+ 	    else
+ 	        isversion = 0;
++
++	    if ((op == RCS_ANNOTATE_BACKWARDS) && STREQ (version, key)) {
++		if (onbranch) {
++		    unsigned int ln;
++
++		    for (ln = 0; ln < curlines.nlines; ++ln)
++			curlines.vector[ln]->vers = NULL;
++		} else {
++		    foundhead = 1;
++		    linevector_copy (&headlines, &curlines);
++		    break;
++		}
++	    }
+ 	}
+ 
+ 	while (1)
+@@@@ -7365,17 +7435,27 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+ 		rcsbuf_valpolish (rcsbuf, value, 0, &vallen);
+ 		if (ishead)
+ 		{
+-		    if (! linevector_add (&curlines, value, vallen, NULL, 0))
++		    if (! linevector_add (&curlines, value, vallen,
++			   (op == RCS_ANNOTATE_BACKWARDS) ? vers : NULL, 0))
+ 			error (1, 0, "invalid rcs file %s", rcs->print_path);
+ 
+ 		    ishead = 0;
+ 		}
+ 		else if (isnext)
+ 		{
++		    RCSVers *addv, *delv;
++
++		    if (op == RCS_ANNOTATE_BACKWARDS) {
++			addv = onbranch ? NULL : prev_vers;
++			delv = onbranch ? vers : NULL;
++		    } else {
++			addv = onbranch ? vers : NULL;
++			delv = onbranch ? NULL : prev_vers;
++		    }
++
+ 		    if (! apply_rcs_changes (&curlines, value, vallen,
+ 					     rcs->path,
+-					     onbranch ? vers : NULL,
+-					     onbranch ? NULL : prev_vers))
++					     addv, delv))
+ 			error (1, 0, "invalid change text in %s", rcs->print_path);
+ 		}
+ 		break;
+@@@@ -7391,7 +7471,9 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+ 	        /* This is the version we want.  */
+ 		linevector_copy (&headlines, &curlines);
+ 		foundhead = 1;
+-		if (onbranch)
++		/* If we are annotating backwards, we have to
++		   continue tracking when we're tracking a branch.  */
++		if (onbranch && !(op == RCS_ANNOTATE_BACKWARDS))
+ 		{
+ 		    /* We have found this version by tracking up a
+                        branch.  Restore back to the lines we saved
+@@@@ -7480,6 +7562,7 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+     switch (op)
+     {
+ 	case RCS_ANNOTATE:
++	case RCS_ANNOTATE_BACKWARDS:
+ 	    {
+ 		unsigned int ln;
+ 
+@
+
+
+1.9
+log
+@update and bring them in sync
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.8 2010/09/19 00:42:40 tg Exp $
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.8 2010/09/19 00:42:40 tg Exp $");
+@
+
+
+1.8
+log
+@ok, now it compiles cleanly again, but the regression test still barfs
+when actually letting it run over ssh – the “you are using an even vendor
+branch” warning is duplicated per-line ⇒ still WIP…
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.7 2010/09/18 23:14:07 tg Exp $
+d3 1
+a3 1
++++ src/rcs.c	Sun Sep 19 00:03:32 2010
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.7 2010/09/18 23:14:07 tg Exp $");
+d168 11
+a178 1
+@@@@ -5081,7 +5126,7 @@@@ RCS_checkin (RCSNode *rcs, const char *u
+d187 1
+a187 1
+@@@@ -7235,6 +7280,7 @@@@ rcs_change_text (const char *name, char 
+d195 1
+a195 1
+@@@@ -7263,6 +7309,7 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d203 1
+a203 1
+@@@@ -7285,6 +7332,7 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d211 1
+a211 1
+@@@@ -7332,12 +7380,31 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d243 1
+a243 1
+@@@@ -7365,17 +7432,27 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d274 1
+a274 1
+@@@@ -7391,7 +7468,9 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d285 1
+a285 1
+@@@@ -7480,6 +7559,7 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+@
+
+
+1.7
+log
+@• apply 90zlib-read-compressed.diff from Debian, with the following
+  explanation from DragonFly BSD via MidnightBSD (thanks laffer1):
+  zlib.c: byte by byte to fix infinity waiting on some zlib operations while using compression.
+• add MidnightBSD’s global “-g” option: force group-writable permissions
+• merge patch for backwards annotation from DragonFly BSD via MidnightBSD
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.6 2010/09/15 20:57:02 tg Exp $
+d3 1
+a3 1
++++ src/rcs.c	Sat Sep 18 23:08:52 2010
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.6 2010/09/15 20:57:02 tg Exp $");
+d177 9
+a185 1
+@@@@ -7263,6 +7308,7 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d193 1
+a193 9
+@@@@ -7270,6 +7316,7 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+     struct linevector curlines;
+     struct linevector trunklines;
+     int foundhead;
++    int backwards;
+ 
+     assert (version);
+ 
+@@@@ -7285,10 +7332,17 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d201 1
+a201 11
+ 
++    if (op == RCS_ANNOTATE_BACKWARDS) {
++	backwards = 1;
++	op = RCS_ANNOTATE;
++    } else
++	backwards = 0;
++
+     linevector_init (&curlines);
+     linevector_init (&headlines);
+     linevector_init (&trunklines);
+@@@@ -7332,12 +7386,30 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d207 2
+a208 1
++	    if (top_vers == NULL || (onbranch && backwards))
+d218 1
+a218 1
++	    if (backwards && STREQ (version, key)) {
+d233 1
+a233 1
+@@@@ -7365,17 +7437,27 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d239 1
+a239 1
++					  backwards ? vers : NULL, 0))
+d248 1
+a248 1
++		    if (backwards) {
+d264 1
+a264 1
+@@@@ -7391,7 +7473,9 @@@@ RCS_deltas (RCSNode *rcs, FILE *fp, stru
+d271 1
+a271 1
++		if (onbranch && !backwards)
+d275 8
+@
+
+
+1.6
+log
+@WIP port (will be worked on more, commit for safety)
+
+Some changes, in this order:
+• re-sync with MirOS base cvs
+• reduce diff against upstream
+• apply cvs-datetime.patch from Arkadiusz Miskiewicz <arekm>
+  via Concurrent Versions System - Bugs: bug #21523, can't parse date/time: =UTC when commiting file (workaround/fix attached)
+• apply (only those considered somewhat sane) patches from Debian cvs_1:1.12.13-12
+  – 11_check_method_crash
+  – 12_rcs2log_POSIX_sort
+  – 14_ext_expansion
+  – 15_PATH_MAX_check
+  – 20_readdir_errno
+  – 21_getcwd_chroot
+  – 25_import-n-X
+  – 51_newlines_in_commit_template (partially)
+  – 55_keyword_alphanumerics (modified)
+  – 62_cvsrc_whitespace
+  – 65_login_cvspass_message
+  – 69_ext_allowroot (modified)
+  – 71_cvsbug_tmpfix
+  – 81_fix_-l (modified)
+  – 85_normalize_correct_roots
+  – 86_server_wrapper (modified)
+  – 93_homedir (modified)
+  – 95_flag_conflicted_copies
+  – 96_manpage_fixes (partially)
+  – 97_cvs.info.typo (partially)
+  – 98_fix_sparc_sigbus.diff
+• document Debian’s changes in the Texinfo manual
+• modify mkman.pl to produce more correct looking output
+• point to texinfo HTML document from HTML manpage
+• fix fseeko configure.in test
+• correct bugs in Debian’s changes
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 1
+a3 1
++++ src/rcs.c	Wed Sep 15 19:51:42 2010
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.5 2009/09/06 11:51:01 tg Exp $");
+d177 107
+@
+
+
+1.5
+log
+@apply cid 1004AA2AEDB55018A46 (-rtag:BASE support) here as well
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.4 2008/03/02 20:35:18 tg Exp $
+d3 1
+a3 1
++++ src/rcs.c	Sun Sep  6 11:31:07 2009
+d8 1
+a8 1
++__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/rcs.c,v 1.9 2009/09/05 18:33:40 tg Exp $");
+d139 17
+@
+
+
+1.4
+log
+@sync
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.3 2007/06/06 13:46:44 tg Exp $
+d3 1
+a3 1
++++ src/rcs.c	Wed Jun  6 13:37:36 2007
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.3 2007/06/06 13:46:44 tg Exp $");
+d21 26
+a46 1
+@@@@ -3120,6 +3123,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d54 1
+a54 1
+@@@@ -3134,7 +3138,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d63 1
+a63 1
+@@@@ -3144,15 +3148,14 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d83 1
+a83 1
+@@@@ -3173,7 +3176,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d92 1
+a92 1
+@@@@ -3475,6 +3478,7 @@@@ enum keyword
+d100 1
+a100 1
+@@@@ -3511,6 +3515,7 @@@@ new_keywords (void)
+d108 1
+a108 1
+@@@@ -3544,6 +3549,30 @@@@ printable_date (const char *rcs_date)
+d139 1
+a139 1
+@@@@ -3741,6 +3770,11 @@@@ expand_keywords (RCSNode *rcs, RCSVers *
+d151 1
+a151 1
+@@@@ -5081,7 +5115,7 @@@@ RCS_checkin (RCSNode *rcs, const char *u
+@
+
+
+1.3
+log
+@support the $Mdocdate keyword of that Other bsd
+credits to jmc@@obsd for the idea and most of the code
+actual implementation by me though
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.2 2007/03/10 23:53:50 tg Exp $
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.2 2007/03/10 23:53:50 tg Exp $");
+d94 1
+a94 1
++    const char *months[] = { "January", "Febuary", "March", "April",
+@
+
+
+1.2
+log
+@sync the cvs port and the cvs in the base system;
+RCSID stuff like in commitid 10045F33CB2157CFEAE
+@
+text
+@d1 3
+a3 3
+$MirOS: ports/devel/cvs/patches/patch-src_rcs_c,v 1.1 2006/10/02 05:59:18 tg Exp $
+--- src/rcs.c.orig	Sat Mar 10 23:14:20 2007
++++ src/rcs.c	Sat Mar 10 23:14:14 2007
+d8 1
+a8 1
++__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/rcs.c,v 1.5 2005/12/05 22:12:48 tg Exp $");
+d13 9
+a21 1
+@@@@ -3120,6 +3122,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d29 1
+a29 1
+@@@@ -3134,7 +3137,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d38 1
+a38 1
+@@@@ -3144,15 +3147,14 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d58 1
+a58 1
+@@@@ -3173,7 +3175,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d67 60
+a126 1
+@@@@ -5081,7 +5083,7 @@@@ RCS_checkin (RCSNode *rcs, const char *u
+@
+
+
+1.1
+log
+@add cvs port, compiles fine and warning-free on MirOS-current;
+other OSes not tested, older MirOS may have issues (mktime, regex/wctype)
+@
+text
+@d1 13
+a13 4
+$MirOS$
+--- src/rcs.c.orig	Wed Sep 28 15:25:37 2005
++++ src/rcs.c	Mon Oct  2 04:40:37 2006
+@@@@ -3120,6 +3120,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d21 1
+a21 1
+@@@@ -3134,7 +3135,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d30 1
+a30 1
+@@@@ -3144,15 +3145,14 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d43 1
+a43 1
+     tdate = Xasprintf ("%d-%d-%d %d:%d:%d -0000",
+d45 2
+a46 1
++		       (int)xtm.tm_year + 1900, xtm.tm_mon, xtm.tm_mday,
+d50 1
+a50 1
+@@@@ -3173,7 +3173,7 @@@@ RCS_getrevtime (RCSNode *rcs, const char
+d55 1
+a55 1
++			(int)ftm->tm_year + (ftm->tm_year < 100 ? 0 : 1900),
+d59 1
+a59 1
+@@@@ -5081,7 +5081,7 @@@@ RCS_checkin (RCSNode *rcs, const char *u
+d64 1
+a64 1
++			     (int)ftm->tm_year + (ftm->tm_year < 100 ? 0 : 1900),
+@
+

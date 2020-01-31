@@ -1,0 +1,561 @@
+head	1.1;
+branch	1.1.109;
+access;
+symbols
+	lynx-2_8_8dev_16:1.1.109.4
+	lynx-2_8_8dev_15e:1.1.109.4
+	lynx-2_8_8dev_15:1.1.109.3
+	lynx-2_8_8dev_14:1.1.109.3
+	lynx-2_8_8dev_12:1.1.109.3
+	lynx-2_8_8dev_11:1.1.109.3
+	lynx-2_8_8dev_10a:1.1.109.3
+	lynx-2_8_8dev_7a:1.1.109.3
+	lynx-2_8_8dev_7:1.1.109.3
+	lynx-2_8_7rel_1:1.1.109.2
+	lynx-2_8_7dev_12:1.1.109.2
+	lynx-2_8_7dev_11a:1.1.109.2
+	MIRBSD_10:1.1.109.1.0.4
+	MIRBSD_10_BASE:1.1.109.1
+	lynx-2_8_7dev_8:1.1.109.1
+	lynx-2_8_7dev_7:1.1.109.1
+	lynx-2_8_7dev_5:1.1.109.1
+	lynx-2_8_7dev_2:1.1.109.1
+	lynx-2_8_6pre_5:1.1.109.1
+	lynx-2_8_6pre_4:1.1.109.1
+	lynx-2_8_6pre_3:1.1.109.1
+	MIRBSD_9_BASE:1.1.109.1
+	lynx-2_8_6dev_18c:1.1.109.1
+	lynx-2_8_6dev_18:1.1.109.1
+	MIRBSD_8:1.1.109.1.0.2
+	MIRBSD_8_BASE:1.1.109.1
+	lynx-2_8_6dev_16:1.1.109.1
+	lynx:1.1.109;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.03.27.22.11.55;	author tg;	state Exp;
+branches
+	1.1.109.1;
+next	;
+
+1.1.109.1
+date	2005.03.27.22.11.55;	author tg;	state Exp;
+branches;
+next	1.1.109.2;
+
+1.1.109.2
+date	2008.12.16.23.13.08;	author tg;	state Exp;
+branches;
+next	1.1.109.3;
+commitid	100494835F965A87026;
+
+1.1.109.3
+date	2010.12.19.18.12.41;	author tg;	state Exp;
+branches;
+next	1.1.109.4;
+commitid	1004D0E4B24304015D1;
+
+1.1.109.4
+date	2013.05.18.14.43.56;	author tg;	state Exp;
+branches;
+next	;
+commitid	100519793BB3FCC7E2F;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*	A small List class					      HTList.c
+ *	==================
+ *
+ *	A list is represented as a sequence of linked nodes of type HTList.
+ *	The first node is a header which contains no object.
+ *	New nodes are inserted between the header and the rest of the list.
+ */
+
+#include <HTUtils.h>
+#include <HTList.h>
+
+#include <LYLeaks.h>
+
+/*	Create list.
+*/
+HTList *HTList_new(void)
+{
+    HTList *newList;
+
+    if ((newList = typeMalloc(HTList)) == NULL)
+	  outofmem(__FILE__, "HTList_new");
+
+    newList->object = NULL;
+    newList->next = NULL;
+
+    return newList;
+}
+
+/*	Delete list.
+*/
+void HTList_delete(HTList *me)
+{
+    HTList *current;
+
+    while ((current = me)) {
+	me = me->next;
+	FREE(current);
+    }
+
+    return;
+}
+
+/*	Reverse order of elements in list.
+ */
+HTList *HTList_reverse(HTList *start)
+{
+    HTList *cur, *succ;
+
+    if (!(start && start->next && (cur = start->next->next)))
+	return start;
+    start->next->next = NULL;
+    while (cur) {
+	succ = cur->next;
+	cur->next = start->next;
+	start->next = cur;
+	cur = succ;
+    }
+    return start;
+}
+
+/*	Append a list to another.
+ *
+ *	If successful, the second list will become empty but not freed.
+ */
+HTList *HTList_appendList(HTList *start,
+			  HTList *tail)
+{
+    HTList *temp = start;
+
+    if (!start) {
+	CTRACE((tfp,
+		"HTList: Trying to append list %p to a nonexisting list\n",
+		tail));
+	return NULL;
+    }
+    if (!(tail && tail->next))
+	return start;
+
+    while (temp->next)
+	temp = temp->next;
+
+    temp->next = tail->next;
+    tail->next = NULL;		/* tail is now an empty list */
+    return start;
+}
+
+/*	Link object to START of list (so it is pointed to by the head).
+ *
+ *	Unlike HTList_addObject(), it does not malloc memory for HTList entry,
+ *	it use already allocated memory which should not be free'd by any
+ *	list operations (optimization).
+ */
+void HTList_linkObject(HTList *me, void *newObject,
+		       HTList *newNode)
+{
+    if (me) {
+	if (newNode->object == NULL && newNode->next == NULL) {
+	    /*  It is safe: */
+	    newNode->object = newObject;
+	    newNode->next = me->next;
+	    me->next = newNode;
+
+	} else {
+	    /*
+	     * This node is already linked to some list (probably this one), so
+	     * refuse changing node pointers to keep the list valid!!!
+	     */
+	    CTRACE((tfp, "*** HTList: Refuse linking already linked obj "));
+	    CTRACE((tfp, "%p, node %p, list %p\n",
+		    newObject, newNode, me));
+	}
+
+    } else {
+	CTRACE((tfp,
+		"HTList: Trying to link object %p to a nonexisting list\n",
+		newObject));
+    }
+
+    return;
+}
+
+/*      Add object to START of list (so it is pointed to by the head).
+*/
+void HTList_addObject(HTList *me, void *newObject)
+{
+    HTList *newNode;
+
+    if (me) {
+	if ((newNode = typeMalloc(HTList)) == NULL)
+	      outofmem(__FILE__, "HTList_addObject");
+
+	newNode->object = newObject;
+	newNode->next = me->next;
+	me->next = newNode;
+
+    } else {
+	CTRACE((tfp, "HTList: Trying to add object %p to a nonexisting list\n",
+		newObject));
+    }
+
+    return;
+}
+
+/*      Append object to END of list (furthest from the head).
+*/
+void HTList_appendObject(HTList *me, void *newObject)
+{
+    HTList *temp = me;
+
+    if (temp && newObject) {
+	while (temp->next)
+	    temp = temp->next;
+	HTList_addObject(temp, newObject);
+    }
+
+    return;
+}
+
+/*	Insert an object into the list at a specified position.
+ *      If position is 0, this places the object at the head of the list
+ *      and is equivalent to HTList_addObject().
+ */
+void HTList_insertObjectAt(HTList *me, void *newObject,
+			   int pos)
+{
+    HTList *newNode;
+    HTList *temp = me;
+    HTList *prevNode;
+    int Pos = pos;
+
+    if (!temp) {
+	CTRACE((tfp, "HTList: Trying to add object %p to a nonexisting list\n",
+		newObject));
+	return;
+    }
+    if (Pos < 0) {
+	Pos = 0;
+	CTRACE((tfp, "HTList: Treating negative object position %d as %d.\n",
+		pos, Pos));
+    }
+
+    prevNode = temp;
+    while ((temp = temp->next)) {
+	if (Pos == 0) {
+	    if ((newNode = typeMalloc(HTList)) == NULL)
+		  outofmem(__FILE__, "HTList_addObjectAt");
+
+	    newNode->object = newObject;
+	    newNode->next = temp;
+	    if (prevNode)
+		prevNode->next = newNode;
+	    return;
+	}
+	prevNode = temp;
+	Pos--;
+    }
+    if (Pos >= 0)
+	HTList_addObject(prevNode, newObject);
+
+    return;
+}
+
+/*	Unlink specified object from list.
+ *	It does not free memory.
+ */
+BOOL HTList_unlinkObject(HTList *me, void *oldObject)
+{
+    HTList *temp = me;
+    HTList *prevNode;
+
+    if (temp && oldObject) {
+	while (temp->next) {
+	    prevNode = temp;
+	    temp = temp->next;
+	    if (temp->object == oldObject) {
+		prevNode->next = temp->next;
+		temp->next = NULL;
+		temp->object = NULL;
+		return YES;	/* Success */
+	    }
+	}
+    }
+    return NO;			/* object not found or NULL list */
+}
+
+/*	Remove specified object from list.
+*/
+BOOL HTList_removeObject(HTList *me, void *oldObject)
+{
+    HTList *temp = me;
+    HTList *prevNode;
+
+    if (temp && oldObject) {
+	while (temp->next) {
+	    prevNode = temp;
+	    temp = temp->next;
+	    if (temp->object == oldObject) {
+		prevNode->next = temp->next;
+		FREE(temp);
+		return YES;	/* Success */
+	    }
+	}
+    }
+    return NO;			/* object not found or NULL list */
+}
+
+/*	Remove object at a given position in the list, where 0 is the
+ *	object pointed to by the head (returns a pointer to the element
+ *	(->object) for the object, and NULL if the list is empty, or
+ *	if it doesn't exist - Yuk!).
+ */
+void *HTList_removeObjectAt(HTList *me, int position)
+{
+    HTList *temp = me;
+    HTList *prevNode;
+    int pos = position;
+
+    if (!temp || pos < 0)
+	return NULL;
+
+    prevNode = temp;
+    while ((temp = temp->next)) {
+	if (pos == 0) {
+	    prevNode->next = temp->next;
+	    prevNode = temp;
+	    FREE(temp);
+	    return prevNode->object;
+	}
+	prevNode = temp;
+	pos--;
+    }
+
+    return NULL;		/* Reached the end of the list */
+}
+
+/*	Unlink object from START of list (the Last one inserted
+ *	via HTList_linkObject(), and pointed to by the head).
+ *	It does not free memory.
+ */
+void *HTList_unlinkLastObject(HTList *me)
+{
+    HTList *lastNode;
+    void *lastObject;
+
+    if (me && me->next) {
+	lastNode = me->next;
+	lastObject = lastNode->object;
+	me->next = lastNode->next;
+	lastNode->next = NULL;
+	lastNode->object = NULL;
+	return lastObject;
+
+    } else {			/* Empty list */
+	return NULL;
+    }
+}
+
+/*	Remove object from START of list (the Last one inserted
+ *	via HTList_addObject(), and pointed to by the head).
+ */
+void *HTList_removeLastObject(HTList *me)
+{
+    HTList *lastNode;
+    void *lastObject;
+
+    if (me && me->next) {
+	lastNode = me->next;
+	lastObject = lastNode->object;
+	me->next = lastNode->next;
+	FREE(lastNode);
+	return lastObject;
+
+    } else {			/* Empty list */
+	return NULL;
+    }
+}
+
+/*	Remove object from END of list (the First one inserted
+ *	via HTList_addObject(), and furthest from the head).
+ */
+void *HTList_removeFirstObject(HTList *me)
+{
+    HTList *temp = me;
+    HTList *prevNode;
+    void *firstObject;
+
+    if (!temp)
+	return NULL;
+
+    prevNode = temp;
+    if (temp->next) {
+	while (temp->next) {
+	    prevNode = temp;
+	    temp = temp->next;
+	}
+	firstObject = temp->object;
+	prevNode->next = NULL;
+	FREE(temp);
+	return firstObject;
+
+    } else {			/* Empty list */
+	return NULL;
+    }
+}
+
+/*	Determine total number of objects in the list,
+ *	not counting the head.
+ */
+int HTList_count(HTList *me)
+{
+    HTList *temp = me;
+    int count = 0;
+
+    if (temp)
+	while ((temp = temp->next))
+	    count++;
+
+    return count;
+}
+
+/*	Determine position of an object in the list (a value of 0
+ *	means it is pointed to by the head; returns -1 if not found).
+ */
+int HTList_indexOf(HTList *me, void *object)
+{
+    HTList *temp = me;
+    int position = 0;
+
+    if (temp) {
+	while ((temp = temp->next)) {
+	    if (temp->object == object)
+		return position;
+	    position++;
+	}
+    }
+
+    return -1;			/* Object not in the list */
+}
+
+/*	Return pointer to the object at a specified position in the list,
+ *	where 0 is the object pointed to by the head (returns NULL if
+ *	the list is empty, or if it doesn't exist - Yuk!).
+ */
+void *HTList_objectAt(HTList *me, int position)
+{
+    HTList *temp = me;
+    int pos = position;
+
+    if (!temp || pos < 0)
+	return NULL;
+
+    while ((temp = temp->next)) {
+	if (pos == 0)
+	    return temp->object;
+	pos--;
+    }
+
+    return NULL;		/* Reached the end of the list */
+}
+@
+
+
+1.1.109.1
+log
+@Lynx 2.8.6dev.11h (pre-patch) minus
+* lib
+* po
+* scripts
+@
+text
+@@
+
+
+1.1.109.2
+log
+@Import Lynx 2.8.7dev.11a via eMail from Tom Dickey:
+Message-ID: <20081215010313.GA8373@@invisible-island.net>
+Message-ID: <20081216012408.GA15364@@invisible-island.net>
+@
+text
+@d1 1
+a1 4
+/*
+ * $LynxId: HTList.c,v 1.17 2008/09/18 21:36:59 tom Exp $
+ *
+ *	A small List class					      HTList.c
+d73 1
+a73 1
+		(void *) tail));
+d110 1
+a110 1
+		    (void *) newObject, (void *) newNode, (void *) me));
+@
+
+
+1.1.109.3
+log
+@Import lynx-current
+@
+text
+@d2 1
+a2 1
+ * $LynxId: HTList.c,v 1.18 2010/04/29 09:59:31 tom Exp $
+a25 2
+    assert(newList != NULL);
+
+a134 2
+	assert(newNode != NULL);
+
+a190 2
+	    assert(newNode != NULL);
+
+@
+
+
+1.1.109.4
+log
+@Update to the latest Lynx patchkit
+@
+text
+@d2 1
+a2 1
+ * $LynxId: HTList.c,v 1.19 2013/01/04 00:31:27 tom Exp $
+a265 1
+    void *result = NULL;
+d267 7
+a273 9
+    if (temp != NULL && pos >= 0) {
+	prevNode = temp;
+	while ((temp = temp->next) != NULL) {
+	    if (pos == 0) {
+		prevNode->next = temp->next;
+		result = temp->object;
+		FREE(temp);
+		break;
+	    }
+d275 2
+a276 1
+	    pos--;
+d278 2
+d282 1
+a282 1
+    return result;
+@
+
+

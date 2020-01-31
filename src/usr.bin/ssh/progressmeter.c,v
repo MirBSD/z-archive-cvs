@@ -1,0 +1,650 @@
+head	1.5;
+access;
+symbols
+	cvs-200910041320:1.1.1.6
+	cvs-200903221200:1.1.1.6
+	cvs-200812162015:1.1.1.6
+	cvs-200804031830:1.1.1.6
+	MIRBSD_10:1.4.0.2
+	MIRBSD_10_BASE:1.4
+	cvs-200803022030:1.1.1.6
+	cvs-200709131337:1.1.1.6
+	cvs-200709021830:1.1.1.6
+	cvs-200708201200:1.1.1.6
+	cvs-200706161500:1.1.1.6
+	cvs-200705192215:1.1.1.6
+	cvs-200704292000:1.1.1.6
+	cvs-200703080900:1.1.1.6
+	cvs-200701251600:1.1.1.6
+	cvs-200612111600:1.1.1.6
+	cvs-200611090230:1.1.1.6
+	OPENBSD_4_0:1.1.1.6
+	MIRBSD_9_BASE:1.3
+	cvs-200606162342:1.1.1.5
+	cvs-200606022000:1.1.1.5
+	cvs-200604191000:1.1.1.5
+	cvs-200602220045:1.1.1.4
+	MIRBSD_8:1.1.1.3.0.2
+	MIRBSD_8_BASE:1.1.1.3
+	cvs-200512201942:1.1.1.3
+	cvs-200511231930:1.1.1.3
+	cvs-200507211800:1.1.1.3
+	cvs-200506221550:1.1.1.3
+	cvs-200505050030:1.1.1.2
+	cvs-200504291700:1.1.1.2
+	cvs-200504261445:1.1.1.1
+	cvs-200504141900:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2013.10.31.20.07.12;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005272B7081B0E5655;
+
+1.4
+date	2006.09.20.21.41.00;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004511B578580E7F04;
+
+1.3
+date	2006.04.19.10.40.50;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100444613BD3A91C28B;
+
+1.2
+date	2006.02.22.02.16.47;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043FBC991512A442B;
+
+1.1
+date	2005.02.05.17.29.52;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.52;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.29.17.06.15;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2005.06.22.15.56.27;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	181342b98a38fe99;
+
+1.1.1.4
+date	2006.02.22.00.51.35;	author tg;	state Exp;
+branches;
+next	1.1.1.5;
+commitid	10043FBB5A933C3BB9B;
+
+1.1.1.5
+date	2006.04.19.10.15.03;	author tg;	state Exp;
+branches;
+next	1.1.1.6;
+commitid	10044460DB21E1F715C;
+
+1.1.1.6
+date	2006.09.20.19.06.49;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045119150397FC669;
+
+
+desc
+@@
+
+
+1.5
+log
+@adapt most __attribute__((…)) occurrences to new KNF style(9)
+@
+text
+@/* $OpenBSD: progressmeter.c,v 1.37 2006/08/03 03:34:42 deraadt Exp $ */
+/*
+ * Copyright © 2013
+ *	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+ * Copyright (c) 2003 Nils Nordman.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+#include <sys/ioctl.h>
+#include <sys/uio.h>
+
+#include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "progressmeter.h"
+#include "atomicio.h"
+
+__RCSID("$MirOS: src/usr.bin/ssh/progressmeter.c,v 1.4 2006/09/20 21:41:00 tg Exp $");
+
+#define DEFAULT_WINSIZE 80
+#define MAX_WINSIZE 512
+#define PADDING 1		/* padding between the progress indicators */
+#define UPDATE_INTERVAL 1	/* update the progress meter every second */
+#define STALL_TIME 5		/* we're stalled after this many seconds */
+
+/* determines whether we can output to the terminal */
+static int can_output(void);
+
+/* formats and inserts the specified size into the given buffer */
+static void format_size(char *, int, off_t);
+static void format_rate(char *, int, off_t);
+
+/* window resizing */
+static void sig_winch(int);
+static void setscreensize(void);
+
+/* updates the progressmeter to reflect the current state of the transfer */
+void refresh_progress_meter(void);
+
+/* signal handler for updating the progress meter */
+static void update_progress_meter(int);
+
+static time_t start;		/* start progress */
+static time_t last_update;	/* last progress update */
+static char *file;		/* name of the file being transferred */
+static off_t end_pos;		/* ending position of transfer */
+static off_t cur_pos;		/* transfer position as of last refresh */
+static volatile off_t *counter;	/* progress counter */
+static long stalled;		/* how long we have been stalled */
+static int bytes_per_second;	/* current speed in bytes per second */
+static int win_size;		/* terminal window size */
+static volatile sig_atomic_t win_resized; /* for window resizing */
+
+/* units for format_size */
+static const char unit[] = " KMGT";
+
+static int
+can_output(void)
+{
+	return (getpgrp() == tcgetpgrp(STDOUT_FILENO));
+}
+
+static void
+format_rate(char *buf, int size, off_t bytes)
+{
+	int i;
+
+	bytes *= 100;
+	for (i = 0; bytes >= 100*1000 && unit[i] != 'T'; i++)
+		bytes = (bytes + 512) / 1024;
+	if (i == 0) {
+		i++;
+		bytes = (bytes + 512) / 1024;
+	}
+	snprintf(buf, size, "%3lld.%1lld%c%s",
+	    (long long) (bytes + 5) / 100,
+	    (long long) (bytes + 5) / 10 % 10,
+	    unit[i],
+	    i ? "B" : " ");
+}
+
+static void
+format_size(char *buf, int size, off_t bytes)
+{
+	int i;
+
+	for (i = 0; bytes >= 10000 && unit[i] != 'T'; i++)
+		bytes = (bytes + 512) / 1024;
+	snprintf(buf, size, "%4lld%c%s",
+	    (long long) bytes,
+	    unit[i],
+	    i ? "B" : " ");
+}
+
+void
+refresh_progress_meter(void)
+{
+	char buf[MAX_WINSIZE + 1];
+	time_t now;
+	off_t transferred;
+	double elapsed;
+	int percent;
+	off_t bytes_left;
+	int cur_speed;
+	int hours, minutes, seconds;
+	int i, len;
+	int file_len;
+
+	transferred = *counter - cur_pos;
+	cur_pos = *counter;
+	now = time(NULL);
+	bytes_left = end_pos - cur_pos;
+
+	if (bytes_left > 0)
+		elapsed = now - last_update;
+	else {
+		elapsed = now - start;
+		/* Calculate true total speed when done */
+		transferred = end_pos;
+		bytes_per_second = 0;
+	}
+
+	/* calculate speed */
+	if (elapsed != 0)
+		cur_speed = (transferred / elapsed);
+	else
+		cur_speed = transferred;
+
+#define AGE_FACTOR 0.9
+	if (bytes_per_second != 0) {
+		bytes_per_second = (bytes_per_second * AGE_FACTOR) +
+		    (cur_speed * (1.0 - AGE_FACTOR));
+	} else
+		bytes_per_second = cur_speed;
+
+	/* filename */
+	buf[0] = '\0';
+	file_len = win_size - 35;
+	if (file_len > 0) {
+		len = snprintf(buf, file_len + 1, "\r%s", file);
+		if (len < 0)
+			len = 0;
+		if (len >= file_len + 1)
+			len = file_len;
+		for (i = len; i < file_len; i++)
+			buf[i] = ' ';
+		buf[file_len] = '\0';
+	}
+
+	/* percent of transfer done */
+	if (end_pos != 0)
+		percent = ((float)cur_pos / end_pos) * 100;
+	else
+		percent = 100;
+	snprintf(buf + strlen(buf), win_size - strlen(buf),
+	    " %3d%% ", percent);
+
+	/* amount transferred */
+	format_size(buf + strlen(buf), win_size - strlen(buf),
+	    cur_pos);
+	strlcat(buf, " ", win_size);
+
+	/* bandwidth usage */
+	format_rate(buf + strlen(buf), win_size - strlen(buf),
+	    (off_t)bytes_per_second);
+	strlcat(buf, "/s ", win_size);
+
+	/* ETA */
+	if (!transferred)
+		stalled += elapsed;
+	else
+		stalled = 0;
+
+	if (stalled >= STALL_TIME)
+		strlcat(buf, "- stalled -", win_size);
+	else if (bytes_per_second == 0 && bytes_left)
+		strlcat(buf, "  --:-- ETA", win_size);
+	else {
+		if (bytes_left > 0)
+			seconds = bytes_left / bytes_per_second;
+		else
+			seconds = elapsed;
+
+		hours = seconds / 3600;
+		seconds -= hours * 3600;
+		minutes = seconds / 60;
+		seconds -= minutes * 60;
+
+		if (hours != 0)
+			snprintf(buf + strlen(buf), win_size - strlen(buf),
+			    "%d:%02d:%02d", hours, minutes, seconds);
+		else
+			snprintf(buf + strlen(buf), win_size - strlen(buf),
+			    "  %02d:%02d", minutes, seconds);
+
+		if (bytes_left > 0)
+			strlcat(buf, " ETA", win_size);
+		else
+			strlcat(buf, "    ", win_size);
+	}
+
+	atomicio(vwrite, STDOUT_FILENO, buf, win_size - 1);
+	last_update = now;
+}
+
+/*ARGSUSED*/
+static void
+update_progress_meter(int ignore __attribute__((__unused__)))
+{
+	int save_errno;
+
+	save_errno = errno;
+
+	if (win_resized) {
+		setscreensize();
+		win_resized = 0;
+	}
+	if (can_output())
+		refresh_progress_meter();
+
+	signal(SIGALRM, update_progress_meter);
+	alarm(UPDATE_INTERVAL);
+	errno = save_errno;
+}
+
+void
+start_progress_meter(char *f, off_t filesize, off_t *ctr)
+{
+	start = last_update = time(NULL);
+	file = f;
+	end_pos = filesize;
+	cur_pos = 0;
+	counter = ctr;
+	stalled = 0;
+	bytes_per_second = 0;
+
+	setscreensize();
+	if (can_output())
+		refresh_progress_meter();
+
+	signal(SIGALRM, update_progress_meter);
+	signal(SIGWINCH, sig_winch);
+	alarm(UPDATE_INTERVAL);
+}
+
+void
+stop_progress_meter(void)
+{
+	alarm(0);
+
+	if (!can_output())
+		return;
+
+	/* Ensure we complete the progress */
+	if (cur_pos != end_pos)
+		refresh_progress_meter();
+
+	atomicio(vwrite, STDOUT_FILENO, (char *)"\n", 1);
+}
+
+/*ARGSUSED*/
+static void
+sig_winch(int sig __attribute__((__unused__)))
+{
+	win_resized = 1;
+}
+
+static void
+setscreensize(void)
+{
+	struct winsize winsize;
+
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize) != -1 &&
+	    winsize.ws_col != 0) {
+		if (winsize.ws_col > MAX_WINSIZE)
+			win_size = MAX_WINSIZE;
+		else
+			win_size = winsize.ws_col;
+	} else
+		win_size = DEFAULT_WINSIZE;
+	win_size += 1;					/* trailing \0 */
+}
+@
+
+
+1.4
+log
+@finish merging
+@
+text
+@d3 2
+d42 1
+a42 1
+__RCSID("$MirOS$");
+d232 1
+a232 1
+update_progress_meter(int ignore __attribute__((unused)))
+d287 1
+a287 1
+sig_winch(int sig __attribute__((unused)))
+@
+
+
+1.3
+log
+@merge and clean up
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: progressmeter.c,v 1.29 2006/03/25 13:17:02 djm Exp $ */
+d26 1
+a26 3
+#include "includes.h"
+__RCSID("$MirOS: src/usr.bin/ssh/progressmeter.c,v 1.2 2006/02/22 02:16:47 tg Exp $");
+
+d28 1
+d30 1
+d32 4
+d40 2
+d167 1
+a167 1
+		for (i = len;  i < file_len; i++ )
+d228 1
+@
+
+
+1.2
+log
+@fix a lot of and kludge a few more __CRAZY problems, sync rcs id
+@
+text
+@d1 1
+d27 1
+a27 1
+RCSID("$MirOS: progressmeter.c,v 1.26 2006/02/20 17:02:44 stevesk Exp $");
+d276 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d26 5
+a30 1
+RCSID("$OpenBSD: progressmeter.c,v 1.22 2004/07/11 17:48:47 deraadt Exp $");
+d48 4
+d67 1
+d158 2
+d222 1
+a222 1
+update_progress_meter(int ignore)
+d228 4
+a242 2
+	struct winsize winsize;
+
+d251 1
+a251 10
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize) != -1 &&
+	    winsize.ws_col != 0) {
+		if (winsize.ws_col > MAX_WINSIZE)
+			win_size = MAX_WINSIZE;
+		else
+			win_size = winsize.ws_col;
+	} else
+		win_size = DEFAULT_WINSIZE;
+	win_size += 1;					/* trailing \0 */
+
+d256 1
+d272 23
+a294 1
+	atomicio(vwrite, STDOUT_FILENO, "\n", 1);
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@improve my Frankenstein OS (*wink* you know who you are) further
+sans wchar_t of course
+
+this is the essence of reading >1200 commit messages which suck
+due to not having the new format of ours...
+@
+text
+@d26 1
+a26 1
+RCSID("$OpenBSD: progressmeter.c,v 1.23 2005/04/28 10:17:56 moritz Exp $");
+a148 2
+		if (len >= file_len + 1)
+			len = file_len;
+@
+
+
+1.1.1.3
+log
+@most current OpenSSH.com
+@
+text
+@d26 1
+a26 1
+RCSID("$OpenBSD: progressmeter.c,v 1.24 2005/06/07 13:25:23 jaredy Exp $");
+a43 4
+/* window resizing */
+static void sig_winch(int);
+static void setscreensize(void);
+
+a58 1
+static volatile sig_atomic_t win_resized; /* for window resizing */
+a218 4
+	if (win_resized) {
+		setscreensize();
+		win_resized = 0;
+	}
+d230 2
+d240 10
+a249 1
+	setscreensize();
+a253 1
+	signal(SIGWINCH, sig_winch);
+a270 22
+
+static void
+sig_winch(int sig)
+{
+	win_resized = 1;
+}
+
+static void
+setscreensize(void)
+{
+	struct winsize winsize;
+
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize) != -1 &&
+	    winsize.ws_col != 0) {
+		if (winsize.ws_col > MAX_WINSIZE)
+			win_size = MAX_WINSIZE;
+		else
+			win_size = winsize.ws_col;
+	} else
+		win_size = DEFAULT_WINSIZE;
+	win_size += 1;					/* trailing \0 */
+}
+@
+
+
+1.1.1.4
+log
+@import OpenSSH-current
+@
+text
+@d26 1
+a26 5
+RCSID("$OpenBSD: progressmeter.c,v 1.26 2006/02/20 17:02:44 stevesk Exp $");
+
+#include <sys/ioctl.h>
+
+#include <signal.h>
+@
+
+
+1.1.1.5
+log
+@I decided we'd better upgrade OpenSSH before releasing to the general public
+@
+text
+@a0 1
+/* $OpenBSD: progressmeter.c,v 1.29 2006/03/25 13:17:02 djm Exp $ */
+d26 1
+a274 1
+/*ARGSUSED*/
+@
+
+
+1.1.1.6
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: progressmeter.c,v 1.37 2006/08/03 03:34:42 deraadt Exp $ */
+d26 2
+a27 1
+#include <sys/types.h>
+a28 1
+#include <sys/uio.h>
+a29 1
+#include <errno.h>
+a30 4
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+d160 1
+a160 1
+		for (i = len; i < file_len; i++)
+a220 1
+/*ARGSUSED*/
+@
+
+

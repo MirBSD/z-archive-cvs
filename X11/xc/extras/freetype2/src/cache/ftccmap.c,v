@@ -1,0 +1,1310 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.21.32;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.47.49;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.02.26.20.04.55;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.47;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.46;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.12;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.12;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.00;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftccmap.c                                                              */
+/*                                                                         */
+/*    FreeType CharMap cache (body)                                        */
+/*                                                                         */
+/*  Copyright 2000-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_CACHE_H
+#include "ftcmanag.h"
+#include FT_INTERNAL_MEMORY_H
+#include FT_INTERNAL_OBJECTS_H
+#include FT_INTERNAL_DEBUG_H
+
+#include "ftccback.h"
+#include "ftcerror.h"
+
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_cache
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* Each FTC_CMapNode contains a simple array to map a range of character */
+  /* codes to equivalent glyph indices.                                    */
+  /*                                                                       */
+  /* For now, the implementation is very basic: Each node maps a range of  */
+  /* 128 consecutive character codes to their corresponding glyph indices. */
+  /*                                                                       */
+  /* We could do more complex things, but I don't think it is really very  */
+  /* useful.                                                               */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+  /* number of glyph indices / character code per node */
+#define FTC_CMAP_INDICES_MAX  128
+
+  /* compute a query/node hash */
+#define FTC_CMAP_HASH( faceid, index, charcode )         \
+          ( FTC_FACE_ID_HASH( faceid ) + 211 * (index) + \
+            ( (charcode) / FTC_CMAP_INDICES_MAX )      )
+
+  /* the charmap query */
+  typedef struct  FTC_CMapQueryRec_
+  {
+    FTC_FaceID  face_id;
+    FT_UInt     cmap_index;
+    FT_UInt32   char_code;
+
+  } FTC_CMapQueryRec, *FTC_CMapQuery;
+
+#define FTC_CMAP_QUERY( x )  ((FTC_CMapQuery)(x))
+
+  /* the cmap cache node */
+  typedef struct  FTC_CMapNodeRec_
+  {
+    FTC_NodeRec  node;
+    FTC_FaceID   face_id;
+    FT_UInt      cmap_index;
+    FT_UInt32    first;                         /* first character in node */
+    FT_UInt16    indices[FTC_CMAP_INDICES_MAX]; /* array of glyph indices  */
+
+  } FTC_CMapNodeRec, *FTC_CMapNode;
+
+#define FTC_CMAP_NODE( x ) ( (FTC_CMapNode)( x ) )
+
+  /* if (indices[n] == FTC_CMAP_UNKNOWN), we assume that the corresponding */
+  /* glyph indices haven't been queried through FT_Get_Glyph_Index() yet   */
+#define FTC_CMAP_UNKNOWN  (FT_UInt16)~0
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                        CHARMAP NODES                          *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  FT_CALLBACK_DEF( void )
+  ftc_cmap_node_free( FTC_Node   ftcnode,
+                      FTC_Cache  cache )
+  {
+    FTC_CMapNode  node   = (FTC_CMapNode)ftcnode;
+    FT_Memory     memory = cache->memory;
+
+
+    FT_FREE( node );
+  }
+
+
+  /* initialize a new cmap node */
+  FT_CALLBACK_DEF( FT_Error )
+  ftc_cmap_node_new( FTC_Node   *ftcanode,
+                     FT_Pointer  ftcquery,
+                     FTC_Cache   cache )
+  {
+    FTC_CMapNode  *anode  = (FTC_CMapNode*)ftcanode;
+    FTC_CMapQuery  query  = (FTC_CMapQuery)ftcquery;
+    FT_Error       error;
+    FT_Memory      memory = cache->memory;
+    FTC_CMapNode   node   = NULL;
+    FT_UInt        nn;
+
+
+    if ( !FT_NEW( node ) )
+    {
+      node->face_id    = query->face_id;
+      node->cmap_index = query->cmap_index;
+      node->first      = (query->char_code / FTC_CMAP_INDICES_MAX) *
+                         FTC_CMAP_INDICES_MAX;
+
+      for ( nn = 0; nn < FTC_CMAP_INDICES_MAX; nn++ )
+        node->indices[nn] = FTC_CMAP_UNKNOWN;
+    }
+
+    *anode = node;
+    return error;
+  }
+
+
+  /* compute the weight of a given cmap node */
+  FT_CALLBACK_DEF( FT_Offset )
+  ftc_cmap_node_weight( FTC_Node   cnode,
+                        FTC_Cache  cache )
+  {
+    FT_UNUSED( cnode );
+    FT_UNUSED( cache );
+
+    return sizeof ( *cnode );
+  }
+
+
+  /* compare a cmap node to a given query */
+  FT_CALLBACK_DEF( FT_Bool )
+  ftc_cmap_node_compare( FTC_Node    ftcnode,
+                         FT_Pointer  ftcquery,
+                         FTC_Cache   cache,
+                         FT_Bool*    list_changed )
+  {
+    FTC_CMapNode   node  = (FTC_CMapNode)ftcnode;
+    FTC_CMapQuery  query = (FTC_CMapQuery)ftcquery;
+    FT_UNUSED( cache );
+
+
+    if ( list_changed )
+      *list_changed = FALSE;
+    if ( node->face_id    == query->face_id    &&
+         node->cmap_index == query->cmap_index )
+    {
+      FT_UInt32  offset = (FT_UInt32)( query->char_code - node->first );
+
+
+      return FT_BOOL( offset < FTC_CMAP_INDICES_MAX );
+    }
+
+    return 0;
+  }
+
+
+  FT_CALLBACK_DEF( FT_Bool )
+  ftc_cmap_node_remove_faceid( FTC_Node    ftcnode,
+                               FT_Pointer  ftcface_id,
+                               FTC_Cache   cache,
+                               FT_Bool*    list_changed )
+  {
+    FTC_CMapNode  node    = (FTC_CMapNode)ftcnode;
+    FTC_FaceID    face_id = (FTC_FaceID)ftcface_id;
+    FT_UNUSED( cache );
+
+
+    if ( list_changed )
+      *list_changed = FALSE;
+    return FT_BOOL( node->face_id == face_id );
+  }
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                    GLYPH IMAGE CACHE                          *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  static
+  const FTC_CacheClassRec  ftc_cmap_cache_class =
+  {
+    ftc_cmap_node_new,           /* FTC_Node_NewFunc      node_new           */
+    ftc_cmap_node_weight,        /* FTC_Node_WeightFunc   node_weight        */
+    ftc_cmap_node_compare,       /* FTC_Node_CompareFunc  node_compare       */
+    ftc_cmap_node_remove_faceid, /* FTC_Node_CompareFunc  node_remove_faceid */
+    ftc_cmap_node_free,          /* FTC_Node_FreeFunc     node_free          */
+
+    sizeof ( FTC_CacheRec ),
+    ftc_cache_init,              /* FTC_Cache_InitFunc    cache_init         */
+    ftc_cache_done,              /* FTC_Cache_DoneFunc    cache_done         */
+  };
+
+
+  /* documentation is in ftcache.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FTC_CMapCache_New( FTC_Manager     manager,
+                     FTC_CMapCache  *acache )
+  {
+    return FTC_Manager_RegisterCache( manager,
+                                      &ftc_cmap_cache_class,
+                                      FTC_CACHE_P( acache ) );
+  }
+
+
+  /* documentation is in ftcache.h */
+
+  FT_EXPORT_DEF( FT_UInt )
+  FTC_CMapCache_Lookup( FTC_CMapCache  cmap_cache,
+                        FTC_FaceID     face_id,
+                        FT_Int         cmap_index,
+                        FT_UInt32      char_code )
+  {
+    FTC_Cache         cache = FTC_CACHE( cmap_cache );
+    FTC_CMapQueryRec  query;
+    FTC_Node          node;
+    FT_Error          error;
+    FT_UInt           gindex = 0;
+    FT_Offset         hash;
+    FT_Int            no_cmap_change = 0;
+
+
+    if ( cmap_index < 0 )
+    {
+      /* Treat a negative cmap index as a special value, meaning that you */
+      /* don't want to change the FT_Face's character map through this    */
+      /* call.  This can be useful if the face requester callback already */
+      /* sets the face's charmap to the appropriate value.                */
+
+      no_cmap_change = 1;
+      cmap_index     = 0;
+    }
+
+    if ( !cache )
+    {
+      FT_TRACE0(( "FTC_CMapCache_Lookup: bad arguments, returning 0\n" ));
+      return 0;
+    }
+
+    query.face_id    = face_id;
+    query.cmap_index = (FT_UInt)cmap_index;
+    query.char_code  = char_code;
+
+    hash = FTC_CMAP_HASH( face_id, (FT_UInt)cmap_index, char_code );
+
+#if 1
+    FTC_CACHE_LOOKUP_CMP( cache, ftc_cmap_node_compare, hash, &query,
+                          node, error );
+#else
+    error = FTC_Cache_Lookup( cache, hash, &query, &node );
+#endif
+    if ( error )
+      goto Exit;
+
+    FT_ASSERT( (FT_UInt)( char_code - FTC_CMAP_NODE( node )->first ) <
+                FTC_CMAP_INDICES_MAX );
+
+    /* something rotten can happen with rogue clients */
+    if ( (FT_UInt)( char_code - FTC_CMAP_NODE( node )->first >=
+                    FTC_CMAP_INDICES_MAX ) )
+      return 0; /* XXX: should return appropriate error */
+
+    gindex = FTC_CMAP_NODE( node )->indices[char_code -
+                                            FTC_CMAP_NODE( node )->first];
+    if ( gindex == FTC_CMAP_UNKNOWN )
+    {
+      FT_Face  face;
+
+
+      gindex = 0;
+
+      error = FTC_Manager_LookupFace( cache->manager,
+                                      FTC_CMAP_NODE( node )->face_id,
+                                      &face );
+      if ( error )
+        goto Exit;
+
+      if ( (FT_UInt)cmap_index < (FT_UInt)face->num_charmaps )
+      {
+        FT_CharMap  old, cmap  = NULL;
+
+
+        old  = face->charmap;
+        cmap = face->charmaps[cmap_index];
+
+        if ( old != cmap && !no_cmap_change )
+          FT_Set_Charmap( face, cmap );
+
+        gindex = FT_Get_Char_Index( face, char_code );
+
+        if ( old != cmap && !no_cmap_change )
+          FT_Set_Charmap( face, old );
+      }
+
+      FTC_CMAP_NODE( node )->indices[char_code -
+                                     FTC_CMAP_NODE( node )->first]
+        = (FT_UShort)gindex;
+    }
+
+  Exit:
+    return gindex;
+  }
+
+
+/* END */
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 by */
+d24 1
+a33 37
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+
+  typedef enum  FTC_OldCMapType_
+  {
+    FTC_OLD_CMAP_BY_INDEX    = 0,
+    FTC_OLD_CMAP_BY_ENCODING = 1,
+    FTC_OLD_CMAP_BY_ID       = 2
+
+  } FTC_OldCMapType;
+
+
+  typedef struct  FTC_OldCMapIdRec_
+  {
+    FT_UInt  platform;
+    FT_UInt  encoding;
+
+  } FTC_OldCMapIdRec, *FTC_OldCMapId;
+
+
+  typedef struct  FTC_OldCMapDescRec_
+  {
+    FTC_FaceID       face_id;
+    FTC_OldCMapType  type;
+
+    union
+    {
+      FT_UInt           index;
+      FT_Encoding       encoding;
+      FTC_OldCMapIdRec  id;
+
+    } u;
+
+  } FTC_OldCMapDescRec, *FTC_OldCMapDesc;
+
+#endif /* FT_CONFIG_OLD_INTERNALS */
+
+
+a65 2
+#define FTC_CMAP_QUERY_HASH( x )                                         \
+          FTC_CMAP_HASH( (x)->face_id, (x)->cmap_index, (x)->char_code )
+a78 2
+#define FTC_CMAP_NODE_HASH( x )                                      \
+          FTC_CMAP_HASH( (x)->face_id, (x)->cmap_index, (x)->first )
+d82 1
+a82 1
+#define FTC_CMAP_UNKNOWN  ( (FT_UInt16)-1 )
+d116 1
+a116 1
+    FTC_CMapNode   node;
+d152 2
+a153 1
+                         FTC_Cache   cache )
+d160 2
+d178 2
+a179 1
+                               FTC_Cache   cache )
+d185 3
+d201 1
+a201 1
+  FT_CALLBACK_TABLE_DEF
+d204 5
+a208 5
+    ftc_cmap_node_new,
+    ftc_cmap_node_weight,
+    ftc_cmap_node_compare,
+    ftc_cmap_node_remove_faceid,
+    ftc_cmap_node_free,
+d211 2
+a212 2
+    ftc_cache_init,
+    ftc_cache_done,
+a227 15
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+
+  /*
+   *  Unfortunately, it is not possible to support binary backwards
+   *  compatibility in the cmap cache.  The FTC_CMapCache_Lookup signature
+   *  changes were too deep, and there is no clever hackish way to detect
+   *  what kind of structure we are being passed.
+   *
+   *  On the other hand it seems that no production code is using this
+   *  function on Unix distributions.
+   */
+
+#endif
+
+
+d241 1
+a241 1
+    FT_UInt32         hash;
+d262 3
+a264 40
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+
+    /*
+     *  Detect a call from a rogue client that thinks it is linking
+     *  to FreeType 2.1.7.  This is possible because the third parameter
+     *  is then a character code, and we have never seen any font with
+     *  more than a few charmaps, so if the index is very large...
+     *
+     *  It is also very unlikely that a rogue client is interested
+     *  in Unicode values 0 to 15.
+     *
+     *  NOTE: The original threshold was 4, but we found a font from the
+     *        Adobe Acrobat Reader Pack, named `KozMinProVI-Regular.otf',
+     *        which contains more than 5 charmaps.
+     */
+    if ( cmap_index >= 16 && !no_cmap_change )
+    {
+      FTC_OldCMapDesc  desc = (FTC_OldCMapDesc) face_id;
+
+
+      char_code     = (FT_UInt32)cmap_index;
+      query.face_id = desc->face_id;
+
+
+      switch ( desc->type )
+      {
+      case FTC_OLD_CMAP_BY_INDEX:
+        query.cmap_index = desc->u.index;
+        query.char_code  = (FT_UInt32)cmap_index;
+        break;
+
+      case FTC_OLD_CMAP_BY_ENCODING:
+        {
+          FT_Face  face;
+
+
+          error = FTC_Manager_LookupFace( cache->manager, desc->face_id,
+                                          &face );
+          if ( error )
+            return 0;
+d266 1
+a266 20
+          FT_Select_Charmap( face, desc->u.encoding );
+
+          return FT_Get_Char_Index( face, char_code );
+        }
+
+      default:
+        return 0;
+      }
+    }
+    else
+
+#endif /* FT_CONFIG_OPTION_OLD_INTERNALS */
+
+    {
+      query.face_id    = face_id;
+      query.cmap_index = (FT_UInt)cmap_index;
+      query.char_code  = char_code;
+    }
+
+    hash = FTC_CMAP_HASH( face_id, cmap_index, char_code );
+d283 1
+a283 1
+      return 0;
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006, 2007 by             */
+a24 1
+#include FT_TRUETYPE_IDS_H
+d88 3
+a90 3
+#define FTC_CMAP_HASH( faceid, index, charcode )           \
+          ( FTC_FACE_ID_HASH( faceid ) + 211 * ( index ) + \
+            ( (char_code) / FTC_CMAP_INDICES_MAX )       )
+d177 1
+a177 1
+  FT_CALLBACK_DEF( FT_ULong )
+d286 1
+a286 1
+    FTC_CMapNode      node;
+d290 1
+d293 11
+d306 1
+a306 1
+      FT_ERROR(( "FTC_CMapCache_Lookup: bad arguments, returning 0!\n" ));
+d325 1
+a325 1
+    if ( cmap_index >= 16 )
+d376 1
+a376 1
+    error = FTC_Cache_Lookup( cache, hash, &query, (FTC_Node*) &node );
+d381 2
+a382 1
+    FT_ASSERT( (FT_UInt)( char_code - node->first ) < FTC_CMAP_INDICES_MAX );
+d385 2
+a386 1
+    if ( (FT_UInt)( char_code - node->first >= FTC_CMAP_INDICES_MAX ) )
+d389 2
+a390 1
+    gindex = node->indices[char_code - node->first];
+d398 3
+a400 1
+      error = FTC_Manager_LookupFace( cache->manager, node->face_id, &face );
+d412 1
+a412 1
+        if ( old != cmap )
+d417 1
+a417 1
+        if ( old != cmap )
+d421 3
+a423 1
+      node->indices[char_code - node->first] = (FT_UShort)gindex;
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006 by                   */
+d308 5
+a312 1
+     *  in Unicode values 0 to 3.
+d314 1
+a314 1
+    if ( cmap_index >= 4 )
+a343 1
+        break;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004 by                               */
+d22 1
+a22 1
+#include FT_CACHE_INTERNAL_MANAGER_H
+d34 37
+a134 2
+  /* no need for specific finalizer; we use `ftc_node_done' directly */
+
+d136 2
+a137 2
+  ftc_cmap_node_free( FTC_CMapNode  node,
+                      FTC_Cache     cache )
+d139 2
+a140 1
+    FT_Memory  memory = cache->memory;
+d149 10
+a158 8
+  ftc_cmap_node_new( FTC_CMapNode  *anode,
+                     FTC_CMapQuery  query,
+                     FTC_Cache      cache )
+  {
+    FT_Error      error;
+    FT_Memory     memory  = cache->memory;
+    FTC_CMapNode  node;
+    FT_UInt       nn;
+d179 2
+a180 1
+  ftc_cmap_node_weight( FTC_CMapNode  cnode )
+d183 1
+d191 3
+a193 2
+  ftc_cmap_node_compare( FTC_CMapNode   node,
+                         FTC_CMapQuery  query )
+d195 5
+d214 3
+a216 2
+  ftc_cmap_node_remove_faceid( FTC_CMapNode  node,
+                               FTC_FaceID    face_id )
+d218 4
+d238 5
+a242 5
+    (FTC_Node_NewFunc)    ftc_cmap_node_new,
+    (FTC_Node_WeightFunc) ftc_cmap_node_weight,
+    (FTC_Node_CompareFunc)ftc_cmap_node_compare,
+    (FTC_Node_CompareFunc)ftc_cmap_node_remove_faceid,
+    (FTC_Node_FreeFunc)   ftc_cmap_node_free,
+d245 2
+a246 2
+    (FTC_Cache_InitFunc)  ftc_cache_init,
+    (FTC_Cache_DoneFunc)  ftc_cache_done,
+d250 1
+a250 1
+  /* documentation is in ftccmap.h */
+d262 16
+a277 1
+  /* documentation is in ftccmap.h */
+d299 56
+a354 3
+    query.face_id    = face_id;
+    query.cmap_index = (FT_UInt)cmap_index;
+    query.char_code  = char_code;
+d369 4
+d402 1
+a402 1
+      node->indices[char_code - node->first] = gindex;
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006, 2007 by             */
+d22 1
+a22 1
+#include "ftcmanag.h"
+a33 37
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+
+  typedef enum  FTC_OldCMapType_
+  {
+    FTC_OLD_CMAP_BY_INDEX    = 0,
+    FTC_OLD_CMAP_BY_ENCODING = 1,
+    FTC_OLD_CMAP_BY_ID       = 2
+
+  } FTC_OldCMapType;
+
+
+  typedef struct  FTC_OldCMapIdRec_
+  {
+    FT_UInt  platform;
+    FT_UInt  encoding;
+
+  } FTC_OldCMapIdRec, *FTC_OldCMapId;
+
+
+  typedef struct  FTC_OldCMapDescRec_
+  {
+    FTC_FaceID       face_id;
+    FTC_OldCMapType  type;
+
+    union
+    {
+      FT_UInt           index;
+      FT_Encoding       encoding;
+      FTC_OldCMapIdRec  id;
+
+    } u;
+
+  } FTC_OldCMapDescRec, *FTC_OldCMapDesc;
+
+#endif /* FT_CONFIG_OLD_INTERNALS */
+
+
+d98 2
+d101 2
+a102 2
+  ftc_cmap_node_free( FTC_Node   ftcnode,
+                      FTC_Cache  cache )
+d104 1
+a104 2
+    FTC_CMapNode  node   = (FTC_CMapNode)ftcnode;
+    FT_Memory     memory = cache->memory;
+d113 8
+a120 10
+  ftc_cmap_node_new( FTC_Node   *ftcanode,
+                     FT_Pointer  ftcquery,
+                     FTC_Cache   cache )
+  {
+    FTC_CMapNode  *anode  = (FTC_CMapNode*)ftcanode;
+    FTC_CMapQuery  query  = (FTC_CMapQuery)ftcquery;
+    FT_Error       error;
+    FT_Memory      memory = cache->memory;
+    FTC_CMapNode   node;
+    FT_UInt        nn;
+d141 1
+a141 2
+  ftc_cmap_node_weight( FTC_Node   cnode,
+                        FTC_Cache  cache )
+a143 1
+    FT_UNUSED( cache );
+d151 2
+a152 3
+  ftc_cmap_node_compare( FTC_Node    ftcnode,
+                         FT_Pointer  ftcquery,
+                         FTC_Cache   cache )
+a153 5
+    FTC_CMapNode   node  = (FTC_CMapNode)ftcnode;
+    FTC_CMapQuery  query = (FTC_CMapQuery)ftcquery;
+    FT_UNUSED( cache );
+
+
+d168 2
+a169 3
+  ftc_cmap_node_remove_faceid( FTC_Node    ftcnode,
+                               FT_Pointer  ftcface_id,
+                               FTC_Cache   cache )
+a170 4
+    FTC_CMapNode  node    = (FTC_CMapNode)ftcnode;
+    FTC_FaceID    face_id = (FTC_FaceID)ftcface_id;
+    FT_UNUSED( cache );
+
+d187 5
+a191 5
+    ftc_cmap_node_new,
+    ftc_cmap_node_weight,
+    ftc_cmap_node_compare,
+    ftc_cmap_node_remove_faceid,
+    ftc_cmap_node_free,
+d194 2
+a195 2
+    ftc_cache_init,
+    ftc_cache_done,
+d199 1
+a199 1
+  /* documentation is in ftcache.h */
+d211 1
+a211 16
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+
+  /*
+   *  Unfortunately, it is not possible to support binary backwards
+   *  compatibility in the cmap cache.  The FTC_CMapCache_Lookup signature
+   *  changes were too deep, and there is no clever hackish way to detect
+   *  what kind of structure we are being passed.
+   *
+   *  On the other hand it seems that no production code is using this
+   *  function on Unix distributions.
+   */
+
+#endif
+
+
+  /* documentation is in ftcache.h */
+d233 3
+a235 59
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+
+    /*
+     *  Detect a call from a rogue client that thinks it is linking
+     *  to FreeType 2.1.7.  This is possible because the third parameter
+     *  is then a character code, and we have never seen any font with
+     *  more than a few charmaps, so if the index is very large...
+     *
+     *  It is also very unlikely that a rogue client is interested
+     *  in Unicode values 0 to 15.
+     *
+     *  NOTE: The original threshold was 4, but we found a font from the
+     *        Adobe Acrobat Reader Pack, named `KozMinProVI-Regular.otf',
+     *        which contains more than 5 charmaps.
+     */
+    if ( cmap_index >= 16 )
+    {
+      FTC_OldCMapDesc  desc = (FTC_OldCMapDesc) face_id;
+
+
+      char_code     = (FT_UInt32)cmap_index;
+      query.face_id = desc->face_id;
+
+
+      switch ( desc->type )
+      {
+      case FTC_OLD_CMAP_BY_INDEX:
+        query.cmap_index = desc->u.index;
+        query.char_code  = (FT_UInt32)cmap_index;
+        break;
+
+      case FTC_OLD_CMAP_BY_ENCODING:
+        {
+          FT_Face  face;
+
+
+          error = FTC_Manager_LookupFace( cache->manager, desc->face_id,
+                                          &face );
+          if ( error )
+            return 0;
+
+          FT_Select_Charmap( face, desc->u.encoding );
+
+          return FT_Get_Char_Index( face, char_code );
+        }
+
+      default:
+        return 0;
+      }
+    }
+    else
+
+#endif /* FT_CONFIG_OPTION_OLD_INTERNALS */
+
+    {
+      query.face_id    = face_id;
+      query.cmap_index = (FT_UInt)cmap_index;
+      query.char_code  = char_code;
+    }
+a249 4
+    /* something rotten can happen with rogue clients */
+    if ( (FT_UInt)( char_code - node->first >= FTC_CMAP_INDICES_MAX ) )
+      return 0;
+
+d279 1
+a279 1
+      node->indices[char_code - node->first] = (FT_UShort)gindex;
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006 by                   */
+d22 1
+a22 1
+#include "ftcmanag.h"
+a33 37
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+
+  typedef enum  FTC_OldCMapType_
+  {
+    FTC_OLD_CMAP_BY_INDEX    = 0,
+    FTC_OLD_CMAP_BY_ENCODING = 1,
+    FTC_OLD_CMAP_BY_ID       = 2
+
+  } FTC_OldCMapType;
+
+
+  typedef struct  FTC_OldCMapIdRec_
+  {
+    FT_UInt  platform;
+    FT_UInt  encoding;
+
+  } FTC_OldCMapIdRec, *FTC_OldCMapId;
+
+
+  typedef struct  FTC_OldCMapDescRec_
+  {
+    FTC_FaceID       face_id;
+    FTC_OldCMapType  type;
+
+    union
+    {
+      FT_UInt           index;
+      FT_Encoding       encoding;
+      FTC_OldCMapIdRec  id;
+
+    } u;
+
+  } FTC_OldCMapDescRec, *FTC_OldCMapDesc;
+
+#endif /* FT_CONFIG_OLD_INTERNALS */
+
+
+d98 2
+d101 2
+a102 2
+  ftc_cmap_node_free( FTC_Node   ftcnode,
+                      FTC_Cache  cache )
+d104 1
+a104 2
+    FTC_CMapNode  node   = (FTC_CMapNode)ftcnode;
+    FT_Memory     memory = cache->memory;
+d113 8
+a120 10
+  ftc_cmap_node_new( FTC_Node   *ftcanode,
+                     FT_Pointer  ftcquery,
+                     FTC_Cache   cache )
+  {
+    FTC_CMapNode  *anode  = (FTC_CMapNode*)ftcanode;
+    FTC_CMapQuery  query  = (FTC_CMapQuery)ftcquery;
+    FT_Error       error;
+    FT_Memory      memory = cache->memory;
+    FTC_CMapNode   node;
+    FT_UInt        nn;
+d141 1
+a141 2
+  ftc_cmap_node_weight( FTC_Node   cnode,
+                        FTC_Cache  cache )
+a143 1
+    FT_UNUSED( cache );
+d151 2
+a152 3
+  ftc_cmap_node_compare( FTC_Node    ftcnode,
+                         FT_Pointer  ftcquery,
+                         FTC_Cache   cache )
+a153 5
+    FTC_CMapNode   node  = (FTC_CMapNode)ftcnode;
+    FTC_CMapQuery  query = (FTC_CMapQuery)ftcquery;
+    FT_UNUSED( cache );
+
+
+d168 2
+a169 3
+  ftc_cmap_node_remove_faceid( FTC_Node    ftcnode,
+                               FT_Pointer  ftcface_id,
+                               FTC_Cache   cache )
+a170 4
+    FTC_CMapNode  node    = (FTC_CMapNode)ftcnode;
+    FTC_FaceID    face_id = (FTC_FaceID)ftcface_id;
+    FT_UNUSED( cache );
+
+d187 5
+a191 5
+    ftc_cmap_node_new,
+    ftc_cmap_node_weight,
+    ftc_cmap_node_compare,
+    ftc_cmap_node_remove_faceid,
+    ftc_cmap_node_free,
+d194 2
+a195 2
+    ftc_cache_init,
+    ftc_cache_done,
+d199 1
+a199 1
+  /* documentation is in ftcache.h */
+d211 1
+a211 16
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+
+  /*
+   *  Unfortunately, it is not possible to support binary backwards
+   *  compatibility in the cmap cache.  The FTC_CMapCache_Lookup signature
+   *  changes were too deep, and there is no clever hackish way to detect
+   *  what kind of structure we are being passed.
+   *
+   *  On the other hand it seems that no production code is using this
+   *  function on Unix distributions.
+   */
+
+#endif
+
+
+  /* documentation is in ftcache.h */
+d233 3
+a235 56
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+
+    /*
+     *  Detect a call from a rogue client that thinks it is linking
+     *  to FreeType 2.1.7.  This is possible because the third parameter
+     *  is then a character code, and we have never seen any font with
+     *  more than a few charmaps, so if the index is very large...
+     *
+     *  It is also very unlikely that a rogue client is interested
+     *  in Unicode values 0 to 3.
+     */
+    if ( cmap_index >= 4 )
+    {
+      FTC_OldCMapDesc  desc = (FTC_OldCMapDesc) face_id;
+
+
+      char_code     = (FT_UInt32)cmap_index;
+      query.face_id = desc->face_id;
+
+
+      switch ( desc->type )
+      {
+      case FTC_OLD_CMAP_BY_INDEX:
+        query.cmap_index = desc->u.index;
+        query.char_code  = (FT_UInt32)cmap_index;
+        break;
+
+      case FTC_OLD_CMAP_BY_ENCODING:
+        {
+          FT_Face  face;
+
+
+          error = FTC_Manager_LookupFace( cache->manager, desc->face_id,
+                                          &face );
+          if ( error )
+            return 0;
+
+          FT_Select_Charmap( face, desc->u.encoding );
+
+          return FT_Get_Char_Index( face, char_code );
+        }
+        break;
+
+      default:
+        return 0;
+      }
+    }
+    else
+
+#endif /* FT_CONFIG_OPTION_OLD_INTERNALS */
+
+    {
+      query.face_id    = face_id;
+      query.cmap_index = (FT_UInt)cmap_index;
+      query.char_code  = char_code;
+    }
+a249 4
+    /* something rotten can happen with rogue clients */
+    if ( (FT_UInt)( char_code - node->first >= FTC_CMAP_INDICES_MAX ) )
+      return 0;
+
+d279 1
+a279 1
+      node->indices[char_code - node->first] = (FT_UShort)gindex;
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 by */
+d25 1
+d89 3
+a91 3
+#define FTC_CMAP_HASH( faceid, index, charcode )         \
+          ( FTC_FACE_ID_HASH( faceid ) + 211 * (index) + \
+            ( (charcode) / FTC_CMAP_INDICES_MAX )      )
+d178 1
+a178 1
+  FT_CALLBACK_DEF( FT_Offset )
+d287 1
+a287 1
+    FTC_Node          node;
+a290 1
+    FT_Int            no_cmap_change = 0;
+a292 11
+    if ( cmap_index < 0 )
+    {
+      /* Treat a negative cmap index as a special value, meaning that you */
+      /* don't want to change the FT_Face's character map through this    */
+      /* call.  This can be useful if the face requester callback already */
+      /* sets the face's charmap to the appropriate value.                */
+
+      no_cmap_change = 1;
+      cmap_index     = 0;
+    }
+
+d295 1
+a295 1
+      FT_TRACE0(( "FTC_CMapCache_Lookup: bad arguments, returning 0\n" ));
+d308 1
+a308 5
+     *  in Unicode values 0 to 15.
+     *
+     *  NOTE: The original threshold was 4, but we found a font from the
+     *        Adobe Acrobat Reader Pack, named `KozMinProVI-Regular.otf',
+     *        which contains more than 5 charmaps.
+d310 1
+a310 1
+    if ( cmap_index >= 16 && !no_cmap_change )
+d340 1
+d362 1
+a362 1
+    error = FTC_Cache_Lookup( cache, hash, &query, &node );
+d367 1
+a367 2
+    FT_ASSERT( (FT_UInt)( char_code - FTC_CMAP_NODE( node )->first ) <
+                FTC_CMAP_INDICES_MAX );
+d370 1
+a370 2
+    if ( (FT_UInt)( char_code - FTC_CMAP_NODE( node )->first >=
+                    FTC_CMAP_INDICES_MAX ) )
+d373 1
+a373 2
+    gindex = FTC_CMAP_NODE( node )->indices[char_code -
+                                            FTC_CMAP_NODE( node )->first];
+d381 1
+a381 3
+      error = FTC_Manager_LookupFace( cache->manager,
+                                      FTC_CMAP_NODE( node )->face_id,
+                                      &face );
+d393 1
+a393 1
+        if ( old != cmap && !no_cmap_change )
+d398 1
+a398 1
+        if ( old != cmap && !no_cmap_change )
+d402 1
+a402 3
+      FTC_CMAP_NODE( node )->indices[char_code -
+                                     FTC_CMAP_NODE( node )->first]
+        = (FT_UShort)gindex;
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2016 by                                                 */
+a23 1
+#include FT_INTERNAL_OBJECTS_H
+d33 37
+d102 2
+d117 2
+d122 1
+a122 1
+#define FTC_CMAP_UNKNOWN  (FT_UInt16)~0
+d156 1
+a156 1
+    FTC_CMapNode   node   = NULL;
+d192 1
+a192 2
+                         FTC_Cache   cache,
+                         FT_Bool*    list_changed )
+a198 2
+    if ( list_changed )
+      *list_changed = FALSE;
+d215 1
+a215 2
+                               FTC_Cache   cache,
+                               FT_Bool*    list_changed )
+a220 3
+
+    if ( list_changed )
+      *list_changed = FALSE;
+d234 1
+a234 1
+  static
+d237 5
+a241 5
+    ftc_cmap_node_new,           /* FTC_Node_NewFunc      node_new           */
+    ftc_cmap_node_weight,        /* FTC_Node_WeightFunc   node_weight        */
+    ftc_cmap_node_compare,       /* FTC_Node_CompareFunc  node_compare       */
+    ftc_cmap_node_remove_faceid, /* FTC_Node_CompareFunc  node_remove_faceid */
+    ftc_cmap_node_free,          /* FTC_Node_FreeFunc     node_free          */
+d244 2
+a245 2
+    ftc_cache_init,              /* FTC_Cache_InitFunc    cache_init         */
+    ftc_cache_done,              /* FTC_Cache_DoneFunc    cache_done         */
+d261 15
+d289 1
+a289 1
+    FT_Offset         hash;
+d310 40
+a349 3
+    query.face_id    = face_id;
+    query.cmap_index = (FT_UInt)cmap_index;
+    query.char_code  = char_code;
+d351 20
+a370 1
+    hash = FTC_CMAP_HASH( face_id, (FT_UInt)cmap_index, char_code );
+d387 1
+a387 1
+      return 0; /* XXX: should return appropriate error */
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

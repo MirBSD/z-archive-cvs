@@ -1,0 +1,148 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2010.09.18.22.35.09;	author tg;	state dead;
+branches;
+next	1.1;
+commitid	1004C953D8624E3E654;
+
+1.1
+date	2010.09.15.20.57.00;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004C9132F41004B31C;
+
+
+desc
+@@
+
+
+1.2
+log
+@wip mostly from working on testsuite
+• run part of it under posixtz (can't do for all of it because date(1) is
+  linked statically and thus not affected, which breaks parts of it)
+• sync getdate.c
+• adjust getdate testsuite against our output format
+• revert debian patches because they break things and the original issues
+  cannot be reproduced anyway
+  ‣ 93_homedir
+  ‣ 95_flag_conflicted_copies
+• parseinfo.c: correct off-by-one bug in the original GNU CVS, discovered
+  because of the testsuite (it was not adapted to binary ISO units yet)
+• sanity.sh: work on the cvs testsuite
+  – add (commented out) debug to aid temporarily
+  – configure UserAdminOptions because --with-cvs-admin-group=_cvsadmin
+  – accept our version strings
+  – recognise GNU getopt changed error messages
+  – run part of it with posixtz
+  – sync with changed output
+  – use ISO/IEC 60027-2 binary præficēs properly
+@
+text
+@$MirOS: ports/devel/cvs/patches/patch-src_filesubr_c,v 1.1 2010/09/15 20:57:00 tg Exp $
+--- src/filesubr.c.orig	Wed Sep 28 15:25:37 2005
++++ src/filesubr.c	Wed Sep 15 19:36:15 2010
+@@@@ -22,6 +22,8 @@@@
+ #include "save-cwd.h"
+ #include "xsize.h"
+ 
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_filesubr_c,v 1.1 2010/09/15 20:57:00 tg Exp $");
++
+ static int deep_remove_dir (const char *path);
+ 
+ /*
+@@@@ -795,6 +797,11 @@@@ last_component (const char *path)
+    The workaround is to put -f in inetd.conf which means that
+    get_homedir won't get called until after the switch in user ID.
+ 
++   NOTE: the above paragraph is not sufficient if the HOME environment
++   variable is set, it overrides the uid based password lookup, hence
++   the change_uid logic path that blocks the HOME environment variable
++   when the uid gets changed.
++
+    The whole concept of a "home directory" on the server is pretty
+    iffy, although I suppose some people probably are relying on it for
+    .cvsrc and such, in the cases where it works.  */
+@@@@ -802,15 +809,25 @@@@ char *
+ get_homedir (void)
+ {
+     static char *home = NULL;
++    static uid_t home_uid = 0;
++    static int changed_uid = 0;
+     char *env;
++    uid_t uid;
+     struct passwd *pw;
+ 
++    uid = getuid();
++    if (home && home_uid != uid) {
++        home = NULL;
++        home_uid = uid;
++        changed_uid = 1;
++    }
++
+     if (home != NULL)
+ 	return home;
+ 
+-    if (!server_active && (env = getenv ("HOME")) != NULL)
++    if (!server_active && ((env = getenv ("HOME")) != NULL) && !changed_uid)
+ 	home = env;
+-    else if ((pw = (struct passwd *) getpwuid (getuid ()))
++    else if ((pw = (struct passwd *) getpwuid (uid))
+ 	     && pw->pw_dir)
+ 	home = xstrdup (pw->pw_dir);
+     else
+@
+
+
+1.1
+log
+@WIP port (will be worked on more, commit for safety)
+
+Some changes, in this order:
+• re-sync with MirOS base cvs
+• reduce diff against upstream
+• apply cvs-datetime.patch from Arkadiusz Miskiewicz <arekm>
+  via Concurrent Versions System - Bugs: bug #21523, can't parse date/time: =UTC when commiting file (workaround/fix attached)
+• apply (only those considered somewhat sane) patches from Debian cvs_1:1.12.13-12
+  – 11_check_method_crash
+  – 12_rcs2log_POSIX_sort
+  – 14_ext_expansion
+  – 15_PATH_MAX_check
+  – 20_readdir_errno
+  – 21_getcwd_chroot
+  – 25_import-n-X
+  – 51_newlines_in_commit_template (partially)
+  – 55_keyword_alphanumerics (modified)
+  – 62_cvsrc_whitespace
+  – 65_login_cvspass_message
+  – 69_ext_allowroot (modified)
+  – 71_cvsbug_tmpfix
+  – 81_fix_-l (modified)
+  – 85_normalize_correct_roots
+  – 86_server_wrapper (modified)
+  – 93_homedir (modified)
+  – 95_flag_conflicted_copies
+  – 96_manpage_fixes (partially)
+  – 97_cvs.info.typo (partially)
+  – 98_fix_sparc_sigbus.diff
+• document Debian’s changes in the Texinfo manual
+• modify mkman.pl to produce more correct looking output
+• point to texinfo HTML document from HTML manpage
+• fix fseeko configure.in test
+• correct bugs in Debian’s changes
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d8 1
+a8 1
++__RCSID("$MirOS$");
+@
+

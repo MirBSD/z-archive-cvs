@@ -1,0 +1,461 @@
+head	1.6;
+access;
+symbols
+	cvs-201403122330:1.1.1.2
+	MIRBSD_10:1.3.0.2
+	MIRBSD_10_BASE:1.3
+	OPENBSD_4_0:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2016.01.02.21.33.06;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10056884200442406AA;
+
+1.5
+date	2014.03.23.20.18.27;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100532F41952BEE442C;
+
+1.4
+date	2014.03.13.00.37.36;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005320FDE718E443A8;
+
+1.3
+date	2007.07.05.23.09.37;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100468D7A224CDB6D5A;
+
+1.2
+date	2007.04.28.00.12.47;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004632918E6CE6474D;
+
+1.1
+date	2005.02.05.17.29.24;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.24;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2014.03.12.23.56.45;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005320F456704D6170;
+
+
+desc
+@@
+
+
+1.6
+log
+@remove #ifndef __MirBSD__ before setlocale(); related changes
+@
+text
+@/*	$OpenBSD: main.c,v 1.17 2011/09/28 19:27:18 millert Exp $	*/
+/****************************************************************
+Copyright (C) Lucent Technologies 1997
+All Rights Reserved
+
+Permission to use, copy, modify, and distribute this software and
+its documentation for any purpose and without fee is hereby
+granted, provided that the above copyright notice appear in all
+copies and that both that the copyright notice and this
+permission notice and warranty disclaimer appear in supporting
+documentation, and that the name Lucent Technologies or any of
+its entities not be used in advertising or publicity pertaining
+to distribution of the software without specific, written prior
+permission.
+
+LUCENT DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.
+IN NO EVENT SHALL LUCENT OR ANY OF ITS ENTITIES BE LIABLE FOR ANY
+SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+****************************************************************/
+
+const char	*version = "version 20110810";
+
+#define DEBUG
+#include <stdio.h>
+#include <ctype.h>
+#include <locale.h>
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
+#include "awk.h"
+#include "awkgram.h"
+
+__RCSID("$MirOS: src/usr.bin/awk/main.c,v 1.5 2014/03/23 20:18:27 tg Exp $");
+
+extern	char	**environ;
+extern	int	nfields;
+extern	char	*__progname;
+
+int	dbg	= 0;
+char	*cmdname;	/* gets argv[0] for error messages */
+extern	FILE	*yyin;	/* lex input file */
+char	*lexprog;	/* points to program argument if it exists */
+int	compile_time = 2;	/* for error printing: */
+				/* 2 = cmdline, 1 = compile, 0 = running */
+
+#define	MAX_PFILE	20	/* max number of -f's */
+
+char	*pfile[MAX_PFILE];	/* program filenames from -f's */
+int	npfile = 0;	/* number of filenames */
+int	curpfile = 0;	/* current filename */
+
+int	safe	= 0;	/* 1 => "safe" mode */
+
+int main(int argc, char *argv[])
+{
+	const char *fs = NULL;
+
+	setlocale(LC_ALL, "");
+	setlocale(LC_NUMERIC, "C"); /* for parsing cmdline & prog */
+	cmdname = __progname;
+	if (argc == 1) {
+		fprintf(stderr, "usage: %s [-safe] [-V] [-d[n]] [-F fs] "
+		    "[-v var=value] [prog | -f progfile]\n\tfile ...\n",
+		    cmdname);
+		exit(1);
+	}
+	signal(SIGFPE, fpecatch);
+
+	yyin = NULL;
+	symtab = makesymtab(NSYMTAB);
+	while (argc > 1 && argv[1][0] == '-' && argv[1][1] != '\0') {
+		if (strcmp(argv[1], "--") == 0) {	/* explicit end of args */
+			argc--;
+			argv++;
+			break;
+		}
+		switch (argv[1][1]) {
+		case 's':
+			if (strcmp(argv[1], "-safe") == 0)
+				safe = 1;
+			break;
+		case 'f':	/* next argument is program filename */
+			if (argv[1][2] != 0) {  /* arg is -fsomething */
+				if (npfile >= MAX_PFILE - 1)
+					FATAL("too many -f options"); 
+				pfile[npfile++] = &argv[1][2];
+			} else {		/* arg is -f something */
+				argc--; argv++;
+				if (argc <= 1)
+					FATAL("no program filename");
+				if (npfile >= MAX_PFILE - 1)
+					FATAL("too many -f options"); 
+				pfile[npfile++] = argv[1];
+			}
+			break;
+		case 'F':	/* set field separator */
+			if (argv[1][2] != 0) {	/* arg is -Fsomething */
+				if (argv[1][2] == 't' && argv[1][3] == 0)	/* wart: t=>\t */
+					fs = "\t";
+				else if (argv[1][2] != 0)
+					fs = &argv[1][2];
+			} else {		/* arg is -F something */
+				argc--; argv++;
+				if (argc > 1 && argv[1][0] == 't' && argv[1][1] == 0)	/* wart: t=>\t */
+					fs = "\t";
+				else if (argc > 1 && argv[1][0] != 0)
+					fs = &argv[1][0];
+			}
+			if (fs == NULL || *fs == '\0')
+				WARNING("field separator FS is empty");
+			break;
+		case 'v':	/* -v a=1 to be done NOW.  one -v for each */
+			if (argv[1][2] != 0) {  /* arg is -vsomething */
+				if (isclvar(&argv[1][2]))
+					setclvar(&argv[1][2]);
+				else
+					FATAL("invalid -v option argument: %s", &argv[1][2]);
+			} else {		/* arg is -v something */
+				argc--; argv++;
+				if (argc <= 1)
+					FATAL("no variable name");
+				if (isclvar(argv[1]))
+					setclvar(argv[1]);
+				else
+					FATAL("invalid -v option argument: %s", argv[1]);
+			}
+			break;
+		case 'd':
+			dbg = atoi(&argv[1][2]);
+			if (dbg == 0)
+				dbg = 1;
+			printf("awk %s\n", version);
+			break;
+		case 'V':	/* added for exptools "standard" */
+			printf("awk %s\n", version);
+			exit(0);
+			break;
+		default:
+			WARNING("unknown option %s ignored", argv[1]);
+			break;
+		}
+		argc--;
+		argv++;
+	}
+	/* argv[1] is now the first argument */
+	if (npfile == 0) {	/* no -f; first argument is program */
+		if (argc <= 1) {
+			if (dbg)
+				exit(0);
+			FATAL("no program given");
+		}
+		   dprintf( ("program = |%s|\n", argv[1]) );
+		lexprog = argv[1];
+		argc--;
+		argv++;
+	}
+	recinit(recsize);
+	syminit();
+	compile_time = 1;
+	argv[0] = cmdname;	/* put prog name at front of arglist */
+	   dprintf( ("argc=%d, argv[0]=%s\n", argc, argv[0]) );
+	arginit(argc, argv);
+	if (!safe)
+		envinit(environ);
+	yyparse();
+	setlocale(LC_NUMERIC, ""); /* back to whatever it is locally */
+	if (fs)
+		*FS = qstring(fs, '\0');
+	   dprintf( ("errorflag=%d\n", errorflag) );
+	if (errorflag == 0) {
+		compile_time = 0;
+		run(winner);
+	} else
+		bracecheck();
+	return(errorflag);
+}
+
+int pgetc(void)		/* get 1 character from awk program */
+{
+	int c;
+
+	for (;;) {
+		if (yyin == NULL) {
+			if (curpfile >= npfile)
+				return EOF;
+			if (strcmp(pfile[curpfile], "-") == 0)
+				yyin = stdin;
+			else if ((yyin = fopen(pfile[curpfile], "r")) == NULL)
+				FATAL("can't open file %s", pfile[curpfile]);
+			lineno = 1;
+		}
+		if ((c = getc(yyin)) != EOF)
+			return c;
+		if (yyin != stdin)
+			fclose(yyin);
+		yyin = NULL;
+		curpfile++;
+	}
+}
+
+char *cursource(void)	/* current source file name */
+{
+	if (npfile > 0)
+		return pfile[curpfile];
+	else
+		return NULL;
+}
+@
+
+
+1.5
+log
+@always use arc4random; POSIX does not demand reproducibility of rand values
+even in the face of srand; also, fix rand() retval (1.0 is POSIX invalid)
+@
+text
+@d38 1
+a38 1
+__RCSID("$MirOS: src/usr.bin/awk/main.c,v 1.4 2014/03/13 00:37:36 tg Exp $");
+a62 1
+#ifndef __MirBSD__
+a64 1
+#endif
+a170 1
+#ifndef __MirBSD__
+a171 1
+#endif
+@
+
+
+1.4
+log
+@merge and __CRAZY clean
+@
+text
+@d38 1
+a38 1
+__RCSID("$MirOS: src/usr.bin/awk/main.c,v 1.3 2007/07/05 23:09:37 tg Exp $");
+a44 1
+Awkfloat	srand_seed = 1;
+@
+
+
+1.3
+log
+@• #ifdef __MirBSD__
+  do not use setlocale() and nl_langinfo(), hardcode it
+  #endif
+• rcs ids
+
+should greatly reduce space usage of ramdisc
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: main.c,v 1.13 2004/12/30 01:52:48 millert Exp $	*/
+d26 1
+a26 1
+const char	*version = "version 20041222";
+d38 1
+a38 3
+__RCSID("$MirOS: src/usr.bin/awk/main.c,v 1.2 2007/04/28 00:12:47 tg Exp $");
+
+#define	MAX_PFILE	20
+d45 1
+a48 1
+extern	int errorflag;	/* non-zero if any syntax errors; set by yyerror */
+d52 2
+d70 2
+a71 2
+		fprintf(stderr, "usage: %s [-F fs] [-v var=value] [-safe] "
+		    "[-mr n] [-mf n] [prog | -f progfile] file ...\n",
+d76 1
+d91 12
+a102 7
+			argc--;
+			argv++;
+			if (npfile >= MAX_PFILE - 1)
+				FATAL("too many -f options");
+			if (argc <= 1)
+				FATAL("no program filename");
+			pfile[npfile++] = argv[1];
+d121 14
+a134 6
+			if (argv[1][2] == '\0' && --argc > 1 && isclvar((++argv)[1]))
+				setclvar(argv[1]);
+			break;
+		case 'm':	/* more memory: -mr=record, -mf=fields */
+				/* no longer supported */
+			WARNING("obsolete option %s ignored", argv[1]);
+@
+
+
+1.2
+log
+@more lex/yacc overhaul, tentatively
+@
+text
+@d38 1
+a38 1
+__RCSID("$MirOS$");
+d64 1
+d67 1
+d160 1
+d162 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d36 3
+a38 1
+#include "ytab.h"
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@get newer awk
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: main.c,v 1.17 2011/09/28 19:27:18 millert Exp $	*/
+d26 1
+a26 1
+const char	*version = "version 20110810";
+d38 2
+a44 1
+Awkfloat	srand_seed = 1;
+a51 2
+#define	MAX_PFILE	20	/* max number of -f's */
+
+d66 2
+a67 2
+		fprintf(stderr, "usage: %s [-safe] [-V] [-d[n]] [-F fs] "
+		    "[-v var=value] [prog | -f progfile]\n\tfile ...\n",
+a71 1
+
+d86 7
+a92 12
+			if (argv[1][2] != 0) {  /* arg is -fsomething */
+				if (npfile >= MAX_PFILE - 1)
+					FATAL("too many -f options"); 
+				pfile[npfile++] = &argv[1][2];
+			} else {		/* arg is -f something */
+				argc--; argv++;
+				if (argc <= 1)
+					FATAL("no program filename");
+				if (npfile >= MAX_PFILE - 1)
+					FATAL("too many -f options"); 
+				pfile[npfile++] = argv[1];
+			}
+d111 6
+a116 14
+			if (argv[1][2] != 0) {  /* arg is -vsomething */
+				if (isclvar(&argv[1][2]))
+					setclvar(&argv[1][2]);
+				else
+					FATAL("invalid -v option argument: %s", &argv[1][2]);
+			} else {		/* arg is -v something */
+				argc--; argv++;
+				if (argc <= 1)
+					FATAL("no variable name");
+				if (isclvar(argv[1]))
+					setclvar(argv[1]);
+				else
+					FATAL("invalid -v option argument: %s", argv[1]);
+			}
+@
+

@@ -1,0 +1,195 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2016.03.26.17.29.21;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10056F6C535787D61F0;
+
+1.2
+date	2005.12.14.23.28.33;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043A0AA0E5A220A51;
+
+1.1
+date	2005.05.14.23.21.03;	author tg;	state Exp;
+branches
+	1.1.201.1;
+next	;
+commitid	1e94428687d39445;
+
+1.1.201.1
+date	2005.05.14.23.21.03;	author tg;	state Exp;
+branches;
+next	;
+commitid	1e94428687d39445;
+
+
+desc
+@@
+
+
+1.3
+log
+@complete overhaul of djbdns port:
+
+• merge t4/t6 flavours back into one binary
+  ‣ greatly simplify IPv6 handling, too; drop code for v6-less OSes
+• merge v4/v6 dnsroots back into one, update all of them
+• improve documentation a bit
+• apply two patches from http://www.your.org/dnscache/ (SECURITY):
+  ‣ merge identical outgoing requests
+  ‣ allow caching SOA responses
+• update to Fefe’s djbdns-1.05-test27.diff.bz2
+  ‣ fixes recursively resolving hosts behind IPv6-only nameservers;
+    spotted by Natureshadow (for Teckids’ Lunatics network) and via
+    http://serverfault.com/q/627912/189656 (which I’ll answer RSN)
+  ⚠ fix with “one second” CDB validity patch
+  ⚠ adapt for OpenBSD-style IPv6
+• drop ip6.int. reverse v6 DNS for good
+• improve dealing with mixing v4/v6 transport
+  ⇒ TODO add IP4SEND/IP6SEND support; currently; if IPSEND is v6
+    but we send to a v4 server, we use INADDR_ANY for outgoing,
+    as automatic fallback address
+@
+text
+@$MirOS: ports/net/djbdns/patches/patch-src_dnsname_c,v 1.2 2005/12/14 23:28:33 tg Exp $
+--- src/dnsname.c.orig	Sun Feb 11 21:11:23 2001
++++ src/dnsname.c	Sat Mar 26 14:36:45 2016
+@@@@ -2,6 +2,7 @@@@
+ #include "exit.h"
+ #include "strerr.h"
+ #include "ip4.h"
++#include "ip6.h"
+ #include "dns.h"
+ 
+ #define FATAL "dnsname: fatal: "
+@@@@ -9,6 +10,7 @@@@
+ static char seed[128];
+ 
+ char ip[4];
++char ip6[16];
+ static stralloc out;
+ 
+ int main(int argc,char **argv)
+@@@@ -18,10 +20,15 @@@@ int main(int argc,char **argv)
+   if (*argv) ++argv;
+ 
+   while (*argv) {
+-    if (!ip4_scan(*argv,ip))
+-      strerr_die3x(111,FATAL,"unable to parse IP address ",*argv);
+-    if (dns_name4(&out,ip) == -1)
+-      strerr_die4sys(111,FATAL,"unable to find host name for ",*argv,": ");
++    if (ip6_scan(*argv,ip6)) {
++      if (dns_name6(&out,ip6) == -1)
++	strerr_die4sys(111,FATAL,"unable to find host name for ",*argv,": ");
++    } else {
++      if (!ip4_scan(*argv,ip))
++	strerr_die3x(111,FATAL,"unable to parse IP address ",*argv);
++      if (dns_name4(&out,ip) == -1)
++	strerr_die4sys(111,FATAL,"unable to find host name for ",*argv,": ");
++    }
+ 
+     buffer_put(buffer_1,out.s,out.len);
+     buffer_puts(buffer_1,"\n");
+@
+
+
+1.2
+log
+@* update to fefe's djbdns-1.05-test23.diff
+  with djbdns-1.05-ixfr.diff
+* slightly change naming of v6-transport binaries
+* consolidate all added source files in a central directory
+  so it can be reused by the v6-transport stuff
+* integrate the v6 transport binaries
+* fix spacing
+* sync descriptive texts with reality
+* sync European ORSN (v4 and v6) to their root.hint
+* sync OpenNIC too
+* Open-RSC seeminly ceased to exist recently
+* Apply compiler-temporary-filename.patch
+  from http://homepages.tesco.net/~J.deBoynePollard/FGA/djbdns-problems.html
+* apply dnscache-cname-handling.patch
+* apply dnscache-strict-forwardonly.patch w/ IPv6 tweak
+* apply dnscacheip-space-separator.patch
+* apply tinydns-alias-chain-truncation.patch
+* apply tinydns-data-semantic-error.patch
+  appropriately for 6 and 3, too
+* fix shell code and path to includes
+* fix relative paths
+* fix names of library and programmes; NOMAN=yes here (t6)
+* Add support for the IPv6 transport module to communicate,
+  as a client, with IPv4 transport name servers as well.
+
+  WFM
+* build it with -Wall -Werror
+* honour ${SYSCONFDIR} throughout the port
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_dnsname_c,v 1.1.201.1 2005/05/14 23:21:03 tg Exp $
+d3 2
+a4 2
++++ src/dnsname.c	Tue Dec 13 21:44:26 2005
+@@@@ -2,6 +2,9 @@@@
+a7 1
++#ifdef DJB_V6ONLY
+a8 1
++#endif /* DJB_V6ONLY */
+d12 1
+a12 1
+@@@@ -9,6 +12,9 @@@@
+a15 1
++#ifdef DJB_V6ONLY
+a16 1
++#endif /* DJB_V6ONLY */
+d20 1
+a20 1
+@@@@ -18,10 +24,22 @@@@ int main(int argc,char **argv)
+d24 4
+a27 6
++#ifndef DJB_V6ONLY
+     if (!ip4_scan(*argv,ip))
+       strerr_die3x(111,FATAL,"unable to parse IP address ",*argv);
+     if (dns_name4(&out,ip) == -1)
+       strerr_die4sys(111,FATAL,"unable to find host name for ",*argv,": ");
++#else
+a36 1
++#endif /* DJB_V6ONLY */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 12
+a14 2
++++ src/dnsname.c	Sat May 14 22:27:17 2005
+@@@@ -9,6 +9,9 @@@@
+d24 1
+a24 1
+@@@@ -18,10 +21,22 @@@@ int main(int argc,char **argv)
+@
+
+
+1.1.201.1
+log
+@New djbdns port, #ifdef'd, "original" and "no_ipv6" flavours removed
+"no_ipv4" non-functional at the moment, will follow later after
+redesign using crunchgen(1) and crunchide(1)
+@
+text
+@@

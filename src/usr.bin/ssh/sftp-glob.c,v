@@ -1,0 +1,361 @@
+head	1.6;
+access;
+symbols
+	cvs-200910041320:1.1.1.4
+	cvs-200903221200:1.1.1.4
+	cvs-200812162015:1.1.1.4
+	cvs-200804031830:1.1.1.4
+	MIRBSD_10:1.4.0.2
+	MIRBSD_10_BASE:1.4
+	cvs-200803022030:1.1.1.4
+	cvs-200709131337:1.1.1.4
+	cvs-200709021830:1.1.1.4
+	cvs-200708201200:1.1.1.4
+	cvs-200706161500:1.1.1.4
+	cvs-200705192215:1.1.1.4
+	cvs-200704292000:1.1.1.4
+	cvs-200703080900:1.1.1.4
+	cvs-200701251600:1.1.1.4
+	cvs-200612111600:1.1.1.4
+	cvs-200611090230:1.1.1.4
+	OPENBSD_4_0:1.1.1.4
+	MIRBSD_9_BASE:1.3
+	cvs-200606162342:1.1.1.3
+	cvs-200606022000:1.1.1.3
+	cvs-200604191000:1.1.1.3
+	cvs-200602220045:1.1.1.2
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200512201942:1.1.1.1
+	cvs-200511231930:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200506221550:1.1.1.1
+	cvs-200505050030:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	cvs-200504261445:1.1.1.1
+	cvs-200504141900:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2010.10.08.20.18.55;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004CAF7CB4313A67AD;
+
+1.5
+date	2008.12.16.22.13.30;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10049482819766381ED;
+
+1.4
+date	2006.09.20.21.41.04;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004511B578580E7F04;
+
+1.3
+date	2006.04.19.10.40.53;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100444613BD3A91C28B;
+
+1.2
+date	2006.02.22.01.23.51;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043FBBD2C2C5E7D81;
+
+1.1
+date	2005.02.05.17.29.55;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.55;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.02.22.00.51.36;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	10043FBB5A933C3BB9B;
+
+1.1.1.3
+date	2006.04.19.10.15.04;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	10044460DB21E1F715C;
+
+1.1.1.4
+date	2006.09.20.19.06.49;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045119150397FC669;
+
+
+desc
+@@
+
+
+1.6
+log
+@pull in NetBSD SA2010-008, thanks Tonnerre for mentioning
+@
+text
+@/* $OpenBSD: sftp-glob.c,v 1.22 2006/08/03 03:34:42 deraadt Exp $ */
+/*
+ * Copyright (c) 2001-2004 Damien Miller <djm@@openbsd.org>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include <dirent.h>
+#include <glob.h>
+#include <string.h>
+
+#include "xmalloc.h"
+#include "sftp.h"
+#include "buffer.h"
+#include "sftp-common.h"
+#include "sftp-client.h"
+
+__RCSID("$MirOS$");
+
+int remote_glob(struct sftp_conn *, const char *, int,
+    int (*)(const char *, int), glob_t *);
+
+struct SFTP_OPENDIR {
+	SFTP_DIRENT **dir;
+	int offset;
+};
+
+static struct {
+	struct sftp_conn *conn;
+} cur;
+
+static void *
+fudge_opendir(const char *path)
+{
+	struct SFTP_OPENDIR *r;
+
+	r = xmalloc(sizeof(*r));
+
+	if (do_readdir(cur.conn, (char *)path, &r->dir)) {
+		xfree(r);
+		return(NULL);
+	}
+
+	r->offset = 0;
+
+	return((void *)r);
+}
+
+static struct dirent *
+fudge_readdir(struct SFTP_OPENDIR *od)
+{
+	static struct dirent ret;
+
+	if (od->dir[od->offset] == NULL)
+		return(NULL);
+
+	memset(&ret, 0, sizeof(ret));
+	strlcpy(ret.d_name, od->dir[od->offset++]->filename,
+	    sizeof(ret.d_name));
+
+	return(&ret);
+}
+
+static void
+fudge_closedir(struct SFTP_OPENDIR *od)
+{
+	free_sftp_dirents(od->dir);
+	xfree(od);
+}
+
+static int
+fudge_lstat(const char *path, struct stat *st)
+{
+	Attrib *a;
+
+	if (!(a = do_lstat(cur.conn, (char *)path, 0)))
+		return(-1);
+
+	attrib_to_stat(a, st);
+
+	return(0);
+}
+
+static int
+fudge_stat(const char *path, struct stat *st)
+{
+	Attrib *a;
+
+	if (!(a = do_stat(cur.conn, (char *)path, 0)))
+		return(-1);
+
+	attrib_to_stat(a, st);
+
+	return(0);
+}
+
+int
+remote_glob(struct sftp_conn *conn, const char *pattern, int flags,
+    int (*errfunc)(const char *, int), glob_t *pglob)
+{
+	pglob->gl_opendir = fudge_opendir;
+	pglob->gl_readdir = (struct dirent *(*)(void *))fudge_readdir;
+	pglob->gl_closedir = (void (*)(void *))fudge_closedir;
+	pglob->gl_lstat = fudge_lstat;
+	pglob->gl_stat = fudge_stat;
+
+	memset(&cur, 0, sizeof(cur));
+	cur.conn = conn;
+
+	return (glob(pattern, flags | GLOB_ALTDIRFUNC | GLOB_LIMIT, errfunc,
+	    pglob));
+}
+@
+
+
+1.5
+log
+@really merge OpenSSH-current into MirBSD Secure SHell 10uA4
+@
+text
+@d31 2
+d123 2
+a124 1
+	return(glob(pattern, flags | GLOB_ALTDIRFUNC, errfunc, pglob));
+@
+
+
+1.4
+log
+@finish merging
+@
+text
+@a30 2
+__RCSID("$MirOS$");
+
+@
+
+
+1.3
+log
+@merge and clean up
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: sftp-glob.c,v 1.19 2006/03/25 13:17:02 djm Exp $ */
+d18 1
+a18 2
+#include "includes.h"
+
+d23 1
+a24 2
+#include "buffer.h"
+#include "bufaux.h"
+a25 2
+#include "log.h"
+
+d27 1
+d31 2
+@
+
+
+1.2
+log
+@merge; bump version; fix up manpages and includes a little
+@
+text
+@d1 1
+a18 1
+RCSID("$OpenBSD: sftp-glob.c,v 1.17 2006/02/20 17:19:54 stevesk Exp $");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d18 1
+a18 1
+RCSID("$OpenBSD: sftp-glob.c,v 1.15 2004/02/17 07:17:29 djm Exp $");
+d20 3
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@import OpenSSH-current
+@
+text
+@d18 1
+a18 1
+RCSID("$OpenBSD: sftp-glob.c,v 1.17 2006/02/20 17:19:54 stevesk Exp $");
+a19 4
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include <dirent.h>
+@
+
+
+1.1.1.3
+log
+@I decided we'd better upgrade OpenSSH before releasing to the general public
+@
+text
+@a0 1
+/* $OpenBSD: sftp-glob.c,v 1.19 2006/03/25 13:17:02 djm Exp $ */
+d18 1
+@
+
+
+1.1.1.4
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: sftp-glob.c,v 1.22 2006/08/03 03:34:42 deraadt Exp $ */
+d18 2
+a24 1
+#include <string.h>
+d26 2
+d29 2
+a31 1
+#include "buffer.h"
+@
+
+

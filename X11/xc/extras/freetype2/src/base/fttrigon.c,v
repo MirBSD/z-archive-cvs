@@ -1,0 +1,1541 @@
+head	1.4;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2017.04.15.19.21.27;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10058F2723111C7BEE2;
+
+1.3
+date	2013.08.06.19.47.45;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100520152445E05B912;
+
+1.2
+date	2006.06.29.20.24.45;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.24;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.07;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.01;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.23;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.4
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  fttrigon.c                                                             */
+/*                                                                         */
+/*    FreeType trigonometric functions (body).                             */
+/*                                                                         */
+/*  Copyright 2001-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* This is a fixed-point CORDIC implementation of trigonometric          */
+  /* functions as well as transformations between Cartesian and polar      */
+  /* coordinates.  The angles are represented as 16.16 fixed-point values  */
+  /* in degrees, i.e., the angular resolution is 2^-16 degrees.  Note that */
+  /* only vectors longer than 2^16*180/pi (or at least 22 bits) on a       */
+  /* discrete Cartesian grid can have the same or better angular           */
+  /* resolution.  Therefore, to maintain this precision, some functions    */
+  /* require an interim upscaling of the vectors, whereas others operate   */
+  /* with 24-bit long vectors directly.                                    */
+  /*                                                                       */
+  /*************************************************************************/
+
+#include <ft2build.h>
+#include FT_INTERNAL_OBJECTS_H
+#include FT_INTERNAL_CALC_H
+#include FT_TRIGONOMETRY_H
+
+
+  /* the Cordic shrink factor 0.858785336480436 * 2^32 */
+#define FT_TRIG_SCALE      0xDBD95B16UL
+
+  /* the highest bit in overflow-safe vector components, */
+  /* MSB of 0.858785336480436 * sqrt(0.5) * 2^30         */
+#define FT_TRIG_SAFE_MSB   29
+
+  /* this table was generated for FT_PI = 180L << 16, i.e. degrees */
+#define FT_TRIG_MAX_ITERS  23
+
+  static const FT_Angle
+  ft_trig_arctan_table[] =
+  {
+    1740967L, 919879L, 466945L, 234379L, 117304L, 58666L, 29335L,
+    14668L, 7334L, 3667L, 1833L, 917L, 458L, 229L, 115L,
+    57L, 29L, 14L, 7L, 4L, 2L, 1L
+  };
+
+
+#ifdef FT_LONG64
+
+  /* multiply a given value by the CORDIC shrink factor */
+  static FT_Fixed
+  ft_trig_downscale( FT_Fixed  val )
+  {
+    FT_Int  s = 1;
+
+
+    if ( val < 0 )
+    {
+       val = -val;
+       s = -1;
+    }
+
+    /* 0x40000000 comes from regression analysis between true */
+    /* and CORDIC hypotenuse, so it minimizes the error       */
+    val = (FT_Fixed)(
+            ( (FT_UInt64)val * FT_TRIG_SCALE + 0x40000000UL ) >> 32 );
+
+    return s < 0 ? -val : val;
+  }
+
+#else /* !FT_LONG64 */
+
+  /* multiply a given value by the CORDIC shrink factor */
+  static FT_Fixed
+  ft_trig_downscale( FT_Fixed  val )
+  {
+    FT_Int     s = 1;
+    FT_UInt32  lo1, hi1, lo2, hi2, lo, hi, i1, i2;
+
+
+    if ( val < 0 )
+    {
+       val = -val;
+       s = -1;
+    }
+
+    lo1 = (FT_UInt32)val & 0x0000FFFFU;
+    hi1 = (FT_UInt32)val >> 16;
+    lo2 = FT_TRIG_SCALE & 0x0000FFFFU;
+    hi2 = FT_TRIG_SCALE >> 16;
+
+    lo = lo1 * lo2;
+    i1 = lo1 * hi2;
+    i2 = lo2 * hi1;
+    hi = hi1 * hi2;
+
+    /* Check carry overflow of i1 + i2 */
+    i1 += i2;
+    hi += (FT_UInt32)( i1 < i2 ) << 16;
+
+    hi += i1 >> 16;
+    i1  = i1 << 16;
+
+    /* Check carry overflow of i1 + lo */
+    lo += i1;
+    hi += ( lo < i1 );
+
+    /* 0x40000000 comes from regression analysis between true */
+    /* and CORDIC hypotenuse, so it minimizes the error       */
+
+    /* Check carry overflow of lo + 0x40000000 */
+    lo += 0x40000000UL;
+    hi += ( lo < 0x40000000UL );
+
+    val = (FT_Fixed)hi;
+
+    return s < 0 ? -val : val;
+  }
+
+#endif /* !FT_LONG64 */
+
+
+  /* undefined and never called for zero vector */
+  static FT_Int
+  ft_trig_prenorm( FT_Vector*  vec )
+  {
+    FT_Pos  x, y;
+    FT_Int  shift;
+
+
+    x = vec->x;
+    y = vec->y;
+
+    shift = FT_MSB( (FT_UInt32)( FT_ABS( x ) | FT_ABS( y ) ) );
+
+    if ( shift <= FT_TRIG_SAFE_MSB )
+    {
+      shift  = FT_TRIG_SAFE_MSB - shift;
+      vec->x = (FT_Pos)( (FT_ULong)x << shift );
+      vec->y = (FT_Pos)( (FT_ULong)y << shift );
+    }
+    else
+    {
+      shift -= FT_TRIG_SAFE_MSB;
+      vec->x = x >> shift;
+      vec->y = y >> shift;
+      shift  = -shift;
+    }
+
+    return shift;
+  }
+
+
+  static void
+  ft_trig_pseudo_rotate( FT_Vector*  vec,
+                         FT_Angle    theta )
+  {
+    FT_Int           i;
+    FT_Fixed         x, y, xtemp, b;
+    const FT_Angle  *arctanptr;
+
+
+    x = vec->x;
+    y = vec->y;
+
+    /* Rotate inside [-PI/4,PI/4] sector */
+    while ( theta < -FT_ANGLE_PI4 )
+    {
+      xtemp  =  y;
+      y      = -x;
+      x      =  xtemp;
+      theta +=  FT_ANGLE_PI2;
+    }
+
+    while ( theta > FT_ANGLE_PI4 )
+    {
+      xtemp  = -y;
+      y      =  x;
+      x      =  xtemp;
+      theta -=  FT_ANGLE_PI2;
+    }
+
+    arctanptr = ft_trig_arctan_table;
+
+    /* Pseudorotations, with right shifts */
+    for ( i = 1, b = 1; i < FT_TRIG_MAX_ITERS; b <<= 1, i++ )
+    {
+      if ( theta < 0 )
+      {
+        xtemp  = x + ( ( y + b ) >> i );
+        y      = y - ( ( x + b ) >> i );
+        x      = xtemp;
+        theta += *arctanptr++;
+      }
+      else
+      {
+        xtemp  = x - ( ( y + b ) >> i );
+        y      = y + ( ( x + b ) >> i );
+        x      = xtemp;
+        theta -= *arctanptr++;
+      }
+    }
+
+    vec->x = x;
+    vec->y = y;
+  }
+
+
+  static void
+  ft_trig_pseudo_polarize( FT_Vector*  vec )
+  {
+    FT_Angle         theta;
+    FT_Int           i;
+    FT_Fixed         x, y, xtemp, b;
+    const FT_Angle  *arctanptr;
+
+
+    x = vec->x;
+    y = vec->y;
+
+    /* Get the vector into [-PI/4,PI/4] sector */
+    if ( y > x )
+    {
+      if ( y > -x )
+      {
+        theta =  FT_ANGLE_PI2;
+        xtemp =  y;
+        y     = -x;
+        x     =  xtemp;
+      }
+      else
+      {
+        theta =  y > 0 ? FT_ANGLE_PI : -FT_ANGLE_PI;
+        x     = -x;
+        y     = -y;
+      }
+    }
+    else
+    {
+      if ( y < -x )
+      {
+        theta = -FT_ANGLE_PI2;
+        xtemp = -y;
+        y     =  x;
+        x     =  xtemp;
+      }
+      else
+      {
+        theta = 0;
+      }
+    }
+
+    arctanptr = ft_trig_arctan_table;
+
+    /* Pseudorotations, with right shifts */
+    for ( i = 1, b = 1; i < FT_TRIG_MAX_ITERS; b <<= 1, i++ )
+    {
+      if ( y > 0 )
+      {
+        xtemp  = x + ( ( y + b ) >> i );
+        y      = y - ( ( x + b ) >> i );
+        x      = xtemp;
+        theta += *arctanptr++;
+      }
+      else
+      {
+        xtemp  = x - ( ( y + b ) >> i );
+        y      = y + ( ( x + b ) >> i );
+        x      = xtemp;
+        theta -= *arctanptr++;
+      }
+    }
+
+    /* round theta to acknowledge its error that mostly comes */
+    /* from accumulated rounding errors in the arctan table   */
+    if ( theta >= 0 )
+      theta = FT_PAD_ROUND( theta, 16 );
+    else
+      theta = -FT_PAD_ROUND( -theta, 16 );
+
+    vec->x = x;
+    vec->y = theta;
+  }
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( FT_Fixed )
+  FT_Cos( FT_Angle  angle )
+  {
+    FT_Vector  v;
+
+
+    FT_Vector_Unit( &v, angle );
+
+    return v.x;
+  }
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( FT_Fixed )
+  FT_Sin( FT_Angle  angle )
+  {
+    FT_Vector  v;
+
+
+    FT_Vector_Unit( &v, angle );
+
+    return v.y;
+  }
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( FT_Fixed )
+  FT_Tan( FT_Angle  angle )
+  {
+    FT_Vector  v;
+
+
+    FT_Vector_Unit( &v, angle );
+
+    return FT_DivFix( v.y, v.x );
+  }
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( FT_Angle )
+  FT_Atan2( FT_Fixed  dx,
+            FT_Fixed  dy )
+  {
+    FT_Vector  v;
+
+
+    if ( dx == 0 && dy == 0 )
+      return 0;
+
+    v.x = dx;
+    v.y = dy;
+    ft_trig_prenorm( &v );
+    ft_trig_pseudo_polarize( &v );
+
+    return v.y;
+  }
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Vector_Unit( FT_Vector*  vec,
+                  FT_Angle    angle )
+  {
+    if ( !vec )
+      return;
+
+    vec->x = FT_TRIG_SCALE >> 8;
+    vec->y = 0;
+    ft_trig_pseudo_rotate( vec, angle );
+    vec->x = ( vec->x + 0x80L ) >> 8;
+    vec->y = ( vec->y + 0x80L ) >> 8;
+  }
+
+
+  /* these macros return 0 for positive numbers,
+     and -1 for negative ones */
+#define FT_SIGN_LONG( x )   ( (x) >> ( FT_SIZEOF_LONG * 8 - 1 ) )
+#define FT_SIGN_INT( x )    ( (x) >> ( FT_SIZEOF_INT * 8 - 1 ) )
+#define FT_SIGN_INT32( x )  ( (x) >> 31 )
+#define FT_SIGN_INT16( x )  ( (x) >> 15 )
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Vector_Rotate( FT_Vector*  vec,
+                    FT_Angle    angle )
+  {
+    FT_Int     shift;
+    FT_Vector  v;
+
+
+    if ( !vec || !angle )
+      return;
+
+    v = *vec;
+
+    if ( v.x == 0 && v.y == 0 )
+      return;
+
+    shift = ft_trig_prenorm( &v );
+    ft_trig_pseudo_rotate( &v, angle );
+    v.x = ft_trig_downscale( v.x );
+    v.y = ft_trig_downscale( v.y );
+
+    if ( shift > 0 )
+    {
+      FT_Int32  half = (FT_Int32)1L << ( shift - 1 );
+
+
+      vec->x = ( v.x + half + FT_SIGN_LONG( v.x ) ) >> shift;
+      vec->y = ( v.y + half + FT_SIGN_LONG( v.y ) ) >> shift;
+    }
+    else
+    {
+      shift  = -shift;
+      vec->x = (FT_Pos)( (FT_ULong)v.x << shift );
+      vec->y = (FT_Pos)( (FT_ULong)v.y << shift );
+    }
+  }
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( FT_Fixed )
+  FT_Vector_Length( FT_Vector*  vec )
+  {
+    FT_Int     shift;
+    FT_Vector  v;
+
+
+    if ( !vec )
+      return 0;
+
+    v = *vec;
+
+    /* handle trivial cases */
+    if ( v.x == 0 )
+    {
+      return FT_ABS( v.y );
+    }
+    else if ( v.y == 0 )
+    {
+      return FT_ABS( v.x );
+    }
+
+    /* general case */
+    shift = ft_trig_prenorm( &v );
+    ft_trig_pseudo_polarize( &v );
+
+    v.x = ft_trig_downscale( v.x );
+
+    if ( shift > 0 )
+      return ( v.x + ( 1L << ( shift - 1 ) ) ) >> shift;
+
+    return (FT_Fixed)( (FT_UInt32)v.x << -shift );
+  }
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Vector_Polarize( FT_Vector*  vec,
+                      FT_Fixed   *length,
+                      FT_Angle   *angle )
+  {
+    FT_Int     shift;
+    FT_Vector  v;
+
+
+    if ( !vec || !length || !angle )
+      return;
+
+    v = *vec;
+
+    if ( v.x == 0 && v.y == 0 )
+      return;
+
+    shift = ft_trig_prenorm( &v );
+    ft_trig_pseudo_polarize( &v );
+
+    v.x = ft_trig_downscale( v.x );
+
+    *length = shift >= 0 ?                      ( v.x >>  shift )
+                         : (FT_Fixed)( (FT_UInt32)v.x << -shift );
+    *angle  = v.y;
+  }
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Vector_From_Polar( FT_Vector*  vec,
+                        FT_Fixed    length,
+                        FT_Angle    angle )
+  {
+    if ( !vec )
+      return;
+
+    vec->x = length;
+    vec->y = 0;
+
+    FT_Vector_Rotate( vec, angle );
+  }
+
+
+  /* documentation is in fttrigon.h */
+
+  FT_EXPORT_DEF( FT_Angle )
+  FT_Angle_Diff( FT_Angle  angle1,
+                 FT_Angle  angle2 )
+  {
+    FT_Angle  delta = angle2 - angle1;
+
+
+    while ( delta <= -FT_ANGLE_PI )
+      delta += FT_ANGLE_2PI;
+
+    while ( delta > FT_ANGLE_PI )
+      delta -= FT_ANGLE_2PI;
+
+    return delta;
+  }
+
+
+/* END */
+@
+
+
+1.3
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001, 2002, 2003, 2004, 2005 by                              */
+d18 13
+d34 1
+d38 6
+a43 2
+  /* the following is 0.2715717684432231 * 2^30 */
+#define FT_TRIG_COSCALE  0x11616E8EUL
+d48 2
+a49 2
+  static const FT_Fixed
+  ft_trig_arctan_table[24] =
+d51 2
+a52 2
+    4157273L, 2949120L, 1740967L, 919879L, 466945L, 234379L, 117304L,
+    58666L, 29335L, 14668L, 7334L, 3667L, 1833L, 917L, 458L, 229L, 115L,
+a55 3
+  /* the Cordic shrink factor, multiplied by 2^32 */
+#define FT_TRIG_SCALE    1166391785UL  /* 0x4585BA38UL */
+
+d57 1
+a57 1
+#ifdef FT_CONFIG_HAS_INT64
+d63 1
+a63 2
+    FT_Fixed  s;
+    FT_Int64  v;
+d66 5
+a70 2
+    s   = val;
+    val = ( val >= 0 ) ? val : -val;
+d72 4
+a75 2
+    v   = ( val * (FT_Int64)FT_TRIG_SCALE ) + 0x100000000UL;
+    val = (FT_Fixed)( v >> 32 );
+d77 1
+a77 1
+    return ( s >= 0 ) ? val : -val;
+d80 1
+a80 1
+#else /* !FT_CONFIG_HAS_INT64 */
+d86 2
+a87 2
+    FT_Fixed   s;
+    FT_UInt32  v1, v2, k1, k2, hi, lo1, lo2, lo3;
+d90 10
+a99 2
+    s   = val;
+    val = ( val >= 0 ) ? val : -val;
+d101 4
+a104 2
+    v1 = (FT_UInt32)val >> 16;
+    v2 = (FT_UInt32)(val & 0xFFFFL);
+d106 3
+a108 2
+    k1 = (FT_UInt32)FT_TRIG_SCALE >> 16;       /* constant */
+    k2 = (FT_UInt32)(FT_TRIG_SCALE & 0xFFFFL);   /* constant */
+d110 2
+a111 2
+    hi   = k1 * v1;
+    lo1  = k1 * v2 + k2 * v1;       /* can't overflow */
+d113 3
+a115 3
+    lo2  = ( k2 * v2 ) >> 16;
+    lo3  = ( lo1 >= lo2 ) ? lo1 : lo2;
+    lo1 += lo2;
+d117 2
+a118 3
+    hi  += lo1 >> 16;
+    if ( lo1 < lo3 )
+      hi += (FT_UInt32)0x10000UL;
+d120 3
+a122 1
+    val  = (FT_Fixed)hi;
+d124 3
+a126 1
+    return ( s >= 0 ) ? val : -val;
+d129 1
+a129 1
+#endif /* !FT_CONFIG_HAS_INT64 */
+d132 1
+d136 2
+a137 2
+    FT_Fixed  x, y, z;
+    FT_Int    shift;
+d143 1
+a143 30
+    z     = ( ( x >= 0 ) ? x : - x ) | ( (y >= 0) ? y : -y );
+    shift = 0;
+
+#if 1
+    /* determine msb bit index in `shift' */
+    if ( z >= ( 1L << 16 ) )
+    {
+      z     >>= 16;
+      shift  += 16;
+    }
+    if ( z >= ( 1L << 8 ) )
+    {
+      z     >>= 8;
+      shift  += 8;
+    }
+    if ( z >= ( 1L << 4 ) )
+    {
+      z     >>= 4;
+      shift  += 4;
+    }
+    if ( z >= ( 1L << 2 ) )
+    {
+      z     >>= 2;
+      shift  += 2;
+    }
+    if ( z >= ( 1L << 1 ) )
+    {
+      z    >>= 1;
+      shift += 1;
+    }
+d145 1
+a145 1
+    if ( shift <= 27 )
+d147 3
+a149 3
+      shift  = 27 - shift;
+      vec->x = x << shift;
+      vec->y = y << shift;
+d153 1
+a153 1
+      shift -= 27;
+a158 27
+#else /* 0 */
+
+    if ( z < ( 1L << 27 ) )
+    {
+      do
+      {
+        shift++;
+        z <<= 1;
+      } while ( z < ( 1L << 27 ) );
+      vec->x = x << shift;
+      vec->y = y << shift;
+    }
+    else if ( z > ( 1L << 28 ) )
+    {
+      do
+      {
+        shift++;
+        z >>= 1;
+      } while ( z > ( 1L << 28 ) );
+
+      vec->x = x >> shift;
+      vec->y = y >> shift;
+      shift  = -shift;
+    }
+
+#endif /* 0 */
+
+d168 2
+a169 2
+    FT_Fixed         x, y, xtemp;
+    const FT_Fixed  *arctanptr;
+d175 2
+a176 2
+    /* Get angle between -90 and 90 degrees */
+    while ( theta <= -FT_ANGLE_PI2 )
+d178 4
+a181 3
+      x = -x;
+      y = -y;
+      theta += FT_ANGLE_PI;
+d184 1
+a184 1
+    while ( theta > FT_ANGLE_PI2 )
+d186 4
+a189 3
+      x = -x;
+      y = -y;
+      theta -= FT_ANGLE_PI;
+a191 1
+    /* Initial pseudorotation, with left shift */
+d194 2
+a195 18
+    if ( theta < 0 )
+    {
+      xtemp  = x + ( y << 1 );
+      y      = y - ( x << 1 );
+      x      = xtemp;
+      theta += *arctanptr++;
+    }
+    else
+    {
+      xtemp  = x - ( y << 1 );
+      y      = y + ( x << 1 );
+      x      = xtemp;
+      theta -= *arctanptr++;
+    }
+
+    /* Subsequent pseudorotations, with right shifts */
+    i = 0;
+    do
+d199 2
+a200 2
+        xtemp  = x + ( y >> i );
+        y      = y - ( x >> i );
+d206 2
+a207 2
+        xtemp  = x - ( y >> i );
+        y      = y + ( x >> i );
+d211 1
+a211 1
+    } while ( ++i < FT_TRIG_MAX_ITERS );
+d221 4
+a224 4
+    FT_Fixed         theta;
+    FT_Fixed         yi, i;
+    FT_Fixed         x, y;
+    const FT_Fixed  *arctanptr;
+d230 2
+a231 3
+    /* Get the vector into the right half plane */
+    theta = 0;
+    if ( x < 0 )
+d233 13
+a245 17
+      x = -x;
+      y = -y;
+      theta = 2 * FT_ANGLE_PI2;
+    }
+
+    if ( y > 0 )
+      theta = - theta;
+
+    arctanptr = ft_trig_arctan_table;
+
+    if ( y < 0 )
+    {
+      /* Rotate positive */
+      yi     = y + ( x << 1 );
+      x      = x - ( y << 1 );
+      y      = yi;
+      theta -= *arctanptr++;  /* Subtract angle */
+d249 11
+a259 5
+      /* Rotate negative */
+      yi     = y - ( x << 1 );
+      x      = x + ( y << 1 );
+      y      = yi;
+      theta += *arctanptr++;  /* Add angle */
+d262 4
+a265 2
+    i = 0;
+    do
+d267 1
+a267 1
+      if ( y < 0 )
+d269 4
+a272 5
+        /* Rotate positive */
+        yi     = y + ( x >> i );
+        x      = x - ( y >> i );
+        y      = yi;
+        theta -= *arctanptr++;
+d276 4
+a279 5
+        /* Rotate negative */
+        yi     = y - ( x >> i );
+        x      = x + ( y >> i );
+        y      = yi;
+        theta += *arctanptr++;
+d281 1
+a281 1
+    } while ( ++i < FT_TRIG_MAX_ITERS );
+d283 2
+a284 1
+    /* round theta */
+d286 1
+a286 1
+      theta = FT_PAD_ROUND( theta, 32 );
+d288 1
+a288 1
+      theta = -FT_PAD_ROUND( -theta, 32 );
+d303 1
+a303 3
+    v.x = FT_TRIG_COSCALE >> 2;
+    v.y = 0;
+    ft_trig_pseudo_rotate( &v, angle );
+d305 1
+a305 1
+    return v.x / ( 1 << 12 );
+d314 6
+a319 1
+    return FT_Cos( FT_ANGLE_PI2 - angle );
+d331 1
+a331 3
+    v.x = FT_TRIG_COSCALE >> 2;
+    v.y = 0;
+    ft_trig_pseudo_rotate( &v, angle );
+d364 4
+a367 1
+    vec->x = FT_TRIG_COSCALE >> 2;
+d370 2
+a371 2
+    vec->x >>= 12;
+    vec->y >>= 12;
+d393 7
+a399 2
+    v.x   = vec->x;
+    v.y   = vec->y;
+d401 6
+a406 1
+    if ( angle && ( v.x != 0 || v.y != 0 ) )
+d408 1
+a408 4
+      shift = ft_trig_prenorm( &v );
+      ft_trig_pseudo_rotate( &v, angle );
+      v.x = ft_trig_downscale( v.x );
+      v.y = ft_trig_downscale( v.y );
+a409 3
+      if ( shift > 0 )
+      {
+        FT_Int32  half = (FT_Int32)1L << ( shift - 1 );
+d411 8
+a418 10
+
+        vec->x = ( v.x + half + FT_SIGN_LONG( v.x ) ) >> shift;
+        vec->y = ( v.y + half + FT_SIGN_LONG( v.y ) ) >> shift;
+      }
+      else
+      {
+        shift  = -shift;
+        vec->x = v.x << shift;
+        vec->y = v.y << shift;
+      }
+d432 3
+d440 1
+a440 1
+      return ( v.y >= 0 ) ? v.y : -v.y;
+d444 1
+a444 1
+      return ( v.x >= 0 ) ? v.x : -v.x;
+d454 1
+a454 1
+      return ( v.x + ( 1 << ( shift - 1 ) ) ) >> shift;
+d456 1
+a456 1
+    return v.x << -shift;
+d471 3
+d484 2
+a485 1
+    *length = ( shift >= 0 ) ? ( v.x >> shift ) : ( v.x << -shift );
+d497 3
+d516 1
+a516 2
+    delta %= FT_ANGLE_2PI;
+    if ( delta < 0 )
+d519 1
+a519 1
+    if ( delta > FT_ANGLE_PI )
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d75 1
+a75 1
+    v2 = (FT_UInt32)val & 0xFFFFL;
+d77 2
+a78 2
+    k1 = FT_TRIG_SCALE >> 16;       /* constant */
+    k2 = FT_TRIG_SCALE & 0xFFFFL;   /* constant */
+d89 1
+a89 1
+      hi += 0x10000UL;
+d436 1
+a436 1
+        FT_Int32  half = 1L << ( shift - 1 );
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001, 2002, 2003 by                                          */
+d112 44
+a162 1
+
+d178 3
+d323 1
+a323 1
+      theta = - FT_PAD_ROUND( -theta, 32 );
+d534 1
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001, 2002, 2003, 2004, 2005 by                              */
+a111 44
+#if 1
+    /* determine msb bit index in `shift' */
+    if ( z >= ( 1L << 16 ) )
+    {
+      z     >>= 16;
+      shift  += 16;
+    }
+    if ( z >= ( 1L << 8 ) )
+    {
+      z     >>= 8;
+      shift  += 8;
+    }
+    if ( z >= ( 1L << 4 ) )
+    {
+      z     >>= 4;
+      shift  += 4;
+    }
+    if ( z >= ( 1L << 2 ) )
+    {
+      z     >>= 2;
+      shift  += 2;
+    }
+    if ( z >= ( 1L << 1 ) )
+    {
+      z    >>= 1;
+      shift += 1;
+    }
+
+    if ( shift <= 27 )
+    {
+      shift  = 27 - shift;
+      vec->x = x << shift;
+      vec->y = y << shift;
+    }
+    else
+    {
+      shift -= 27;
+      vec->x = x >> shift;
+      vec->y = y >> shift;
+      shift  = -shift;
+    }
+
+#else /* 0 */
+
+d119 1
+a134 3
+
+#endif /* 0 */
+
+d277 1
+a277 1
+      theta = -FT_PAD_ROUND( -theta, 32 );
+a487 1
+
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001, 2002, 2003, 2004, 2005 by                              */
+a111 44
+#if 1
+    /* determine msb bit index in `shift' */
+    if ( z >= ( 1L << 16 ) )
+    {
+      z     >>= 16;
+      shift  += 16;
+    }
+    if ( z >= ( 1L << 8 ) )
+    {
+      z     >>= 8;
+      shift  += 8;
+    }
+    if ( z >= ( 1L << 4 ) )
+    {
+      z     >>= 4;
+      shift  += 4;
+    }
+    if ( z >= ( 1L << 2 ) )
+    {
+      z     >>= 2;
+      shift  += 2;
+    }
+    if ( z >= ( 1L << 1 ) )
+    {
+      z    >>= 1;
+      shift += 1;
+    }
+
+    if ( shift <= 27 )
+    {
+      shift  = 27 - shift;
+      vec->x = x << shift;
+      vec->y = y << shift;
+    }
+    else
+    {
+      shift -= 27;
+      vec->x = x >> shift;
+      vec->y = y >> shift;
+      shift  = -shift;
+    }
+
+#else /* 0 */
+
+d119 1
+a134 3
+
+#endif /* 0 */
+
+d277 1
+a277 1
+      theta = -FT_PAD_ROUND( -theta, 32 );
+a487 1
+
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d75 1
+a75 1
+    v2 = (FT_UInt32)(val & 0xFFFFL);
+d77 2
+a78 2
+    k1 = (FT_UInt32)FT_TRIG_SCALE >> 16;       /* constant */
+    k2 = (FT_UInt32)(FT_TRIG_SCALE & 0xFFFFL);   /* constant */
+d89 1
+a89 1
+      hi += (FT_UInt32)0x10000UL;
+d436 1
+a436 1
+        FT_Int32  half = (FT_Int32)1L << ( shift - 1 );
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001-2016 by                                                 */
+a17 13
+  /*************************************************************************/
+  /*                                                                       */
+  /* This is a fixed-point CORDIC implementation of trigonometric          */
+  /* functions as well as transformations between Cartesian and polar      */
+  /* coordinates.  The angles are represented as 16.16 fixed-point values  */
+  /* in degrees, i.e., the angular resolution is 2^-16 degrees.  Note that */
+  /* only vectors longer than 2^16*180/pi (or at least 22 bits) on a       */
+  /* discrete Cartesian grid can have the same or better angular           */
+  /* resolution.  Therefore, to maintain this precision, some functions    */
+  /* require an interim upscaling of the vectors, whereas others operate   */
+  /* with 24-bit long vectors directly.                                    */
+  /*                                                                       */
+  /*************************************************************************/
+a20 1
+#include FT_INTERNAL_CALC_H
+d24 2
+a25 6
+  /* the Cordic shrink factor 0.858785336480436 * 2^32 */
+#define FT_TRIG_SCALE      0xDBD95B16UL
+
+  /* the highest bit in overflow-safe vector components, */
+  /* MSB of 0.858785336480436 * sqrt(0.5) * 2^30         */
+#define FT_TRIG_SAFE_MSB   29
+d30 2
+a31 2
+  static const FT_Angle
+  ft_trig_arctan_table[] =
+d33 2
+a34 2
+    1740967L, 919879L, 466945L, 234379L, 117304L, 58666L, 29335L,
+    14668L, 7334L, 3667L, 1833L, 917L, 458L, 229L, 115L,
+d38 3
+d42 1
+a42 1
+#ifdef FT_LONG64
+d48 2
+a49 1
+    FT_Int  s = 1;
+d52 2
+a53 5
+    if ( val < 0 )
+    {
+       val = -val;
+       s = -1;
+    }
+d55 2
+a56 4
+    /* 0x40000000 comes from regression analysis between true */
+    /* and CORDIC hypotenuse, so it minimizes the error       */
+    val = (FT_Fixed)(
+            ( (FT_UInt64)val * FT_TRIG_SCALE + 0x40000000UL ) >> 32 );
+d58 1
+a58 1
+    return s < 0 ? -val : val;
+d61 1
+a61 1
+#else /* !FT_LONG64 */
+d67 2
+a68 2
+    FT_Int     s = 1;
+    FT_UInt32  lo1, hi1, lo2, hi2, lo, hi, i1, i2;
+d71 2
+a72 10
+    if ( val < 0 )
+    {
+       val = -val;
+       s = -1;
+    }
+
+    lo1 = (FT_UInt32)val & 0x0000FFFFU;
+    hi1 = (FT_UInt32)val >> 16;
+    lo2 = FT_TRIG_SCALE & 0x0000FFFFU;
+    hi2 = FT_TRIG_SCALE >> 16;
+d74 2
+a75 4
+    lo = lo1 * lo2;
+    i1 = lo1 * hi2;
+    i2 = lo2 * hi1;
+    hi = hi1 * hi2;
+d77 2
+a78 3
+    /* Check carry overflow of i1 + i2 */
+    i1 += i2;
+    hi += (FT_UInt32)( i1 < i2 ) << 16;
+d80 2
+a81 2
+    hi += i1 >> 16;
+    i1  = i1 << 16;
+d83 3
+a85 3
+    /* Check carry overflow of i1 + lo */
+    lo += i1;
+    hi += ( lo < i1 );
+d87 3
+a89 2
+    /* 0x40000000 comes from regression analysis between true */
+    /* and CORDIC hypotenuse, so it minimizes the error       */
+d91 1
+a91 3
+    /* Check carry overflow of lo + 0x40000000 */
+    lo += 0x40000000UL;
+    hi += ( lo < 0x40000000UL );
+d93 1
+a93 3
+    val = (FT_Fixed)hi;
+
+    return s < 0 ? -val : val;
+d96 1
+a96 1
+#endif /* !FT_LONG64 */
+a98 1
+  /* undefined and never called for zero vector */
+d102 2
+a103 2
+    FT_Pos  x, y;
+    FT_Int  shift;
+d109 30
+a138 1
+    shift = FT_MSB( (FT_UInt32)( FT_ABS( x ) | FT_ABS( y ) ) );
+d140 1
+a140 1
+    if ( shift <= FT_TRIG_SAFE_MSB )
+d142 3
+a144 3
+      shift  = FT_TRIG_SAFE_MSB - shift;
+      vec->x = (FT_Pos)( (FT_ULong)x << shift );
+      vec->y = (FT_Pos)( (FT_ULong)y << shift );
+d148 1
+a148 1
+      shift -= FT_TRIG_SAFE_MSB;
+d154 27
+d190 2
+a191 2
+    FT_Fixed         x, y, xtemp, b;
+    const FT_Angle  *arctanptr;
+d197 2
+a198 2
+    /* Rotate inside [-PI/4,PI/4] sector */
+    while ( theta < -FT_ANGLE_PI4 )
+d200 3
+a202 4
+      xtemp  =  y;
+      y      = -x;
+      x      =  xtemp;
+      theta +=  FT_ANGLE_PI2;
+d205 1
+a205 1
+    while ( theta > FT_ANGLE_PI4 )
+d207 3
+a209 4
+      xtemp  = -y;
+      y      =  x;
+      x      =  xtemp;
+      theta -=  FT_ANGLE_PI2;
+d212 1
+d215 18
+a232 2
+    /* Pseudorotations, with right shifts */
+    for ( i = 1, b = 1; i < FT_TRIG_MAX_ITERS; b <<= 1, i++ )
+d236 2
+a237 2
+        xtemp  = x + ( ( y + b ) >> i );
+        y      = y - ( ( x + b ) >> i );
+d243 2
+a244 2
+        xtemp  = x - ( ( y + b ) >> i );
+        y      = y + ( ( x + b ) >> i );
+d248 1
+a248 1
+    }
+d258 4
+a261 4
+    FT_Angle         theta;
+    FT_Int           i;
+    FT_Fixed         x, y, xtemp, b;
+    const FT_Angle  *arctanptr;
+d267 15
+a281 2
+    /* Get the vector into [-PI/4,PI/4] sector */
+    if ( y > x )
+d283 5
+a287 13
+      if ( y > -x )
+      {
+        theta =  FT_ANGLE_PI2;
+        xtemp =  y;
+        y     = -x;
+        x     =  xtemp;
+      }
+      else
+      {
+        theta =  y > 0 ? FT_ANGLE_PI : -FT_ANGLE_PI;
+        x     = -x;
+        y     = -y;
+      }
+d291 5
+a295 11
+      if ( y < -x )
+      {
+        theta = -FT_ANGLE_PI2;
+        xtemp = -y;
+        y     =  x;
+        x     =  xtemp;
+      }
+      else
+      {
+        theta = 0;
+      }
+d298 2
+a299 4
+    arctanptr = ft_trig_arctan_table;
+
+    /* Pseudorotations, with right shifts */
+    for ( i = 1, b = 1; i < FT_TRIG_MAX_ITERS; b <<= 1, i++ )
+d301 1
+a301 1
+      if ( y > 0 )
+d303 5
+a307 4
+        xtemp  = x + ( ( y + b ) >> i );
+        y      = y - ( ( x + b ) >> i );
+        x      = xtemp;
+        theta += *arctanptr++;
+d311 5
+a315 4
+        xtemp  = x - ( ( y + b ) >> i );
+        y      = y + ( ( x + b ) >> i );
+        x      = xtemp;
+        theta -= *arctanptr++;
+d317 1
+a317 1
+    }
+d319 1
+a319 2
+    /* round theta to acknowledge its error that mostly comes */
+    /* from accumulated rounding errors in the arctan table   */
+d321 1
+a321 1
+      theta = FT_PAD_ROUND( theta, 16 );
+d323 1
+a323 1
+      theta = -FT_PAD_ROUND( -theta, 16 );
+d338 3
+a340 1
+    FT_Vector_Unit( &v, angle );
+d342 1
+a342 1
+    return v.x;
+d351 1
+a351 6
+    FT_Vector  v;
+
+
+    FT_Vector_Unit( &v, angle );
+
+    return v.y;
+d363 3
+a365 1
+    FT_Vector_Unit( &v, angle );
+d398 1
+a398 4
+    if ( !vec )
+      return;
+
+    vec->x = FT_TRIG_SCALE >> 8;
+d401 2
+a402 2
+    vec->x = ( vec->x + 0x80L ) >> 8;
+    vec->y = ( vec->y + 0x80L ) >> 8;
+d424 2
+a425 2
+    if ( !vec || !angle )
+      return;
+d427 6
+a432 1
+    v = *vec;
+d434 3
+a436 2
+    if ( v.x == 0 && v.y == 0 )
+      return;
+a437 4
+    shift = ft_trig_prenorm( &v );
+    ft_trig_pseudo_rotate( &v, angle );
+    v.x = ft_trig_downscale( v.x );
+    v.y = ft_trig_downscale( v.y );
+d439 9
+a447 13
+    if ( shift > 0 )
+    {
+      FT_Int32  half = (FT_Int32)1L << ( shift - 1 );
+
+
+      vec->x = ( v.x + half + FT_SIGN_LONG( v.x ) ) >> shift;
+      vec->y = ( v.y + half + FT_SIGN_LONG( v.y ) ) >> shift;
+    }
+    else
+    {
+      shift  = -shift;
+      vec->x = (FT_Pos)( (FT_ULong)v.x << shift );
+      vec->y = (FT_Pos)( (FT_ULong)v.y << shift );
+a460 3
+    if ( !vec )
+      return 0;
+
+d466 1
+a466 1
+      return FT_ABS( v.y );
+d470 1
+a470 1
+      return FT_ABS( v.x );
+d480 1
+a480 1
+      return ( v.x + ( 1L << ( shift - 1 ) ) ) >> shift;
+d482 1
+a482 1
+    return (FT_Fixed)( (FT_UInt32)v.x << -shift );
+a496 3
+    if ( !vec || !length || !angle )
+      return;
+
+d507 1
+a507 2
+    *length = shift >= 0 ?                      ( v.x >>  shift )
+                         : (FT_Fixed)( (FT_UInt32)v.x << -shift );
+a518 3
+    if ( !vec )
+      return;
+
+d535 2
+a536 1
+    while ( delta <= -FT_ANGLE_PI )
+d539 1
+a539 1
+    while ( delta > FT_ANGLE_PI )
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

@@ -1,0 +1,221 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2007.06.26.21.23.30;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	1004681833C769527EE;
+
+1.1
+date	2005.03.18.15.44.51;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.44.51;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@Update to 2.14.6, the exact same version as in OpenBSD ports. It was from
+there that I took the patches, except that they didn't work. So it was
+still not trivial.
+
+This port is a nightmare. It is full of system dependencies. Just one look
+at the patch filenames should tell you enough. It actually defines _KERNEL
+in some places to get things like struct msginfo. Its server is sgid kmem.
+@
+text
+@$MirOS$
+$OpenBSD: patch-sysdeps_freebsd_procmem_c,v 1.5 2007/01/18 19:31:34 jasper Exp $
+--- sysdeps/freebsd/procmem.c.orig	Wed Jan 17 09:01:28 2007
++++ sysdeps/freebsd/procmem.c	Wed Jan 17 09:05:01 2007
+@@@@ -34,7 +34,7 @@@@
+ #include <sys/resource.h>
+ #if defined(__NetBSD__) && (__NetBSD_Version__ >= 105020000)
+ #include <uvm/uvm_extern.h>
+-#else
++#elif !defined(__OpenBSD__)
+ #include <vm/vm_object.h>
+ #include <vm/vm_map.h>
+ #endif
+@@@@ -50,12 +50,13 @@@@
+ #include <sys/sysctl.h>
+ #if defined(__NetBSD__) && (__NetBSD_Version__ >= 105020000)
+ #include <uvm/uvm.h>
+-#else
++#elif !defined(__OpenBSD__)
+ #include <vm/vm.h>
+ #endif
+ 
+ #if defined(__NetBSD__) && \
+-	(__NetBSD_Version__ >= 104000000) && (__NetBSD_Version__ < 105020000)
++	(__NetBSD_Version__ >= 104000000) && (__NetBSD_Version__ < 105020000) || \
++	defined(__OpenBSD__)
+ /* Fixme ... */
+ #undef _KERNEL
+ #define _UVM_UVM_AMAP_I_H_ 1
+@@@@ -71,10 +72,8 @@@@ static const unsigned long _glibtop_sysd
+ (1L << GLIBTOP_PROC_MEM_RSS_RLIM);
+ 
+ static const unsigned long _glibtop_sysdeps_proc_mem_share =
+-#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000)
++#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000) || defined(__OpenBSD__) || defined(__FreeBSD__)
+ (1L << GLIBTOP_PROC_MEM_SHARE);
+-#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
+-(1L << GLIBTOP_PROC_MEM_SHARE);
+ #else
+ 0;
+ #endif
+@@@@ -121,7 +120,7 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+ 	struct kinfo_proc *pinfo;
+ 	struct vm_map_entry entry, *first;
+ 	struct vmspace *vms, vmspace;
+-#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000)
++#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000) || defined(__OpenBSD__)
+ 	struct vnode vnode;
+ #else
+ 	struct vm_object object;
+@@@@ -223,7 +222,7 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+  			continue;
+ #endif
+ #else
+-#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000)
++#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000) || defined(__OpenBSD__)
+  		if (UVM_ET_ISSUBMAP (&entry))
+ 			continue;
+ #else
+@@@@ -232,7 +231,7 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+ #endif
+ #endif
+ 
+-#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000)
++#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000) || defined(__OpenBSD__)
+ 		if (!entry.object.uvm_obj)
+ 			continue;
+ 
+@@@@ -259,7 +258,7 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+ #endif
+ 		/* If the object is of type vnode, add its size */
+ 
+-#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000)
++#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000) || defined(__OpenBSD__)
+ #if defined(UVM_VNODE_VALID)
+ 		if (!vnode.v_uvm.u_flags & UVM_VNODE_VALID)
+ 			continue;
+@@@@ -275,7 +274,7 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+ #else
+ 
+ 		/* Reference count must be at least two. */
+-		if (vnode.v_uvm.u_obj.uo_refs <= 1)
++		if (vnode.v_usecount <= 1)
+ 			continue;
+ 
+ 		buf->share += pagetok (vnode.v_uvm.u_obj.uo_npages) << LOG1024;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 5
+a5 5
+--- sysdeps/freebsd/procmem.c.orig	Sun Jul 18 13:33:56 2004
++++ sysdeps/freebsd/procmem.c	Fri Dec 10 19:15:09 2004
+@@@@ -31,7 +31,7 @@@@
+ #include <sys/param.h>
+ #include <sys/proc.h>
+d7 1
+a7 2
+-#ifdef __NetBSD__ && (__NetBSD_Version__ >= 105020000)
++#if defined(__NetBSD__) && (__NetBSD_Version__ >= 105020000) || defined(__OpenBSD__)
+d9 2
+a10 1
+ #else
+d12 1
+a12 2
+@@@@ -47,7 +47,7 @@@@
+ #include <sys/user.h>
+d14 1
+d16 1
+a16 2
+-#ifdef __NetBSD__ && (__NetBSD_Version__ >= 105020000)
++#if defined(__NetBSD__) && (__NetBSD_Version__ >= 105020000) || defined(__OpenBSD__)
+d18 2
+a19 1
+ #else
+d21 10
+a30 1
+@@@@ -70,7 +70,7 @@@@ static const unsigned long _glibtop_sysd
+d35 1
+a35 1
++#if defined(__NetBSD__) && (__NetBSD_Version__ >= 104000000) || defined(__OpenBSD__)
+d37 6
+a42 3
+ #elif defined(__FreeBSD__)
+ (1L << GLIBTOP_PROC_MEM_SHARE);
+@@@@ -120,12 +120,12 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+d51 1
+a51 28
+ #endif
+-	struct plimit plimit;
++	struct rlimit rlimit;
+ 	int count;
+ 
+ 	glibtop_init_p (server, (1L << GLIBTOP_SYSDEPS_PROC_MEM), 0);
+@@@@ -159,16 +159,12 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+ #else
+ 
+ #define        PROC_VMSPACE   kp_proc.p_vmspace
+-
+-	if (kvm_read (server->machine.kd,
+-		      (unsigned long) pinfo [0].PROC_VMSPACE,
+-		      (char *) &plimit, sizeof (plimit)) != sizeof (plimit)) {
+-		glibtop_warn_io_r (server, "kvm_read (plimit)");
+-		return;
++       if (getrlimit (RLIMIT_RSS, &rlimit) < 0) {
++	   glibtop_warn_io_r (server, "getrlimit");
++	   return;
+ 	}
+ 
+-	buf->rss_rlim = (guint64)
+-		(plimit.pl_rlimit [RLIMIT_RSS].rlim_cur);
++       buf->rss_rlim = (u_int64_t) (rlimit.rlim_cur);
+ 
+ 	vms = &pinfo [0].kp_eproc.e_vm;
+ 
+@@@@ -220,7 +216,7 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+d60 1
+a60 2
+@@@@ -228,8 +224,7 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+ 			continue;
+d63 1
+a63 1
+-
+d69 1
+a69 1
+@@@@ -256,7 +251,7 @@@@ glibtop_get_proc_mem_p (glibtop *server,
+d78 9
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

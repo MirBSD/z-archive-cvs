@@ -1,0 +1,379 @@
+head	1.1;
+branch	1.1.115;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.1.115.1
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype:1.1.115;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2006.06.29.18.37.41;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10044A41DBD6368BED5;
+
+1.1.1.1
+date	2008.02.26.19.53.02;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.115.1
+date	2006.06.29.18.37.41;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.2
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.3
+date	2017.04.15.15.42.08;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  gxvlcar.c                                                              */
+/*                                                                         */
+/*    TrueTypeGX/AAT lcar table validation (body).                         */
+/*                                                                         */
+/*  Copyright 2004, 2005 by suzuki toshiya, Masatake YAMATO, Red Hat K.K., */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+/***************************************************************************/
+/*                                                                         */
+/* gxvalid is derived from both gxlayout module and otvalid module.        */
+/* Development of gxlayout is supported by the Information-technology      */
+/* Promotion Agency(IPA), Japan.                                           */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include "gxvalid.h"
+#include "gxvcommn.h"
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_gxvlcar
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                      Data and Types                           *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  typedef struct  GXV_lcar_DataRec_
+  {
+    FT_UShort  format;
+
+  } GXV_lcar_DataRec, *GXV_lcar_Data;
+
+
+#define GXV_LCAR_DATA( FIELD )  GXV_TABLE_DATA( lcar, FIELD )
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                      UTILITY FUNCTIONS                        *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  static void
+  gxv_lcar_partial_validate( FT_UShort      partial,
+                             FT_UShort      glyph,
+                             GXV_Validator  valid )
+  {
+    GXV_NAME_ENTER( "partial" );
+
+    if ( GXV_LCAR_DATA( format ) != 1 )
+      goto Exit;
+
+    gxv_ctlPoint_validate( glyph, partial, valid );
+
+  Exit:
+    GXV_EXIT;
+  }
+
+
+  static void
+  gxv_lcar_LookupValue_validate( FT_UShort            glyph,
+                                 GXV_LookupValueDesc  value,
+                                 GXV_Validator        valid )
+  {
+    FT_Bytes   p     = valid->root->base + value.u;
+    FT_Bytes   limit = valid->root->limit;
+    FT_UShort  count;
+    FT_Short   partial;
+    FT_UShort  i;
+
+
+    GXV_NAME_ENTER( "element in lookupTable" );
+
+    GXV_LIMIT_CHECK( 2 );
+    count = FT_NEXT_USHORT( p );
+
+    GXV_LIMIT_CHECK( 2 * count );
+    for ( i = 0; i < count; i++ )
+    {
+      partial = FT_NEXT_SHORT( p );
+      gxv_lcar_partial_validate( partial, glyph, valid );
+    }
+
+    GXV_EXIT;
+  }
+
+
+  /*
+    +------ lcar --------------------+
+    |                                |
+    |      +===============+         |
+    |      | looup header  |         |
+    |      +===============+         |
+    |      | BinSrchHeader |         |
+    |      +===============+         |
+    |      | lastGlyph[0]  |         |
+    |      +---------------+         |
+    |      | firstGlyph[0] |         |  head of lcar sfnt table
+    |      +---------------+         |             +
+    |      | offset[0]     |    ->   |          offset            [byte]
+    |      +===============+         |             +
+    |      | lastGlyph[1]  |         | (glyphID - firstGlyph) * 2 [byte]
+    |      +---------------+         |
+    |      | firstGlyph[1] |         |
+    |      +---------------+         |
+    |      | offset[1]     |         |
+    |      +===============+         |
+    |                                |
+    |       ....                     |
+    |                                |
+    |      16bit value array         |
+    |      +===============+         |
+    +------|     value     | <-------+
+    |       ....
+    |
+    |
+    |
+    |
+    |
+    +---->  lcar values...handled by lcar callback function
+  */
+
+  static GXV_LookupValueDesc
+  gxv_lcar_LookupFmt4_transit( FT_UShort            relative_gindex,
+                               GXV_LookupValueDesc  base_value,
+                               FT_Bytes             lookuptbl_limit,
+                               GXV_Validator        valid )
+  {
+    FT_Bytes             p;
+    FT_Bytes             limit;
+    FT_UShort            offset;
+    GXV_LookupValueDesc  value;
+
+    FT_UNUSED( lookuptbl_limit );
+
+    /* XXX: check range? */
+    offset = (FT_UShort)( base_value.u +
+                          relative_gindex * sizeof ( FT_UShort ) );
+    p      = valid->root->base + offset;
+    limit  = valid->root->limit;
+
+    GXV_LIMIT_CHECK ( 2 );
+    value.u = FT_NEXT_USHORT( p );
+
+    return value;
+  }
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                          lcar TABLE                           *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  FT_LOCAL_DEF( void )
+  gxv_lcar_validate( FT_Bytes      table,
+                     FT_Face       face,
+                     FT_Validator  ftvalid )
+  {
+    FT_Bytes          p     = table;
+    FT_Bytes          limit = 0;
+    GXV_ValidatorRec  validrec;
+    GXV_Validator     valid = &validrec;
+
+    GXV_lcar_DataRec  lcarrec;
+    GXV_lcar_Data     lcar = &lcarrec;
+
+    FT_Fixed          version;
+
+
+    valid->root       = ftvalid;
+    valid->table_data = lcar;
+    valid->face       = face;
+
+    FT_TRACE3(( "validating `lcar' table\n" ));
+    GXV_INIT;
+
+    GXV_LIMIT_CHECK( 4 + 2 );
+    version = FT_NEXT_ULONG( p );
+    GXV_LCAR_DATA( format ) = FT_NEXT_USHORT( p );
+
+    if ( version != 0x00010000UL)
+      FT_INVALID_FORMAT;
+
+    if ( GXV_LCAR_DATA( format ) > 1 )
+      FT_INVALID_FORMAT;
+
+    valid->lookupval_sign   = GXV_LOOKUPVALUE_UNSIGNED;
+    valid->lookupval_func   = gxv_lcar_LookupValue_validate;
+    valid->lookupfmt4_trans = gxv_lcar_LookupFmt4_transit;
+    gxv_LookupTable_validate( p, limit, valid );
+
+    FT_TRACE4(( "\n" ));
+  }
+
+
+/* END */
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@@
+
+
+1.1.115.1
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@@
+
+
+1.1.115.2
+log
+@we need newer freetype for advance calculation
+@
+text
+@d86 1
+a86 1
+                                 GXV_LookupValueCPtr  value_p,
+d89 1
+a89 1
+    FT_Bytes   p     = valid->root->base + value_p->u;
+d149 1
+a149 1
+                               GXV_LookupValueCPtr  base_value_p,
+d161 1
+a161 1
+    offset = (FT_UShort)( base_value_p->u +
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 2
+/*  Copyright 2004-2016 by                                                 */
+/*  suzuki toshiya, Masatake YAMATO, Red Hat K.K.,                         */
+d68 1
+a68 1
+  gxv_lcar_partial_validate( FT_Short       partial,
+d70 1
+a70 1
+                             GXV_Validator  gxvalid )
+d77 1
+a77 1
+    gxv_ctlPoint_validate( glyph, (FT_UShort)partial, gxvalid );
+d87 1
+a87 1
+                                 GXV_Validator        gxvalid )
+d89 2
+a90 2
+    FT_Bytes   p     = gxvalid->root->base + value_p->u;
+    FT_Bytes   limit = gxvalid->root->limit;
+d105 1
+a105 1
+      gxv_lcar_partial_validate( partial, glyph, gxvalid );
+d116 1
+a116 1
+    |      | lookup header |         |
+d151 1
+a151 1
+                               GXV_Validator        gxvalid )
+d163 2
+a164 2
+    p      = gxvalid->root->base + offset;
+    limit  = gxvalid->root->limit;
+d188 2
+a189 2
+    GXV_ValidatorRec  gxvalidrec;
+    GXV_Validator     gxvalid = &gxvalidrec;
+d197 3
+a199 3
+    gxvalid->root       = ftvalid;
+    gxvalid->table_data = lcar;
+    gxvalid->face       = face;
+d205 1
+a205 1
+    version = FT_NEXT_LONG( p );
+d214 4
+a217 4
+    gxvalid->lookupval_sign   = GXV_LOOKUPVALUE_UNSIGNED;
+    gxvalid->lookupval_func   = gxv_lcar_LookupValue_validate;
+    gxvalid->lookupfmt4_trans = gxv_lcar_LookupFmt4_transit;
+    gxv_LookupTable_validate( p, limit, gxvalid );
+@
+
+

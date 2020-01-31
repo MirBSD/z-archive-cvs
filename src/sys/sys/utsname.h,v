@@ -1,0 +1,209 @@
+head	1.5;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.1
+	MIRBSD_10:1.5.0.4
+	MIRBSD_10_BASE:1.5
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2007.06.21.14.40.19;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100467A8D2C4D7EEFFE;
+
+1.4
+date	2007.05.17.14.24.43;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100464C657063A0BD89;
+
+1.3
+date	2007.05.16.22.03.54;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100464B7E545A2B0094;
+
+1.2
+date	2005.03.06.21.28.35;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.29.18;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.18;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.5
+log
+@• libedit, libm, libocurses, libsectok, libskey, libssl, libusbhid, libutil:
+  do something I should've long done and bump their majors – ABI changes are
+  not only removals (or changes) of T/D symbols but also additions(!) of U
+  symbols (i.e. imports); these changed during the <ctype.h> changes from a
+  while ago and depend on newer libc; I did an nm(1) comparision against #9
+  (release) to allow upgrading by source
+• libc, uname: since I'm bumping a lot of other shlibs, it's a good time to
+  bump the libc major as well and finally get rid of that struct utsname bug
+  I introduced when I had no idea what I was doing, in MirOS #1 or so…
+• libpthread: requires a major bump if libc major is bumped, or so they say
+• bump os patchlevel
+
+agreed bsiegert@@
+XXX any more changes to do before release?
+@
+text
+@/*	$OpenBSD: utsname.h,v 1.5 2003/06/02 23:28:22 millert Exp $	*/
+/*	$NetBSD: utsname.h,v 1.6 1994/06/29 06:46:11 cgd Exp $	*/
+
+/*-
+ * Copyright (c) 1994
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Chuck Karish of Mindcraft, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@@(#)utsname.h	8.1 (Berkeley) 1/4/94
+ */
+
+#ifndef	_SYS_UTSNAME_H
+#define	_SYS_UTSNAME_H
+
+#define SYS_NMLN	256
+
+struct utsname {
+	char	sysname[SYS_NMLN];	/* Name of this OS. */
+	char	nodename[SYS_NMLN];	/* Name of this network node. */
+	char	release[SYS_NMLN];	/* Release level. */
+	char	version[SYS_NMLN];	/* Version level. */
+	char	machine[SYS_NMLN];	/* Hardware type. */
+};
+
+#include <sys/cdefs.h>
+
+__BEGIN_DECLS
+int	uname(struct utsname *);
+__END_DECLS
+
+#endif	/* !_SYS_UTSNAME_H */
+@
+
+
+1.4
+log
+@d'oh, this was obviously stupid. new libc with old apps was safe, but new
+apps allocated only 1280 bytes for a struct utsname on the stack, trigge-
+ring propolice in make(1) at end of main() because of an off-by-one over-
+write. until we bump libc major, increase struct utsname size by one byte
+again.
+@
+text
+@a48 2
+	/* this is for binary compatibility to MirOS #9 and before */
+	char	__dummy;		/* Must be zero. */
+@
+
+
+1.3
+log
+@okay, time to clear up one of the earliest messes in MirBSD's history…
+(yes I was young and stup^Wunknowingly did this)
+
+• lib/libc/gen/uname.c: do not fill in the struct utsname.patchlevel
+  field any more.
+• X11/xc/config/imake/imake.c: use sysctl kern.ospatchlevel, instead
+  of relying on non-standard/unsafe struct utsname.patchlevel.
+• lib/libc/gen/uname.c: in order to avoid a libc version bump, bzero
+  the struct utsname * argument, so that the former patchlevel field
+  becomes a NUL string.
+• sys/sys/utsname.h: revert, i.e. delete the “patchlevel” field from
+  struct utsname. Do NOT bump the os patchlevel, because this change
+  does not affect the kernel/userland interface – that field has ne-
+  ver been used in kernel land. This change, back then, was not safe
+  as per ABI policy.
+• lib/libc/gen/uname.c, share/mk/sys.mk, sys/sys/param.h: patchlevel
+  bump for size change of struct utsname, used in gen/uname.c to add
+  1 to the number of octets to bzero(), ifdef'd (so that new source,
+  old includes, is safe).
+• lib/libc/Makefile: mention gen/uname.c change for next major bump.
+
+All other users of struct utsname in the base system have been taken
+care of already (most notably uname(1); the others didn't use the os
+patchlevel anyway).
+@
+text
+@d49 2
+@
+
+
+1.2
+log
+@* merge src/sys/
+  (at least the better part of it)
+* revert IPv6 networking to OpenBSD, since
+  I didn't get IPV4_MAPPED addresses working :(
+@
+text
+@a0 1
+/**	$MirOS$	*/
+a48 1
+	char	patchlevel[SYS_NMLN];	/* Patch level. */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d50 1
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

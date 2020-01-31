@@ -1,0 +1,1039 @@
+head	1.6;
+access;
+symbols
+	MIRBSD_10:1.4.0.4
+	MIRBSD_10_BASE:1.4
+	MIRBSD_9_BASE:1.4
+	MIRBSD_8:1.4.0.2
+	MIRBSD_8_BASE:1.4
+	cvs-200509212000:1.1.1.3
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.08.07.20.15.18;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1005988C69344442E37;
+
+1.5
+date	2009.11.09.21.30.51;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004AF88A0F18F30769;
+
+1.4
+date	2005.09.22.20.40.03;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	2258433316aba805;
+
+1.3
+date	2005.07.09.13.23.32;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	156f42cfcfe741cc;
+
+1.2
+date	2005.03.06.20.28.42;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.24.50;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.50;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.09.13.05.00;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	500642cfcb8db32b;
+
+1.1.1.3
+date	2005.09.21.20.34.23;	author tg;	state Exp;
+branches;
+next	;
+commitid	20cd4331c3c732a2;
+
+
+desc
+@@
+
+
+1.6
+log
+@filesystem
+@
+text
+@/*
+ * Copyright (c) 1995, 1996, 1998 Theo de Raadt.  All rights reserved.
+ * Copyright (c) 1983, 1993, 1994
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/param.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#include <signal.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <pwd.h>
+#include <errno.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <string.h>
+#include <syslog.h>
+#include <stdlib.h>
+#include <netgroup.h>
+
+__RCSID("$MirOS: src/lib/libc/net/rcmd.c,v 1.5 2009/11/09 21:30:51 tg Exp $");
+
+int	__ivaliduser(FILE *, in_addr_t, const char *, const char *);
+int	__ivaliduser_sa(FILE *, struct sockaddr *, socklen_t,
+	    const char *, const char *);
+static int __icheckhost(struct sockaddr *, socklen_t, const char *);
+static char *__gethostloop(struct sockaddr *, socklen_t);
+
+int
+rcmd(char **ahost, int rport, const char *locuser, const char *remuser,
+    const char *cmd, int *fd2p)
+{
+	return rcmd_af(ahost, rport, locuser, remuser, cmd, fd2p, AF_INET);
+}
+
+int
+rcmd_af(char **ahost, int porta, const char *locuser, const char *remuser,
+    const char *cmd, int *fd2p, int af)
+{
+	static char hbuf[MAXHOSTNAMELEN];
+	char pbuf[NI_MAXSERV];
+	struct addrinfo hints, *res, *r;
+	int error;
+	struct sockaddr_storage from;
+	fd_set *readsp = NULL;
+	sigset_t oldmask, mask;
+	pid_t pid;
+	int s, lport, timo;
+	char c, *p;
+	int refused;
+	in_port_t rport = porta;
+
+	/* call rcmdsh() with specified remote shell if appropriate. */
+	if (!issetugid() && (p = getenv("RSH")) && *p) {
+		struct servent *sp = getservbyname("shell", "tcp");
+
+		if (sp && sp->s_port == rport)
+			return (rcmdsh(ahost, rport, locuser, remuser,
+			    cmd, p));
+	}
+
+	/* use rsh(1) if non-root and remote port is shell. */
+	if (geteuid()) {
+		struct servent *sp = getservbyname("shell", "tcp");
+
+		if (sp && sp->s_port == rport)
+			return (rcmdsh(ahost, rport, locuser, remuser,
+			    cmd, NULL));
+	}
+
+	pid = getpid();
+	snprintf(pbuf, sizeof(pbuf), "%u", ntohs(rport));
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = af;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_CANONNAME;
+	error = getaddrinfo(*ahost, pbuf, &hints, &res);
+	if (error) {
+#if 0
+		warnx("%s: %s", *ahost, gai_strerror(error));
+#endif
+		return (-1);
+	}
+	if (res->ai_canonname) {
+		strlcpy(hbuf, res->ai_canonname, sizeof(hbuf));
+		*ahost = hbuf;
+	} /*XXX else
+		; XXX*/
+
+	r = res;
+	refused = 0;
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGURG);
+	oldmask = sigprocmask(SIG_BLOCK, &mask, &oldmask);
+	for (timo = 1, lport = IPPORT_RESERVED - 1;;) {
+		s = rresvport_af(&lport, r->ai_family);
+		if (s < 0) {
+			if (errno == EAGAIN)
+				(void)fprintf(stderr,
+				    "rcmd: socket: All ports in use\n");
+			else
+				(void)fprintf(stderr, "rcmd: socket: %s\n",
+				    strerror(errno));
+			if (r->ai_next) {
+				r = r->ai_next;
+				continue;
+			} else {
+				sigprocmask(SIG_SETMASK, &oldmask, NULL);
+				freeaddrinfo(res);
+				return (-1);
+			}
+		}
+		fcntl(s, F_SETOWN, pid);
+		if (connect(s, r->ai_addr, r->ai_addrlen) >= 0)
+			break;
+		(void)close(s);
+		if (errno == EADDRINUSE) {
+			lport--;
+			continue;
+		}
+		if (errno == ECONNREFUSED)
+			refused++;
+		if (r->ai_next) {
+			int oerrno = errno;
+			char hbuf_[NI_MAXHOST];
+			const int niflags = NI_NUMERICHOST;
+
+			hbuf_[0] = '\0';
+			if (getnameinfo(r->ai_addr, r->ai_addrlen,
+			    hbuf_, sizeof(hbuf_), NULL, 0, niflags) != 0)
+				strlcpy(hbuf_, "(invalid)", sizeof hbuf_);
+			(void)fprintf(stderr, "connect to address %s: ", hbuf_);
+			errno = oerrno;
+			perror(0);
+			r = r->ai_next;
+			hbuf_[0] = '\0';
+			if (getnameinfo(r->ai_addr, r->ai_addrlen,
+			    hbuf_, sizeof(hbuf_), NULL, 0, niflags) != 0)
+				strlcpy(hbuf_, "(invalid)", sizeof hbuf_);
+			(void)fprintf(stderr, "Trying %s...\n", hbuf_);
+			continue;
+		}
+		if (refused && timo <= 16) {
+			(void)sleep(timo);
+			timo *= 2;
+			r = res;
+			refused = 0;
+			continue;
+		}
+		(void)fprintf(stderr, "%s: %s\n", res->ai_canonname,
+		    strerror(errno));
+		sigprocmask(SIG_SETMASK, &oldmask, NULL);
+		freeaddrinfo(res);
+		return (-1);
+	}
+	/* given "af" can be PF_UNSPEC, we need the real af for "s" */
+	af = r->ai_family;
+	freeaddrinfo(res);
+#if 0
+	/*
+	 * try to rresvport() to the same port. This will make rresvport()
+	 * fail it's first bind, resulting in it choosing a random port.
+	 */
+	lport--;
+#endif
+	if (fd2p == 0) {
+		write(s, "", 1);
+		lport = 0;
+	} else {
+		char num[8];
+		int s2 = rresvport_af(&lport, af), s3;
+		socklen_t len = sizeof(from);
+		int fdssize = howmany(MAX(s, s2)+1, NFDBITS) * sizeof(fd_mask);
+
+		if (s2 < 0)
+			goto bad;
+		readsp = (fd_set *)malloc(fdssize);
+		if (readsp == NULL) {
+			close(s2);
+			goto bad;
+		}
+		listen(s2, 1);
+		(void)snprintf(num, sizeof(num), "%d", lport);
+		if ((size_t)write(s, num, strlen(num)+1) != strlen(num)+1) {
+			(void)fprintf(stderr,
+			    "rcmd: write (setting up stderr): %s\n",
+			    strerror(errno));
+			(void)close(s2);
+			goto bad;
+		}
+again:
+		memset(readsp, 0, fdssize);
+		FD_SET(s, readsp);
+		FD_SET(s2, readsp);
+		errno = 0;
+		if (select(MAX(s, s2) + 1, readsp, 0, 0, 0) < 1 ||
+		    !FD_ISSET(s2, readsp)) {
+			if (errno != 0)
+				(void)fprintf(stderr,
+				    "rcmd: select (setting up stderr): %s\n",
+				    strerror(errno));
+			else
+				(void)fprintf(stderr,
+				"select: protocol failure in circuit setup\n");
+			(void)close(s2);
+			goto bad;
+		}
+		s3 = accept(s2, (struct sockaddr *)&from, &len);
+		if (s3 < 0) {
+			(void)fprintf(stderr,
+			    "rcmd: accept: %s\n", strerror(errno));
+			lport = 0;
+			close(s2);
+			goto bad;
+		}
+
+		/*
+		 * XXX careful for ftp bounce attacks. If discovered, shut them
+		 * down and check for the real auxiliary channel to connect.
+		 */
+		switch (from.ss_family) {
+		case AF_INET:
+		case AF_INET6:
+			if (getnameinfo((struct sockaddr *)&from, len,
+			    NULL, 0, num, sizeof(num), NI_NUMERICSERV) == 0 &&
+			    atoi(num) != 20) {
+				break;
+			}
+			close(s3);
+			goto again;
+		default:
+			break;
+		}
+		(void)close(s2);
+
+		*fd2p = s3;
+		switch (from.ss_family) {
+		case AF_INET:
+		case AF_INET6:
+			if (getnameinfo((struct sockaddr *)&from, len,
+			    NULL, 0, num, sizeof(num), NI_NUMERICSERV) != 0 ||
+			    (atoi(num) >= IPPORT_RESERVED ||
+			     atoi(num) < IPPORT_RESERVED / 2)) {
+				(void)fprintf(stderr,
+				    "socket: protocol failure in circuit setup.\n");
+				goto bad2;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+	(void)write(s, locuser, strlen(locuser)+1);
+	(void)write(s, remuser, strlen(remuser)+1);
+	(void)write(s, cmd, strlen(cmd)+1);
+	if (read(s, &c, 1) != 1) {
+		(void)fprintf(stderr,
+		    "rcmd: %s: %s\n", *ahost, strerror(errno));
+		goto bad2;
+	}
+	if (c != 0) {
+		while (read(s, &c, 1) == 1) {
+			(void)write(STDERR_FILENO, &c, 1);
+			if (c == '\n')
+				break;
+		}
+		goto bad2;
+	}
+	sigprocmask(SIG_SETMASK, &oldmask, NULL);
+	free(readsp);
+	return (s);
+bad2:
+	if (lport)
+		(void)close(*fd2p);
+bad:
+	if (readsp)
+		free(readsp);
+	(void)close(s);
+	sigprocmask(SIG_SETMASK, &oldmask, NULL);
+	return (-1);
+}
+
+int	__check_rhosts_file = 1;
+const char *__rcmd_errstr;
+
+int
+ruserok(const char *rhost, int superuser, const char *ruser, const char *luser)
+{
+	struct addrinfo hints, *res, *r;
+	int error;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
+	error = getaddrinfo(rhost, "0", &hints, &res);
+	if (error)
+		return (-1);
+
+	for (r = res; r; r = r->ai_next) {
+		if (iruserok_sa(r->ai_addr, r->ai_addrlen, superuser, ruser,
+		    luser) == 0) {
+			freeaddrinfo(res);
+			return (0);
+		}
+	}
+	freeaddrinfo(res);
+	return (-1);
+}
+
+/*
+ * New .rhosts strategy: We are passed an ip address. We spin through
+ * hosts.equiv and .rhosts looking for a match. When the .rhosts only
+ * has ip addresses, we don't have to trust a nameserver.  When it
+ * contains hostnames, we spin through the list of addresses the nameserver
+ * gives us and look for a match.
+ *
+ * Returns 0 if ok, -1 if not ok.
+ */
+int
+iruserok(u_int32_t raddr, int superuser, const char *ruser, const char *luser)
+{
+	struct sockaddr_in sin;
+
+	memset(&sin, 0, sizeof(sin));
+	sin.sin_family = AF_INET;
+	sin.sin_len = sizeof(struct sockaddr_in);
+	memcpy(&sin.sin_addr, &raddr, sizeof(sin.sin_addr));
+	return iruserok_sa(&sin, sizeof(struct sockaddr_in), superuser, ruser,
+		    luser);
+}
+
+int
+iruserok_sa(const void *raddr, int rlen, int superuser, const char *ruser,
+    const char *luser)
+{
+	struct sockaddr *sa;
+	const char *cp;
+	struct stat sbuf;
+	struct passwd *pwd;
+	FILE *hostf;
+	uid_t uid;
+	int first;
+	char pbuf[MAXPATHLEN];
+
+	sa = (struct sockaddr *)raddr;
+	first = 1;
+	hostf = superuser ? NULL : fopen(_PATH_HEQUIV, "r");
+again:
+	if (hostf) {
+		if (__ivaliduser_sa(hostf, sa, rlen, luser, ruser) == 0) {
+			(void)fclose(hostf);
+			return (0);
+		}
+		(void)fclose(hostf);
+	}
+	if (first == 1 && (__check_rhosts_file || superuser)) {
+		first = 0;
+		if ((pwd = getpwnam(luser)) == NULL)
+			return (-1);
+		snprintf(pbuf, sizeof pbuf, "%s/.rhosts", pwd->pw_dir);
+
+		/*
+		 * Change effective uid while opening .rhosts.  If root and
+		 * reading an NFS mounted filesystem, can't read files that
+		 * are protected read/write owner only.
+		 */
+		uid = geteuid();
+		(void)seteuid(pwd->pw_uid);
+		hostf = fopen(pbuf, "r");
+		(void)seteuid(uid);
+
+		if (hostf == NULL)
+			return (-1);
+		/*
+		 * If not a regular file, or is owned by someone other than
+		 * user or root or if writeable by anyone but the owner, quit.
+		 */
+		cp = NULL;
+		if (lstat(pbuf, &sbuf) < 0)
+			cp = ".rhosts lstat failed";
+		else if (!S_ISREG(sbuf.st_mode))
+			cp = ".rhosts not regular file";
+		else if (fstat(fileno(hostf), &sbuf) < 0)
+			cp = ".rhosts fstat failed";
+		else if (sbuf.st_uid && sbuf.st_uid != pwd->pw_uid)
+			cp = "bad .rhosts owner";
+		else if (sbuf.st_mode & (S_IWGRP|S_IWOTH))
+			cp = ".rhosts writable by other than owner";
+		/* If there were any problems, quit. */
+		if (cp) {
+			__rcmd_errstr = cp;
+			(void)fclose(hostf);
+			return (-1);
+		}
+		goto again;
+	}
+	return (-1);
+}
+
+/*
+ * XXX
+ * Don't make static, used by lpd(8).
+ *
+ * Returns 0 if ok, -1 if not ok.
+ */
+int
+__ivaliduser(FILE *hostf, in_addr_t raddrl, const char *luser,
+    const char *ruser)
+{
+	struct sockaddr_in sin;
+
+	memset(&sin, 0, sizeof(sin));
+	sin.sin_family = AF_INET;
+	sin.sin_len = sizeof(struct sockaddr_in);
+	memcpy(&sin.sin_addr, &raddrl, sizeof(sin.sin_addr));
+	return __ivaliduser_sa(hostf, (struct sockaddr *)&sin, sin.sin_len,
+		    luser, ruser);
+}
+
+int
+__ivaliduser_sa(FILE *hostf, struct sockaddr *raddr, socklen_t salen,
+    const char *luser, const char *ruser)
+{
+	char *user, *p;
+	char *buf;
+	const char *auser, *ahost;
+	int hostok, userok;
+	char *rhost = (char *)-1;
+	char domain[MAXHOSTNAMELEN];
+	size_t buflen;
+
+	getdomainname(domain, sizeof(domain));
+
+	while ((buf = fgetln(hostf, &buflen))) {
+		p = buf;
+		if (*p == '#')
+			continue;
+		while (p < buf + buflen && *p != '\n' && *p != ' ' && *p != '\t') {
+			if (!isprint(*p))
+				goto bail;
+			*p = isupper(*p) ? tolower(*p) : *p;
+			p++;
+		}
+		if (p >= buf + buflen)
+			continue;
+		if (*p == ' ' || *p == '\t') {
+			*p++ = '\0';
+			while (p < buf + buflen && (*p == ' ' || *p == '\t'))
+				p++;
+			if (p >= buf + buflen)
+				continue;
+			user = p;
+			while (p < buf + buflen && *p != '\n' && *p != ' ' &&
+			    *p != '\t') {
+				if (!isprint(*p))
+					goto bail;
+				p++;
+			}
+		} else
+			user = p;
+		*p = '\0';
+
+		if (p == buf)
+			continue;
+
+		auser = *user ? user : luser;
+		ahost = buf;
+
+		if (strlen(ahost) >= MAXHOSTNAMELEN)
+			continue;
+
+		/*
+		 * innetgr() must lookup a hostname (we do not attempt
+		 * to change the semantics so that netgroups may have
+		 * #.#.#.# addresses in the list.)
+		 */
+		if (ahost[0] == '+')
+			switch (ahost[1]) {
+			case '\0':
+				hostok = 1;
+				break;
+			case '@@':
+				if (rhost == (char *)-1)
+					rhost = __gethostloop(raddr, salen);
+				hostok = 0;
+				if (rhost)
+					hostok = innetgr(&ahost[2], rhost,
+					    NULL, domain);
+				break;
+			default:
+				hostok = __icheckhost(raddr, salen, &ahost[1]);
+				break;
+			}
+		else if (ahost[0] == '-')
+			switch (ahost[1]) {
+			case '\0':
+				hostok = -1;
+				break;
+			case '@@':
+				if (rhost == (char *)-1)
+					rhost = __gethostloop(raddr, salen);
+				hostok = 0;
+				if (rhost)
+					hostok = -innetgr(&ahost[2], rhost,
+					    NULL, domain);
+				break;
+			default:
+				hostok = -__icheckhost(raddr, salen, &ahost[1]);
+				break;
+			}
+		else
+			hostok = __icheckhost(raddr, salen, ahost);
+
+
+		if (auser[0] == '+')
+			switch (auser[1]) {
+			case '\0':
+				userok = 1;
+				break;
+			case '@@':
+				userok = innetgr(&auser[2], NULL, ruser,
+				    domain);
+				break;
+			default:
+				userok = strcmp(ruser, &auser[1]) ? 0 : 1;
+				break;
+			}
+		else if (auser[0] == '-')
+			switch (auser[1]) {
+			case '\0':
+				userok = -1;
+				break;
+			case '@@':
+				userok = -innetgr(&auser[2], NULL, ruser,
+				    domain);
+				break;
+			default:
+				userok = strcmp(ruser, &auser[1]) ? 0 : -1;
+				break;
+			}
+		else
+			userok = strcmp(ruser, auser) ? 0 : 1;
+
+		/* Check if one component did not match */
+		if (hostok == 0 || userok == 0)
+			continue;
+
+		/* Check if we got a forbidden pair */
+		if (userok <= -1 || hostok <= -1)
+			return (-1);
+
+		/* Check if we got a valid pair */
+		if (hostok >= 1 && userok >= 1)
+			return (0);
+	}
+bail:
+	return (-1);
+}
+
+/*
+ * Returns "true" if match, 0 if no match.  If we do not find any
+ * semblance of an A->PTR->A loop, allow a simple #.#.#.# match to work.
+ */
+static int
+__icheckhost(struct sockaddr *raddr, socklen_t salen, const char *lhost)
+{
+	struct addrinfo hints, *res, *r;
+	char h1[NI_MAXHOST], h2[NI_MAXHOST];
+	int error;
+	const int niflags = NI_NUMERICHOST;
+
+	h1[0] = '\0';
+	if (getnameinfo(raddr, salen, h1, sizeof(h1), NULL, 0,
+	    niflags) != 0)
+		return (0);
+
+	/* Resolve laddr into sockaddr */
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = raddr->sa_family;
+	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
+	res = NULL;
+	error = getaddrinfo(lhost, "0", &hints, &res);
+	if (error)
+		return (0);
+
+	/*
+	 * Try string comparisons between raddr and laddr.
+	 */
+	for (r = res; r; r = r->ai_next) {
+		h2[0] = '\0';
+		if (getnameinfo(r->ai_addr, r->ai_addrlen, h2, sizeof(h2),
+		    NULL, 0, niflags) != 0)
+			continue;
+		if (strcmp(h1, h2) == 0) {
+			freeaddrinfo(res);
+			return (1);
+		}
+	}
+
+	/* No match. */
+	freeaddrinfo(res);
+	return (0);
+}
+
+/*
+ * Return the hostname associated with the supplied address.
+ * Do a reverse lookup as well for security. If a loop cannot
+ * be found, pack the result of inet_ntoa() into the string.
+ */
+static char *
+__gethostloop(struct sockaddr *raddr, socklen_t salen)
+{
+	static char remotehost[NI_MAXHOST];
+	char h1[NI_MAXHOST], h2[NI_MAXHOST];
+	struct addrinfo hints, *res, *r;
+	int error;
+	const int niflags = NI_NUMERICHOST;
+
+	h1[0] = remotehost[0] = '\0';
+	if (getnameinfo(raddr, salen, remotehost, sizeof(remotehost),
+	    NULL, 0, NI_NAMEREQD) != 0)
+		return (NULL);
+	if (getnameinfo(raddr, salen, h1, sizeof(h1), NULL, 0,
+	    niflags) != 0)
+		return (NULL);
+
+	/*
+	 * Look up the name and check that the supplied
+	 * address is in the list
+	 */
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = raddr->sa_family;
+	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
+	hints.ai_flags = AI_CANONNAME;
+	res = NULL;
+	error = getaddrinfo(remotehost, "0", &hints, &res);
+	if (error)
+		return (NULL);
+
+	for (r = res; r; r = r->ai_next) {
+		h2[0] = '\0';
+		if (getnameinfo(r->ai_addr, r->ai_addrlen, h2, sizeof(h2),
+		    NULL, 0, niflags) != 0)
+			continue;
+		if (strcmp(h1, h2) == 0) {
+			freeaddrinfo(res);
+			return (remotehost);
+		}
+	}
+
+	/*
+	 * either the DNS adminstrator has made a configuration
+	 * mistake, or someone has attempted to spoof us
+	 */
+	syslog(LOG_NOTICE, "rcmd: address %s not listed for host %s",
+	    h1, res->ai_canonname ? res->ai_canonname : remotehost);
+	freeaddrinfo(res);
+	return (NULL);
+}
+@
+
+
+1.5
+log
+@fix __CRAZY=Yes build (or work around bugs we can’t fix atm)
+@
+text
+@d51 1
+a51 1
+__RCSID("$MirOS: src/lib/libc/net/rcmd.c,v 1.4 2005/09/22 20:40:03 tg Exp $");
+d394 1
+a394 1
+		 * reading an NFS mounted file system, can't read files that
+@
+
+
+1.4
+log
+@merge
+@
+text
+@a0 1
+/* $MirOS: src/lib/libc/net/rcmd.c,v 1.3 2005/07/09 13:23:32 tg Exp $ */
+d51 1
+a51 1
+__RCSID("$MirOS: src/lib/libc/net/rcmd.c,v 1.3 2005/07/09 13:23:32 tg Exp $");
+d117 2
+a118 2
+	} else
+		; /*XXX*/
+d155 1
+a155 1
+			char hbuf[NI_MAXHOST];
+d158 1
+a158 1
+			hbuf[0] = '\0';
+d160 3
+a162 3
+			    hbuf, sizeof(hbuf), NULL, 0, niflags) != 0)
+				strlcpy(hbuf, "(invalid)", sizeof hbuf);
+			(void)fprintf(stderr, "connect to address %s: ", hbuf);
+d166 1
+a166 1
+			hbuf[0] = '\0';
+d168 3
+a170 3
+			    hbuf, sizeof(hbuf), NULL, 0, niflags) != 0)
+				strlcpy(hbuf, "(invalid)", sizeof hbuf);
+			(void)fprintf(stderr, "Trying %s...\n", hbuf);
+d214 1
+a214 1
+		if (write(s, num, strlen(num)+1) != strlen(num)+1) {
+d314 1
+a314 1
+char	*__rcmd_errstr;
+d367 1
+a367 1
+	char *cp;
+@
+
+
+1.3
+log
+@merge
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/libc/net/rcmd.c,v 1.2 2005/03/06 20:28:42 tg Exp $ */
+a31 4
+#if 0
+static char *rcsid = "$OpenBSD: rcmd.c,v 1.52 2005/03/25 13:24:12 otto Exp $";
+#endif /* LIBC_SCCS and not lint */
+
+d52 1
+a52 1
+__RCSID("$MirOS$");
+@
+
+
+1.2
+log
+@merge src/lib
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d32 2
+a33 2
+#if defined(LIBC_SCCS) && !defined(lint)
+static char *rcsid = "$OpenBSD: rcmd.c,v 1.49 2004/11/17 01:42:26 itojun Exp $";
+d56 2
+d65 2
+a66 5
+rcmd(ahost, rport, locuser, remuser, cmd, fd2p)
+	char **ahost;
+	in_port_t rport;
+	const char *locuser, *remuser, *cmd;
+	int *fd2p;
+d72 2
+a73 6
+rcmd_af(ahost, rport, locuser, remuser, cmd, fd2p, af)
+	char **ahost;
+	in_port_t rport;
+	const char *locuser, *remuser, *cmd;
+	int *fd2p;
+	int af;
+d86 1
+d213 2
+a214 1
+		if (readsp == NULL)
+d216 1
+d244 8
+d270 1
+a270 6
+		if (s3 < 0) {
+			(void)fprintf(stderr,
+			    "rcmd: accept: %s\n", strerror(errno));
+			lport = 0;
+			goto bad;
+		}
+d322 1
+a322 3
+ruserok(rhost, superuser, ruser, luser)
+	const char *rhost, *ruser, *luser;
+	int superuser;
+d355 1
+a355 4
+iruserok(raddr, superuser, ruser, luser)
+	u_int32_t raddr;
+	int superuser;
+	const char *ruser, *luser;
+d368 2
+a369 5
+iruserok_sa(raddr, rlen, superuser, ruser, luser)
+	const void *raddr;
+	int rlen;
+	int superuser;
+	const char *ruser, *luser;
+d372 1
+a372 1
+	register char *cp;
+d442 2
+a443 4
+__ivaliduser(hostf, raddrl, luser, ruser)
+	FILE *hostf;
+	in_addr_t raddrl;
+	const char *luser, *ruser;
+d456 2
+a457 5
+__ivaliduser_sa(hostf, raddr, salen, luser, ruser)
+	FILE *hostf;
+	struct sockaddr *raddr;
+	socklen_t salen;
+	const char *luser, *ruser;
+d459 1
+a459 1
+	register char *user, *p;
+d600 1
+a600 4
+__icheckhost(raddr, salen, lhost)
+	struct sockaddr *raddr;
+	socklen_t salen;
+	const char *lhost;
+d646 1
+a646 3
+__gethostloop(raddr, salen)
+	struct sockaddr *raddr;
+	socklen_t salen;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d229 1
+a229 1
+		bzero(readsp, fdssize);
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@sync resolver code with OpenBSD (better)
+@
+text
+@d32 1
+a32 1
+static char *rcsid = "$OpenBSD: rcmd.c,v 1.52 2005/03/25 13:24:12 otto Exp $";
+d62 5
+a66 2
+rcmd(char **ahost, int rport, const char *locuser, const char *remuser,
+    const char *cmd, int *fd2p)
+d72 6
+a77 2
+rcmd_af(char **ahost, int porta, const char *locuser, const char *remuser,
+    const char *cmd, int *fd2p, int af)
+a89 1
+	in_port_t rport = porta;
+d216 1
+a216 2
+		if (readsp == NULL) {
+			close(s2);
+a217 1
+		}
+a244 8
+		if (s3 < 0) {
+			(void)fprintf(stderr,
+			    "rcmd: accept: %s\n", strerror(errno));
+			lport = 0;
+			close(s2);
+			goto bad;
+		}
+
+d263 6
+a268 1
+
+d320 3
+a322 1
+ruserok(const char *rhost, int superuser, const char *ruser, const char *luser)
+d355 4
+a358 1
+iruserok(u_int32_t raddr, int superuser, const char *ruser, const char *luser)
+d371 5
+a375 2
+iruserok_sa(const void *raddr, int rlen, int superuser, const char *ruser,
+    const char *luser)
+d378 1
+a378 1
+	char *cp;
+d448 4
+a451 2
+__ivaliduser(FILE *hostf, in_addr_t raddrl, const char *luser,
+    const char *ruser)
+d464 5
+a468 2
+__ivaliduser_sa(FILE *hostf, struct sockaddr *raddr, socklen_t salen,
+    const char *luser, const char *ruser)
+d470 1
+a470 1
+	char *user, *p;
+d611 4
+a614 1
+__icheckhost(struct sockaddr *raddr, socklen_t salen, const char *lhost)
+d660 3
+a662 1
+__gethostloop(struct sockaddr *raddr, socklen_t salen)
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD's libc as of today, minus some of the locale stuff,
+and with brk malloc instead of mmap malloc
+@
+text
+@d31 4
+@
+
+

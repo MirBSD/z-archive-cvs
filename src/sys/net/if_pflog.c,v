@@ -1,0 +1,347 @@
+head	1.2;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.2
+	MIRBSD_10:1.2.0.4
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2
+	cvs-200512191930:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2005.12.20.19.41.29;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043A85DFB227044E6;
+
+1.1
+date	2005.02.05.17.29.04;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.04;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.12.19.19.38.30;	author tg;	state Exp;
+branches;
+next	;
+commitid	10043A70C2C02EA4B14;
+
+
+desc
+@@
+
+
+1.2
+log
+@Revert almost everything of the diff which updated PF.
+
+Reason: pppoe(4) did not work any more (and HERC crashed, too).
+Probable cause: the interface groups code.
+
+I do not have time to look into this.
+@
+text
+@/*	$OpenBSD: if_pflog.c,v 1.11 2003/12/31 11:18:25 cedric Exp $	*/
+/*
+ * The authors of this code are John Ioannidis (ji@@tla.org),
+ * Angelos D. Keromytis (kermit@@csd.uch.gr) and 
+ * Niels Provos (provos@@physnet.uni-hamburg.de).
+ *
+ * This code was written by John Ioannidis for BSD/OS in Athens, Greece, 
+ * in November 1995.
+ *
+ * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
+ * by Angelos D. Keromytis.
+ *
+ * Additional transforms and features in 1997 and 1998 by Angelos D. Keromytis
+ * and Niels Provos.
+ *
+ * Copyright (C) 1995, 1996, 1997, 1998 by John Ioannidis, Angelos D. Keromytis
+ * and Niels Provos.
+ * Copyright (c) 2001, Angelos D. Keromytis, Niels Provos.
+ *
+ * Permission to use, copy, and modify this software with or without fee
+ * is hereby granted, provided that this entire notice is included in
+ * all copies of any software which is or includes a copy or
+ * modification of this software. 
+ * You may use this code under the GNU public license if you so wish. Please
+ * contribute changes back to the authors under this freer than GPL license
+ * so that we may further the use of strong encryption without limitations to
+ * all.
+ *
+ * THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
+ * IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
+ * REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
+ * MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
+ * PURPOSE.
+ */
+
+#include "bpfilter.h"
+#include "pflog.h"
+
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/mbuf.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+
+#include <net/if.h>
+#include <net/if_types.h>
+#include <net/route.h>
+#include <net/bpf.h>
+
+#ifdef	INET
+#include <netinet/in.h>
+#include <netinet/in_var.h>
+#include <netinet/in_systm.h>
+#include <netinet/ip.h>
+#endif
+
+#ifdef INET6
+#ifndef INET
+#include <netinet/in.h>
+#endif
+#include <netinet6/nd6.h>
+#endif /* INET6 */
+
+#include <net/pfvar.h>
+#include <net/if_pflog.h>
+
+#define PFLOGMTU	(32768 + MHLEN + MLEN)
+
+#ifdef PFLOGDEBUG
+#define DPRINTF(x)    do { if (pflogdebug) printf x ; } while (0)
+#else
+#define DPRINTF(x)
+#endif
+
+struct pflog_softc pflogif[NPFLOG];
+
+void	pflogattach(int);
+int	pflogoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
+	    	       struct rtentry *);
+int	pflogioctl(struct ifnet *, u_long, caddr_t);
+void	pflogrtrequest(int, struct rtentry *, struct sockaddr *);
+void	pflogstart(struct ifnet *);
+
+extern int ifqmaxlen;
+
+void
+pflogattach(int npflog)
+{
+	struct ifnet *ifp;
+	int i;
+
+	bzero(pflogif, sizeof(pflogif));
+
+	for (i = 0; i < NPFLOG; i++) {
+		ifp = &pflogif[i].sc_if;
+		snprintf(ifp->if_xname, sizeof ifp->if_xname, "pflog%d", i);
+		ifp->if_softc = &pflogif[i];
+		ifp->if_mtu = PFLOGMTU;
+		ifp->if_ioctl = pflogioctl;
+		ifp->if_output = pflogoutput;
+		ifp->if_start = pflogstart;
+		ifp->if_type = IFT_PFLOG;
+		ifp->if_snd.ifq_maxlen = ifqmaxlen;
+		ifp->if_hdrlen = PFLOG_HDRLEN;
+		if_attach(ifp);
+		if_alloc_sadl(ifp);
+
+#if NBPFILTER > 0
+		bpfattach(&pflogif[i].sc_if.if_bpf, ifp, DLT_PFLOG,
+			  PFLOG_HDRLEN);
+#endif
+	}
+}
+
+/*
+ * Start output on the pflog interface.
+ */
+void
+pflogstart(struct ifnet *ifp)
+{
+	struct mbuf *m;
+	int s;
+
+	for (;;) {
+		s = splimp();
+		IF_DROP(&ifp->if_snd);
+		IF_DEQUEUE(&ifp->if_snd, m);
+		splx(s);
+
+		if (m == NULL)
+			return;
+		else
+			m_freem(m);
+	}
+}
+
+int
+pflogoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
+	struct rtentry *rt)
+{
+	m_freem(m);
+	return (0);
+}
+
+/* ARGSUSED */
+void
+pflogrtrequest(int cmd, struct rtentry *rt, struct sockaddr *sa)
+{
+	if (rt)
+		rt->rt_rmx.rmx_mtu = PFLOGMTU;
+}
+
+/* ARGSUSED */
+int
+pflogioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
+{
+	switch (cmd) {
+	case SIOCSIFADDR:
+	case SIOCAIFADDR:
+	case SIOCSIFDSTADDR:
+	case SIOCSIFFLAGS:
+		if (ifp->if_flags & IFF_UP)
+			ifp->if_flags |= IFF_RUNNING;
+		else
+			ifp->if_flags &= ~IFF_RUNNING;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	return (0);
+}
+
+int
+pflog_packet(struct pfi_kif *kif, struct mbuf *m, sa_family_t af, u_int8_t dir,
+    u_int8_t reason, struct pf_rule *rm, struct pf_rule *am,
+    struct pf_ruleset *ruleset)
+{
+#if NBPFILTER > 0
+	struct ifnet *ifn;
+	struct pfloghdr hdr;
+	struct mbuf m1;
+
+	if (kif == NULL || m == NULL || rm == NULL)
+		return (-1);
+
+	bzero(&hdr, sizeof(hdr));
+	hdr.length = PFLOG_REAL_HDRLEN;
+	hdr.af = af;
+	hdr.action = rm->action;
+	hdr.reason = reason;
+	memcpy(hdr.ifname, kif->pfik_name, sizeof(hdr.ifname));
+
+	if (am == NULL) {
+		hdr.rulenr = htonl(rm->nr);
+		hdr.subrulenr = -1;
+	} else {
+		hdr.rulenr = htonl(am->nr);
+		hdr.subrulenr = htonl(rm->nr);
+		if (ruleset != NULL)
+			memcpy(hdr.ruleset, ruleset->name,
+			    sizeof(hdr.ruleset));
+
+			
+	}
+	hdr.dir = dir;
+
+#ifdef INET
+	if (af == AF_INET && dir == PF_OUT) {
+		struct ip *ip;
+
+		ip = mtod(m, struct ip *);
+		ip->ip_sum = 0;
+		ip->ip_sum = in_cksum(m, ip->ip_hl << 2);
+	}
+#endif /* INET */
+
+	m1.m_next = m;
+	m1.m_len = PFLOG_HDRLEN;
+	m1.m_data = (char *) &hdr;
+
+	ifn = &(pflogif[0].sc_if);
+
+	if (ifn->if_bpf)
+		bpf_mtap(ifn->if_bpf, &m1);
+#endif
+
+	return (0);
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@For ftp-proxy(8) we need newer OpenIPF. I think it's time to import
+pf-current from OpenBSD, since it's so buggy anyway... but I tagged
+the old files in case something goes wrong.
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: if_pflog.c,v 1.15 2005/07/31 03:52:18 pascoe Exp $	*/
+a41 1
+#include <sys/proc.h>
+d177 1
+a177 1
+    struct pf_ruleset *ruleset, struct pf_pdesc *pd)
+d182 1
+d184 1
+a184 1
+	if (kif == NULL || m == NULL || rm == NULL || pd == NULL)
+a186 4
+	ifn = &(pflogif[0].sc_if);
+	if (!ifn->if_bpf)
+		return (0);
+
+d200 2
+a201 2
+		if (ruleset != NULL && ruleset->anchor != NULL)
+			strlcpy(hdr.ruleset, ruleset->anchor->name,
+d203 2
+a205 11
+	if (rm->log & PF_LOG_SOCKET_LOOKUP && !pd->lookup.done)
+		pd->lookup.done = pf_socket_lookup(dir, pd);
+	if (pd->lookup.done > 0) {
+		hdr.uid = pd->lookup.uid;
+		hdr.pid = pd->lookup.pid;
+	} else {
+		hdr.uid = UID_MAX;
+		hdr.pid = NO_PID;
+	}
+	hdr.rule_uid = rm->cuid;
+	hdr.rule_pid = rm->cpid;
+d218 8
+a225 1
+	bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, PFLOG_HDRLEN, m);
+@
+

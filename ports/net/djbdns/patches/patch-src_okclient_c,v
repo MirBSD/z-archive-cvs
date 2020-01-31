@@ -1,0 +1,281 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2016.03.26.17.29.22;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10056F6C535787D61F0;
+
+1.4
+date	2008.10.27.21.40.38;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100490634E663D82993;
+
+1.3
+date	2006.01.17.21.08.43;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10043CD5CEA3957D3C1;
+
+1.2
+date	2005.12.14.23.28.35;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043A0AA0E5A220A51;
+
+1.1
+date	2005.05.14.23.21.04;	author tg;	state Exp;
+branches
+	1.1.201.1;
+next	;
+commitid	1e94428687d39445;
+
+1.1.201.1
+date	2005.05.14.23.21.04;	author tg;	state Exp;
+branches;
+next	;
+commitid	1e94428687d39445;
+
+
+desc
+@@
+
+
+1.5
+log
+@complete overhaul of djbdns port:
+
+• merge t4/t6 flavours back into one binary
+  ‣ greatly simplify IPv6 handling, too; drop code for v6-less OSes
+• merge v4/v6 dnsroots back into one, update all of them
+• improve documentation a bit
+• apply two patches from http://www.your.org/dnscache/ (SECURITY):
+  ‣ merge identical outgoing requests
+  ‣ allow caching SOA responses
+• update to Fefe’s djbdns-1.05-test27.diff.bz2
+  ‣ fixes recursively resolving hosts behind IPv6-only nameservers;
+    spotted by Natureshadow (for Teckids’ Lunatics network) and via
+    http://serverfault.com/q/627912/189656 (which I’ll answer RSN)
+  ⚠ fix with “one second” CDB validity patch
+  ⚠ adapt for OpenBSD-style IPv6
+• drop ip6.int. reverse v6 DNS for good
+• improve dealing with mixing v4/v6 transport
+  ⇒ TODO add IP4SEND/IP6SEND support; currently; if IPSEND is v6
+    but we send to a v4 server, we use INADDR_ANY for outgoing,
+    as automatic fallback address
+@
+text
+@$MirOS: ports/net/djbdns/patches/patch-src_okclient_c,v 1.4 2008/10/27 21:40:38 tg Exp $
+--- src/okclient.c.orig	Sun Feb 11 21:11:23 2001
++++ src/okclient.c	Sat Mar 26 14:44:04 2016
+@@@@ -2,24 +2,45 @@@@
+ #include <sys/stat.h>
+ #include "str.h"
+ #include "ip4.h"
++#include "ip6.h"
++#include "byte.h"
+ #include "okclient.h"
++#include "env.h"
+ 
+-static char fn[3 + IP4_FMT];
++static char fn[3 + IP6_FMT];
+ 
+-int okclient(char ip[4])
++int okclient(char ip[16])
+ {
++  static int init_done = 0;
+   struct stat st;
+   int i;
++  char sep;
+ 
++  if (!init_done) {
++    if (env_get("OKCLIENT"))
++      init_done = 1;
++    else
++      init_done = 2;
++  }
++  if (init_done == 1)
++    return 1;
++
+   fn[0] = 'i';
+   fn[1] = 'p';
+   fn[2] = '/';
+-  fn[3 + ip4_fmt(fn + 3,ip)] = 0;
++  if (byte_equal(ip,12,V4mappedprefix)) {
++    fn[3 + ip4_fmt(fn + 3,ip+12)] = 0;
++    sep='.';
++  } else {
++    fn[3 + ip6_fmt(fn + 3,ip)] = 0;
++    sep=':';
++  }
+ 
+   for (;;) {
++    if (!fn[3]) return 0;
+     if (stat(fn,&st) == 0) return 1;
+     /* treat temporary error as rejection */
+-    i = str_rchr(fn,'.');
++    i = str_rchr(fn,sep);
+     if (!fn[i]) return 0;
+     fn[i] = 0;
+   }
+@
+
+
+1.4
+log
+@• remove FLAVOURs
+  ‣ OpenNIC has been EUNREACH for a while
+  ‣ ORSN is shutting down :'(
+    according to http://www.heise.de/newsticker/meldung/117863
+• ICANN is now default for IPv4 and IPv6 root
+  .oO(wow, since when do they have IPv6? not for too long…)
+• fix compile warnings (missing includes) while here
+• remove pkg/ subdirectory while here
+• merge pkg/MESSAGE text into DESCR
+• UTF-8ify DESCR
+
+XXX still missing: IPv6 transport integration into normal binaries
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_okclient_c,v 1.3 2006/01/17 21:08:43 tg Exp $
+d3 2
+a4 2
++++ src/okclient.c	Mon Oct 27 21:35:22 2008
+@@@@ -2,24 +2,67 @@@@
+a7 1
++#ifdef DJB_V6ONLY
+a9 1
++#endif /* DJB_V6ONLY */
+d13 1
+a13 3
++#ifndef DJB_V6ONLY
+ static char fn[3 + IP4_FMT];
++#else
+a14 1
++#endif /* DJB_V6ONLY */
+d16 1
+a16 3
++#ifndef DJB_V6ONLY
+ int okclient(char ip[4])
++#else
+a17 1
++#endif /* DJB_V6ONLY */
+a21 1
++#ifdef DJB_V6ONLY
+a22 1
++#endif /* DJB_V6ONLY */
+d36 1
+a36 3
++#ifndef DJB_V6ONLY
+   fn[3 + ip4_fmt(fn + 3,ip)] = 0;
++#else
+a43 1
++#endif /* DJB_V6ONLY */
+a45 1
++#ifdef DJB_V6ONLY
+a46 1
++#endif /* DJB_V6ONLY */
+d49 1
+a49 3
++#ifndef DJB_V6ONLY
+     i = str_rchr(fn,'.');
++#else
+a50 1
++#endif /* DJB_V6ONLY */
+@
+
+
+1.3
+log
+@Hand-apply http://www.ohse.de/uwe/patches/dnscache-0.61.okclient.patch
+and document; bump patchlevel
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_okclient_c,v 1.2 2005/12/14 23:28:35 tg Exp $
+d3 2
+a4 2
++++ src/okclient.c	Tue Jan 17 21:02:03 2006
+@@@@ -2,24 +2,66 @@@@
+d13 1
+@
+
+
+1.2
+log
+@* update to fefe's djbdns-1.05-test23.diff
+  with djbdns-1.05-ixfr.diff
+* slightly change naming of v6-transport binaries
+* consolidate all added source files in a central directory
+  so it can be reused by the v6-transport stuff
+* integrate the v6 transport binaries
+* fix spacing
+* sync descriptive texts with reality
+* sync European ORSN (v4 and v6) to their root.hint
+* sync OpenNIC too
+* Open-RSC seeminly ceased to exist recently
+* Apply compiler-temporary-filename.patch
+  from http://homepages.tesco.net/~J.deBoynePollard/FGA/djbdns-problems.html
+* apply dnscache-cname-handling.patch
+* apply dnscache-strict-forwardonly.patch w/ IPv6 tweak
+* apply dnscacheip-space-separator.patch
+* apply tinydns-alias-chain-truncation.patch
+* apply tinydns-data-semantic-error.patch
+  appropriately for 6 and 3, too
+* fix shell code and path to includes
+* fix relative paths
+* fix names of library and programmes; NOMAN=yes here (t6)
+* Add support for the IPv6 transport module to communicate,
+  as a client, with IPv4 transport name servers as well.
+
+  WFM
+* build it with -Wall -Werror
+* honour ${SYSCONFDIR} throughout the port
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_okclient_c,v 1.1.201.1 2005/05/14 23:21:04 tg Exp $
+d3 2
+a4 2
++++ src/okclient.c	Tue Dec 13 21:44:32 2005
+@@@@ -2,24 +2,56 @@@@
+d26 1
+d33 9
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 2
+a4 2
++++ src/okclient.c	Sat May 14 22:27:17 2005
+@@@@ -2,24 +2,52 @@@@
+d14 1
+d16 3
+@
+
+
+1.1.201.1
+log
+@New djbdns port, #ifdef'd, "original" and "no_ipv6" flavours removed
+"no_ipv4" non-functional at the moment, will follow later after
+redesign using crunchgen(1) and crunchide(1)
+@
+text
+@@

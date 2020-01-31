@@ -1,0 +1,1393 @@
+head	1.11;
+access;
+symbols
+	cvs-201406091830:1.1.1.4
+	cvs-20120325:1.1.1.3
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.11
+date	2014.06.09.19.17.53;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1005396086E32746161;
+
+1.10
+date	2014.06.09.19.02.55;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	100539604EF023ED11A;
+
+1.9
+date	2014.06.09.18.41.40;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1005395FFFD670846DE;
+
+1.8
+date	2012.04.14.12.37.19;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004F896F8C4320FD2E;
+
+1.7
+date	2012.04.14.12.33.26;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004F896EA40AFEF656;
+
+1.6
+date	2012.04.14.12.29.24;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004F896DA00F79951B;
+
+1.5
+date	2012.03.25.13.47.52;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004F6F220873C7D75D;
+
+1.4
+date	2012.03.25.13.41.15;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004F6F2093467CEE4C;
+
+1.3
+date	2010.10.28.18.13.48;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004CC9BD737B5ECFF8;
+
+1.2
+date	2007.07.14.21.08.11;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10046993B4F65D1D02F;
+
+1.1
+date	2005.02.05.17.29.49;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.49;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.21.00.13;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2012.03.25.13.38.52;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	1004F6F1FFF58C19480;
+
+1.1.1.4
+date	2014.06.09.18.38.46;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395FF4D0BDFEF0B;
+
+
+desc
+@@
+
+
+1.11
+log
+@also handle empty last fields on lines (careful precondition validation)
+@
+text
+@/*	$OpenBSD: rs.c,v 1.23 2013/11/15 15:47:53 millert Exp $	*/
+
+/*-
+ * Copyright (c) 2014
+ *	Thorsten Glaser <tg@@mirbsd.org>
+ * Copyright (c) 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+/*
+ *	rs - reshape a data array
+ *	Author:  John Kunze, Office of Comp. Affairs, UCB
+ *		BEWARE: lots of unfinished edges
+ */
+
+#include <ctype.h>
+#include <err.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#ifdef USE_LIBBSD
+#ifndef __RCSID
+#define __RCSID(x)	static const char rcsid[] __attribute__((__used__)) = x
+#endif
+#ifndef __dead
+#define __dead		__attribute__((__noreturn__))
+#endif
+extern long long strtonum(const char *, long long, long long, const char **);
+#endif
+
+__RCSID("$MirOS: src/usr.bin/rs/rs.c,v 1.8 2012/04/14 12:37:19 tg Exp $");
+
+long	flags;
+#define	TRANSPOSE	000001
+#define	MTRANSPOSE	000002
+#define	ONEPERLINE	000004
+#define	ONEISEPONLY	000010
+#define	ONEOSEPONLY	000020
+#define	NOTRIMENDCOL	000040
+#define	SQUEEZE		000100
+#define	SHAPEONLY	000200
+#define	DETAILSHAPE	000400
+#define	RIGHTADJUST	001000
+#define	NULLPAD		002000
+#define	RECYCLE		004000
+#define	SKIPPRINT	010000
+#define ONEPERCHAR	0100000
+#define NOARGS		0200000
+
+short	*colwidths;
+int	nelem;
+const char **elem;
+const char **endelem;
+char	*curline;
+size_t	allocsize = BUFSIZ;
+int	curlen;
+int	irows, icols;
+int	orows, ocols;
+int	maxlen;
+int	skip;
+int	propgutter;
+char	isep = ' ', osep = ' ';
+int	owidth = 80, gutter = 2;
+
+void	  usage(void) __dead;
+void	  getargs(int, char *[]);
+void	  getfile(void);
+int	  get_line(void);
+const char **getptrs(const char **);
+void	  prepfile(void);
+void	  prints(const char *, int);
+void	  putfile(void);
+
+#define INCR(ep) do {			\
+	if (++ep >= endelem)		\
+		ep = getptrs(ep);	\
+} while(0)
+
+int
+main(int argc, char *argv[])
+{
+	getargs(argc, argv);
+	getfile();
+	if (flags & SHAPEONLY) {
+		printf("%d %d\n", irows, icols);
+		exit(0);
+	}
+	prepfile();
+	putfile();
+	exit(0);
+}
+
+void
+getfile(void)
+{
+	char *p;
+	char *endp;
+	const char **ep = NULL;
+	int multisep = (flags & ONEISEPONLY ? 0 : 1);
+	int nullpad = flags & NULLPAD;
+	const char **padto;
+
+	while (skip--) {
+		get_line();
+		if (flags & SKIPPRINT)
+			puts(curline);
+	}
+	get_line();
+	if (flags & NOARGS && curlen < owidth)
+		flags |= ONEPERLINE;
+	if (flags & ONEPERLINE)
+		icols = 1;
+	else				/* count cols on first line */
+		for (p = curline, endp = curline + curlen; p < endp; p++) {
+			if (*p == isep && multisep)
+				continue;
+			icols++;
+			while (*p && *p != isep)
+				p++;
+		}
+	ep = getptrs(elem);
+	p = curline;
+	do {
+		if (flags & ONEPERLINE) {
+			*ep = curline;
+			INCR(ep);		/* prepare for next entry */
+			if (maxlen < curlen)
+				maxlen = curlen;
+			irows++;
+			continue;
+		}
+		for (p = curline, endp = curline + curlen; p < endp; p++) {
+			if (*p == isep) {
+				if (multisep)
+					/* eat up column separators */
+					goto handle_last_field;
+				/* must be an empty column */
+				*ep = "";
+			} else {
+				/* store column entry */
+				*ep = p;
+				/* find end of entry */
+				while (p < endp && *p != isep)
+					p++;
+				/* update maxlen */
+				if (maxlen < p - *ep)
+					maxlen = p - *ep;
+			}
+			/* mark end of entry */
+			*p = '\0';
+			/* prepare for next entry */
+			INCR(ep);
+			/* handle empty last field */
+ handle_last_field:
+			if ((p + 1) == endp) {
+				/* insert empty entry iff checked */
+				*ep = "";
+				INCR(ep);
+				/* the loop will end immediately */
+			}
+		}
+		irows++;			/* update row count */
+		if (nullpad) {			/* pad missing entries */
+			padto = elem + irows * icols;
+			while (ep < padto) {
+				*ep = "";
+				INCR(ep);
+			}
+		}
+	} while (get_line() != EOF);
+	*ep = NULL;				/* mark end of pointers */
+	nelem = ep - elem;
+}
+
+void
+putfile(void)
+{
+	const char **ep;
+	int i, j, n;
+
+	ep = elem;
+	if (flags & TRANSPOSE) {
+		for (i = 0; i < orows; i++) {
+			for (j = i; j < nelem; j += orows)
+				prints(ep[j], (j - i) / orows);
+			putchar('\n');
+		}
+	} else {
+		for (n = 0, i = 0; i < orows && n < nelem; i++) {
+			for (j = 0; j < ocols; j++) {
+				if (n++ >= nelem)
+					break;
+				prints(*ep++, j);
+			}
+			putchar('\n');
+		}
+	}
+}
+
+void
+prints(const char *s, int col)
+{
+	int n;
+	const char *p = s;
+
+	while (*p)
+		p++;
+	n = (flags & ONEOSEPONLY ? 1 : colwidths[col] - (p - s));
+	if (flags & RIGHTADJUST)
+		while (n-- > 0)
+			putchar(osep);
+	for (p = s; *p; p++)
+		putchar(*p);
+	while (n-- > 0)
+		putchar(osep);
+}
+
+void
+usage(void)
+{
+	extern char *__progname;
+
+	fprintf(stderr,
+	    "usage: %s [-CcSs[x]] [-GgKkw N] [-EeHhjmnTtyz] [rows [cols]]\n",
+	    __progname);
+	exit(1);
+}
+
+void
+prepfile(void)
+{
+	int i, j, colw, max, n;
+	const char **ep, **lp;
+
+	if (!nelem)
+		exit(0);
+	gutter += maxlen * propgutter / 100.0;
+	colw = maxlen + gutter;
+	if (flags & MTRANSPOSE) {
+		orows = icols;
+		ocols = irows;
+	}
+	else if (orows == 0 && ocols == 0) {	/* decide rows and cols */
+		ocols = owidth / colw;
+		if (ocols == 0) {
+			warnx("Display width %d is less than column width %d",
+			    owidth, colw);
+			ocols = 1;
+		}
+		if (ocols > nelem)
+			ocols = nelem;
+		orows = nelem / ocols + (nelem % ocols ? 1 : 0);
+	}
+	else if (orows == 0)			/* decide on rows */
+		orows = nelem / ocols + (nelem % ocols ? 1 : 0);
+	else if (ocols == 0)			/* decide on cols */
+		ocols = nelem / orows + (nelem % orows ? 1 : 0);
+	lp = elem + orows * ocols;
+	while (lp > endelem) {
+		getptrs(elem + nelem);
+		lp = elem + orows * ocols;
+	}
+	if (flags & RECYCLE) {
+		for (ep = elem + nelem; ep < lp; ep++)
+			*ep = *(ep - nelem);
+		nelem = lp - elem;
+	}
+	if (!(colwidths = (short *) calloc(ocols, sizeof(short))))
+		errx(1, "malloc:  No gutter space");
+	if (flags & SQUEEZE) {
+		if (flags & TRANSPOSE)
+			for (ep = elem, i = 0; i < ocols; i++) {
+				max = 0;
+				for (j = 0; j < orows; j++)
+					if ((n = strlen(*ep++)) > max)
+						max = n;
+				colwidths[i] = max + gutter;
+			}
+		else
+			for (ep = elem, i = 0; i < ocols; i++) {
+				max = 0;
+				for (j = i; j < nelem; j += ocols)
+					if ((n = strlen(ep[j])) > max)
+						max = n;
+				colwidths[i] = max + gutter;
+			}
+	} else {
+		for (i = 0; i < ocols; i++)
+			colwidths[i] = colw;
+	}
+	if (!(flags & NOTRIMENDCOL)) {
+		if (flags & RIGHTADJUST)
+			colwidths[0] -= gutter;
+		else
+			colwidths[ocols - 1] = 0;
+	}
+	n = orows * ocols;
+	if (n > nelem && (flags & RECYCLE))
+		nelem = n;
+}
+
+#define	BSIZE	2048
+char	ibuf[BSIZE];		/* two screenfuls should do */
+
+int
+get_line(void)	/* get line; maintain curline, curlen; manage storage */
+{
+	static	int putlength;
+	static	char *endblock = ibuf + BSIZE;
+	char *p;
+	int c, i;
+
+	if (!irows) {
+		curline = ibuf;
+		putlength = flags & DETAILSHAPE;
+	}
+	else if (skip <= 0) {			/* don't waste storage */
+		curline += curlen + 1;
+		if (putlength)		/* print length, recycle storage */
+			printf(" %d line %d\n", curlen, irows);
+	}
+	if (!putlength && endblock - curline < BUFSIZ) {   /* need storage */
+		if (!(curline = (char *) malloc(BSIZE)))
+			errx(1, "File too large");
+		endblock = curline + BSIZE;
+	}
+	for (p = curline, i = 1; i < BUFSIZ; *p++ = c, i++)
+		if ((c = getchar()) == EOF || c == '\n')
+			break;
+	*p = '\0';
+	curlen = i - 1;
+	return(c);
+}
+
+const char **
+getptrs(const char **sp)
+{
+	const char **p;
+	size_t newsize;
+
+	newsize = allocsize * 2;
+	p = realloc(elem, newsize * sizeof(char *));
+	if (p == NULL)
+		err(1, "no memory");
+
+	allocsize = newsize;
+	sp += p - elem;
+	elem = p;
+	endelem = elem + allocsize;
+	return(sp);
+}
+
+void
+getargs(int ac, char *av[])
+{
+	int ch;
+	const char *errstr;
+
+	if (ac == 1)
+		flags |= NOARGS | TRANSPOSE;
+	while ((ch = getopt(ac, av, "c::C::s::S::k:K:g:G:w:tTeEnyjhHmz")) != -1) {
+		switch (ch) {
+		case 'T':
+			flags |= MTRANSPOSE;
+			/* FALLTHROUGH */
+		case 't':
+			flags |= TRANSPOSE;
+			break;
+		case 'c':		/* input col. separator */
+			flags |= ONEISEPONLY;
+			/* FALLTHROUGH */
+		case 's':		/* one or more allowed */
+			if (optarg == NULL)
+				isep = '\t';	/* default is ^I */
+			else if (optarg[1] != '\0')
+				usage();	/* single char only */
+			else
+				isep = *optarg;
+			break;
+		case 'C':
+			flags |= ONEOSEPONLY;
+			/* FALLTHROUGH */
+		case 'S':
+			if (optarg == NULL)
+				osep = '\t';	/* default is ^I */
+			else if (optarg[1] != '\0')
+				usage();	/* single char only */
+			else
+				osep = *optarg;
+			break;
+		case 'w':		/* window width, default 80 */
+			owidth = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr) {
+				warnx("width %s", errstr);
+				usage();
+			}
+			break;
+		case 'K':			/* skip N lines */
+			flags |= SKIPPRINT;
+			/* FALLTHROUGH */
+		case 'k':			/* skip, do not print */
+			skip = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr) {
+				warnx("skip value %s", errstr);
+				usage();
+			}
+			if (skip == 0)
+				skip = 1;
+			break;
+		case 'm':
+			flags |= NOTRIMENDCOL;
+			break;
+		case 'g':		/* gutter width */
+			gutter = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr) {
+				warnx("gutter width %s", errstr);
+				usage();
+			}
+			break;
+		case 'G':
+			propgutter = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr) {
+				warnx("gutter proportion %s", errstr);
+				usage();
+			}
+			break;
+		case 'e':		/* each line is an entry */
+			flags |= ONEPERLINE;
+			break;
+		case 'E':
+			flags |= ONEPERCHAR;
+			break;
+		case 'j':			/* right adjust */
+			flags |= RIGHTADJUST;
+			break;
+		case 'n':	/* null padding for missing values */
+			flags |= NULLPAD;
+			break;
+		case 'y':
+			flags |= RECYCLE;
+			break;
+		case 'H':			/* print shape only */
+			flags |= DETAILSHAPE;
+			/* FALLTHROUGH */
+		case 'h':
+			flags |= SHAPEONLY;
+			break;
+		case 'z':			/* squeeze col width */
+			flags |= SQUEEZE;
+			break;
+		default:
+			usage();
+		}
+	}
+	ac -= optind;
+	av += optind;
+
+	switch (ac) {
+	case 2:
+		ocols = strtonum(av[1], 0, INT_MAX, &errstr);
+		if (errstr) {
+			warnx("columns value %s", errstr);
+			usage();
+		}
+		/* FALLTHROUGH */
+	case 1:
+		orows = strtonum(av[0], 0, INT_MAX, &errstr);
+		if (errstr) {
+			warnx("columns value %s", errstr);
+			usage();
+		}
+		/* FALLTHROUGH */
+	case 0:
+		break;
+	default:
+		usage();
+	}
+}
+@
+
+
+1.10
+log
+@fix empty cell length calculation
+@
+text
+@d164 1
+a164 1
+					continue;
+d181 8
+@
+
+
+1.9
+log
+@fastmerge
+@
+text
+@d4 2
+d161 5
+a165 3
+			if (*p == isep && multisep)
+				continue;	/* eat up column separators */
+			if (*p == isep)		/* must be an empty column */
+d167 2
+a168 1
+			else			/* store column entry */
+d170 11
+a180 6
+			while (p < endp && *p != isep)
+				p++;		/* find end of entry */
+			*p = '\0';		/* mark end of entry */
+			if (maxlen < p - *ep)	/* update maxlen */
+				maxlen = p - *ep;
+			INCR(ep);		/* prepare for next entry */
+@
+
+
+1.8
+log
+@stop using libbsd headers, they’re unreliable
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: rs.c,v 1.21 2012/03/04 04:05:15 fgsch Exp $	*/
+d57 1
+a57 1
+__RCSID("$MirOS: src/usr.bin/rs/rs.c,v 1.7 2012/04/14 12:33:26 tg Exp $");
+d349 1
+a349 1
+	size_t newsize, gap;
+d356 2
+a357 1
+	gap = p - elem;
+a358 2
+	allocsize = newsize;
+	sp += gap;
+@
+
+
+1.7
+log
+@getopt(3) needs <unistd.h>
+@
+text
+@d48 3
+a50 1
+#include <bsd/bsd.h>
+d54 1
+d57 1
+a57 1
+__RCSID("$MirOS: src/usr.bin/rs/rs.c,v 1.6 2012/04/14 12:29:24 tg Exp $");
+@
+
+
+1.6
+log
+@use size_t, not int, when delta’ing pointers
+(both for the size, on LP64 platforms for example, and the unsignedness)
+
+Debian #668306
+@
+text
+@d45 1
+d54 1
+a54 1
+__RCSID("$MirOS: src/usr.bin/rs/rs.c,v 1.5 2012/03/25 13:47:52 tg Exp $");
+@
+
+
+1.5
+log
+@apply patch from RjY (Debian #650029) to fix -z and reword manpage
+@
+text
+@d53 1
+a53 1
+__RCSID("$MirOS: src/usr.bin/rs/rs.c,v 1.4 2012/03/25 13:41:15 tg Exp $");
+d77 1
+a77 1
+int	allocsize = BUFSIZ;
+d345 1
+a345 1
+	int newsize, gap;
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d53 1
+a53 1
+__RCSID("$MirOS: src/usr.bin/rs/rs.c,v 1.3 2010/10/28 18:13:48 tg Exp $");
+d238 2
+a239 7
+	const char **ep;
+	int  i;
+	int  j;
+	const char **lp;
+	int colw;
+	int max = 0;
+	int n;
+d279 1
+d287 1
+@
+
+
+1.3
+log
+@prepare for Debian packaging
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: rs.c,v 1.16 2005/05/15 13:19:14 jmc Exp $	*/
+d53 1
+a53 4
+__COPYRIGHT("@@(#) Copyright (c) 1993\n\
+	The Regents of the University of California.  All rights reserved.\n");
+__SCCSID("@@(#)rs.c	8.1 (Berkeley) 6/6/93");
+__RCSID("$MirOS: src/usr.bin/rs/rs.c,v 1.2 2007/07/14 21:08:11 tg Exp $");
+a68 2
+#define	ICOLBOUNDS	020000
+#define	OCOLBOUNDS	040000
+a72 3
+short	*cord;
+short	*icbd;
+short	*ocbd;
+a90 1
+char	 *getlist(short **, char *);
+d230 1
+a230 1
+	    "usage: %s [-CcSs[x]] [-KkGgw N] [-EeHhjmnTtyz] [rows [cols]]\n",
+d279 1
+a279 1
+	if (!(colwidths = (short *) malloc(ocols * sizeof(short))))
+a460 11
+		case 'o':			/* col order */
+			getlist(&cord, optarg);
+			break;
+		case 'b':
+			flags |= ICOLBOUNDS;
+			getlist(&icbd, optarg);
+			break;
+		case 'B':
+			flags |= OCOLBOUNDS;
+			getlist(&ocbd, optarg);
+			break;
+d475 1
+d482 1
+a488 41
+
+char *
+getlist(short **list, char *p)
+{
+	int count = 1;
+	char *t, *ep;
+	long l;
+
+	for (t = p + 1; *t; t++) {
+		if (!isdigit(*t)) {
+			warnx("option -%c requires a list of unsigned numbers separated by commas", *t);
+			usage();
+		}
+		count++;
+		while (*t && isdigit(*t))
+			t++;
+		if (*t != ',')
+			break;
+	}
+	if (!(*list = (short *) malloc(count * sizeof(short))))
+		errx(1, "No list space");
+	count = 0;
+	for (t = p + 1; *t; t++) {
+		errno = 0;
+		l = strtol(t, &ep, 10);
+		if (t == ep)
+			break;		/* can't happen */
+		if ((errno == ERANGE && (l == LONG_MAX || l == LONG_MIN)) ||
+		    (l > SHRT_MAX || l < SHRT_MIN)) {
+			warnx("list value out of range");
+			usage();
+		}
+		(*list)[count++] = (short)l;
+		printf("++ %d ", (*list)[count-1]);
+		fflush(stdout);
+		if (*(t = ep) != ',')
+			break;
+	}
+	(*list)[count] = 0;
+	return(t - 1);
+}
+@
+
+
+1.2
+log
+@make __CRAZY clean
+@
+text
+@d46 7
+d56 1
+a56 1
+__RCSID("$MirOS$");
+d98 1
+a98 1
+int	  getline(void);
+d135 1
+a135 1
+		getline();
+d139 1
+a139 1
+	getline();
+d185 1
+a185 1
+	} while (getline() != EOF);
+d324 1
+a324 1
+getline(void)	/* get line; maintain curline, curlen; manage storage */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: rs.c,v 1.11 2004/03/13 20:08:21 tedu Exp $	*/
+a31 10
+#ifndef lint
+static char copyright[] =
+"@@(#) Copyright (c) 1993\n\
+	The Regents of the University of California.  All rights reserved.\n";
+#endif /* not lint */
+
+#ifndef lint
+static char sccsid[] = "@@(#)rs.c	8.1 (Berkeley) 6/6/93";
+#endif /* not lint */
+
+d40 2
+d46 5
+d75 2
+a76 2
+char	**elem;
+char	**endelem;
+d88 1
+a88 1
+void	  usage(char *, char *);
+d93 1
+a93 2
+char	 *getnum(int *, char *, int);
+char	**getptrs(char **);
+d95 1
+a95 1
+void	  prints(char *, int);
+d122 1
+a122 1
+	char **ep = NULL;
+d125 1
+a125 1
+	char **padto;
+d186 1
+a186 1
+	char **ep;
+d209 1
+a209 1
+prints(char *s, int col)
+d212 1
+a212 1
+	char *p = s;
+d227 1
+a227 1
+usage(char *msg, char *s)
+d229 2
+a230 1
+	warnx(msg, s);
+d232 2
+a233 1
+"Usage:  rs [ -[csCS][x][kKgGw][N]tTeEnyjhHm ] [ rows [ cols ] ]\n");
+d240 1
+a240 1
+	char **ep;
+d243 1
+a243 1
+	char **lp;
+d298 1
+a298 13
+	}
+	/*	for (i = 0; i < orows; i++) {
+			for (j = i; j < nelem; j += orows)
+				prints(ep[j], (j - i) / orows);
+			putchar('\n');
+		}
+	else
+		for (i = 0; i < orows; i++) {
+			for (j = 0; j < ocols; j++)
+				prints(*ep++, j);
+			putchar('\n');
+		}*/
+	else
+d301 1
+a310 3
+	/*for (i = 0; i < ocols; i++)
+		fprintf(stderr, "%d ",colwidths[i]);
+	fprintf(stderr, "is colwidths, nelem %d\n", nelem);*/
+a333 2
+		/*ww = endblock-curline; tt += ww;*/
+		/*printf("#wasted %d total %d\n",ww,tt);*/
+a336 1
+		/*printf("#endb %d curline %d\n",endblock,curline);*/
+d346 2
+a347 2
+char **
+getptrs(char **sp)
+d349 1
+a349 1
+	char **p;
+d368 2
+a369 1
+	char *p;
+d371 1
+a371 1
+	if (ac == 1) {
+d373 104
+d478 3
+a480 87
+	while (--ac && **++av == '-')
+		for (p = *av+1; *p; p++)
+			switch (*p) {
+			case 'T':
+				flags |= MTRANSPOSE;
+			case 't':
+				flags |= TRANSPOSE;
+				break;
+			case 'c':		/* input col. separator */
+				flags |= ONEISEPONLY;
+			case 's':		/* one or more allowed */
+				if (p[1])
+					isep = *++p;
+				else
+					isep = '\t';	/* default is ^I */
+				break;
+			case 'C':
+				flags |= ONEOSEPONLY;
+			case 'S':
+				if (p[1])
+					osep = *++p;
+				else
+					osep = '\t';	/* default is ^I */
+				break;
+			case 'w':		/* window width, default 80 */
+				p = getnum(&owidth, p, 0);
+				if (owidth <= 0)
+				usage("Width must be a positive integer", "");
+				break;
+			case 'K':			/* skip N lines */
+				flags |= SKIPPRINT;
+			case 'k':			/* skip, do not print */
+				p = getnum(&skip, p, 0);
+				if (!skip)
+					skip = 1;
+				break;
+			case 'm':
+				flags |= NOTRIMENDCOL;
+				break;
+			case 'g':		/* gutter space */
+				p = getnum(&gutter, p, 0);
+				break;
+			case 'G':
+				p = getnum(&propgutter, p, 0);
+				break;
+			case 'e':		/* each line is an entry */
+				flags |= ONEPERLINE;
+				break;
+			case 'E':
+				flags |= ONEPERCHAR;
+				break;
+			case 'j':			/* right adjust */
+				flags |= RIGHTADJUST;
+				break;
+			case 'n':	/* null padding for missing values */
+				flags |= NULLPAD;
+				break;
+			case 'y':
+				flags |= RECYCLE;
+				break;
+			case 'H':			/* print shape only */
+				flags |= DETAILSHAPE;
+			case 'h':
+				flags |= SHAPEONLY;
+				break;
+			case 'z':			/* squeeze col width */
+				flags |= SQUEEZE;
+				break;
+			/*case 'p':
+				ipagespace = atoi(++p);	(default is 1)
+				break;*/
+			case 'o':			/* col order */
+				p = getlist(&cord, p);
+				break;
+			case 'b':
+				flags |= ICOLBOUNDS;
+				p = getlist(&icbd, p);
+				break;
+			case 'B':
+				flags |= OCOLBOUNDS;
+				p = getlist(&ocbd, p);
+				break;
+			default:
+				usage("Bad flag:  %.1s", p);
+			}
+	/*if (!osep)
+		osep = isep;*/
+a481 2
+	/*case 3:
+		opages = atoi(av[2]);*/
+d483 5
+a487 1
+		ocols = atoi(av[1]);
+d489 5
+a493 1
+		orows = atoi(av[0]);
+d497 1
+a497 1
+		usage("Too many arguments.", "");
+d505 2
+a506 1
+	char *t;
+d509 4
+a512 2
+		if (!isdigit(*t))
+			usage("Option %.1s requires a list of unsigned numbers separated by commas", t);
+d523 10
+a532 1
+		(*list)[count++] = atoi(t);
+d535 1
+a535 3
+		while (*t && isdigit(*t))
+			t++;
+		if (*t != ',')
+a540 20
+
+/* num = number p points to; if (strict) complain */
+/* returns pointer to end of num */
+char *
+getnum(int *num, char *p, int strict)
+{
+	char *t = p;
+
+	if (!isdigit(*++t)) {
+		if (strict || *t == '-' || *t == '+')
+			usage("Option %.1s requires an unsigned integer", p);
+		*num = 0;
+		return(p);
+	}
+	*num = atoi(t);
+	while (*++t)
+		if (!isdigit(*t))
+			break;
+	return(--t);
+}
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: rs.c,v 1.16 2005/05/15 13:19:14 jmc Exp $	*/
+d33 1
+a33 1
+static const char copyright[] =
+d39 1
+a39 5
+#if 0
+static const char sccsid[] = "@@(#)rs.c	8.1 (Berkeley) 6/6/93";
+#else
+static const char rcsid[] = "$OpenBSD: rs.c,v 1.16 2005/05/15 13:19:14 jmc Exp $";
+#endif
+a49 2
+#include <errno.h>
+#include <limits.h>
+d91 1
+a91 1
+void	  usage(void);
+d96 1
+d231 1
+a231 1
+usage(void)
+d233 1
+a233 2
+	extern char *__progname;
+
+d235 1
+a235 2
+	    "usage: %s [-CcSs[x]] [-KkGgw N] [-EeHhjmnTtyz] [rows [cols]]\n",
+	    __progname);
+d300 13
+a312 1
+	} else {
+a314 1
+	}
+d324 3
+d350 2
+d355 1
+d387 1
+a387 2
+	int ch;
+	const char *errstr;
+d389 1
+a389 1
+	if (ac == 1)
+d391 85
+a475 64
+	while ((ch = getopt(ac, av, "c::C::s::S::k:K:g:G:w:tTeEnyjhHmz")) != -1) {
+		switch (ch) {
+		case 'T':
+			flags |= MTRANSPOSE;
+			/* FALLTHROUGH */
+		case 't':
+			flags |= TRANSPOSE;
+			break;
+		case 'c':		/* input col. separator */
+			flags |= ONEISEPONLY;
+			/* FALLTHROUGH */
+		case 's':		/* one or more allowed */
+			if (optarg == NULL)
+				isep = '\t';	/* default is ^I */
+			else if (optarg[1] != '\0')
+				usage();	/* single char only */
+			else
+				isep = *optarg;
+			break;
+		case 'C':
+			flags |= ONEOSEPONLY;
+			/* FALLTHROUGH */
+		case 'S':
+			if (optarg == NULL)
+				osep = '\t';	/* default is ^I */
+			else if (optarg[1] != '\0')
+				usage();	/* single char only */
+			else
+				osep = *optarg;
+			break;
+		case 'w':		/* window width, default 80 */
+			owidth = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr) {
+				warnx("width %s", errstr);
+				usage();
+			}
+			break;
+		case 'K':			/* skip N lines */
+			flags |= SKIPPRINT;
+			/* FALLTHROUGH */
+		case 'k':			/* skip, do not print */
+			skip = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr) {
+				warnx("skip value %s", errstr);
+				usage();
+			}
+			if (skip == 0)
+				skip = 1;
+			break;
+		case 'm':
+			flags |= NOTRIMENDCOL;
+			break;
+		case 'g':		/* gutter width */
+			gutter = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr) {
+				warnx("gutter width %s", errstr);
+				usage();
+			}
+			break;
+		case 'G':
+			propgutter = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr) {
+				warnx("gutter proportion %s", errstr);
+				usage();
+d477 2
+a478 43
+			break;
+		case 'e':		/* each line is an entry */
+			flags |= ONEPERLINE;
+			break;
+		case 'E':
+			flags |= ONEPERCHAR;
+			break;
+		case 'j':			/* right adjust */
+			flags |= RIGHTADJUST;
+			break;
+		case 'n':	/* null padding for missing values */
+			flags |= NULLPAD;
+			break;
+		case 'y':
+			flags |= RECYCLE;
+			break;
+		case 'H':			/* print shape only */
+			flags |= DETAILSHAPE;
+			/* FALLTHROUGH */
+		case 'h':
+			flags |= SHAPEONLY;
+			break;
+		case 'z':			/* squeeze col width */
+			flags |= SQUEEZE;
+			break;
+		case 'o':			/* col order */
+			getlist(&cord, optarg);
+			break;
+		case 'b':
+			flags |= ICOLBOUNDS;
+			getlist(&icbd, optarg);
+			break;
+		case 'B':
+			flags |= OCOLBOUNDS;
+			getlist(&ocbd, optarg);
+			break;
+		default:
+			usage();
+		}
+	}
+	ac -= optind;
+	av += optind;
+
+d480 2
+d483 1
+a483 5
+		ocols = strtonum(av[1], 0, INT_MAX, &errstr);
+		if (errstr) {
+			warnx("columns value %s", errstr);
+			usage();
+		}
+d485 1
+a485 5
+		orows = strtonum(av[0], 0, INT_MAX, &errstr);
+		if (errstr) {
+			warnx("columns value %s", errstr);
+			usage();
+		}
+d489 1
+a489 1
+		usage();
+d497 1
+a497 2
+	char *t, *ep;
+	long l;
+d500 2
+a501 4
+		if (!isdigit(*t)) {
+			warnx("option -%c requires a list of unsigned numbers separated by commas", *t);
+			usage();
+		}
+d512 1
+a512 10
+		errno = 0;
+		l = strtol(t, &ep, 10);
+		if (t == ep)
+			break;		/* can't happen */
+		if ((errno == ERANGE && (l == LONG_MAX || l == LONG_MIN)) ||
+		    (l > SHRT_MAX || l < SHRT_MIN)) {
+			warnx("list value out of range");
+			usage();
+		}
+		(*list)[count++] = (short)l;
+d515 3
+a517 1
+		if (*(t = ep) != ',')
+d523 20
+@
+
+
+1.1.1.3
+log
+@update rs from .Ox
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: rs.c,v 1.21 2012/03/04 04:05:15 fgsch Exp $	*/
+d32 14
+d74 2
+d80 3
+d100 2
+a101 1
+int	  get_line(void);
+d137 1
+a137 1
+		get_line();
+d141 1
+a141 1
+	get_line();
+d187 1
+a187 1
+	} while (get_line() != EOF);
+d241 1
+a241 1
+	    "usage: %s [-CcSs[x]] [-GgKkw N] [-EeHhjmnTtyz] [rows [cols]]\n",
+d290 1
+a290 1
+	if (!(colwidths = (short *) calloc(ocols, sizeof(short))))
+d326 1
+a326 1
+get_line(void)	/* get line; maintain curline, curlen; manage storage */
+d472 11
+a496 1
+		/* FALLTHROUGH */
+a502 1
+		/* FALLTHROUGH */
+d509 41
+@
+
+
+1.1.1.4
+log
+@update from obsd
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: rs.c,v 1.23 2013/11/15 15:47:53 millert Exp $	*/
+a44 1
+#include <unistd.h>
+d339 1
+a339 1
+	int newsize;
+d346 2
+d349 1
+a349 2
+	sp += p - elem;
+	elem = p;
+@
+
+

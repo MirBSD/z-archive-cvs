@@ -1,0 +1,222 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2009.05.30.20.38.26;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004A2198964D89D064;
+
+1.4
+date	2008.12.06.16.03.07;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100493AA2505634C2E2;
+
+1.3
+date	2008.08.08.20.51.08;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100489CB19979A49E0E;
+
+1.2
+date	2008.08.03.22.06.56;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10048962C066AE76CE3;
+
+1.1
+date	2008.07.15.19.18.53;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	100487CF80D4D2AD871;
+
+
+desc
+@@
+
+
+1.5
+log
+@• update to the latest 2.5 series Python
+• cope for possible hidden dependency on ncursesw
+• mark as NOT_FOR_PLATFORM Darwin, because both anakin and jajabings
+  are not powered on right now, so I cannot sync PFRAG.dylib, and this
+  way we can avoid needing to bump DASH_VER upon doing so (just remove
+  the NOT_FOR_PLATFORM clause, commit Makefile and PFRAG.dylib at once)
+• make dbhash usable with bsddb185 module ipv bsddb module (gebi@@grml.org)
+• make gdbm usable, it’s pulled in anyway if installed, and in py3k there
+  will be no bsddb[185] any more anyway (gebi@@grml.org)
+• ensure IPv6 is not forcibly enabled on Interix
+• add PATCHLEVEL to SUBST_VARS (for egg info)
+@
+text
+@$MirOS: ports/lang/python/2.5/patches/patch-Makefile_pre_in,v 1.4 2008/12/06 16:03:07 tg Exp $
+$OpenBSD: patch-Makefile_pre_in,v 1.1.1.1 2003/12/31 17:38:33 sturm Exp $
+--- Makefile.pre.in.orig	Mon Sep 22 00:22:21 2008
++++ Makefile.pre.in	Sat May 30 19:02:27 2009
+@@@@ -347,10 +347,7 @@@@ platform: $(BUILDPYTHON)
+ 
+ # Build the shared modules
+ sharedmods: $(BUILDPYTHON)
+-	case $$MAKEFLAGS in \
+-	*-s*) $(RUNSHARED) CC='$(CC)' LDSHARED='$(BLDSHARED)' OPT='$(OPT)' ./$(BUILDPYTHON) -E $(srcdir)/setup.py -q build;; \
+-	*) $(RUNSHARED) CC='$(CC)' LDSHARED='$(BLDSHARED)' OPT='$(OPT)' ./$(BUILDPYTHON) -E $(srcdir)/setup.py build;; \
+-	esac
++	$(RUNSHARED) CC='$(CC)' LDSHARED='$(BLDSHARED)' OPT='$(OPT)' ./$(BUILDPYTHON) -E $(srcdir)/setup.py build
+ 
+ # Build static library
+ # avoid long command lines, same as LIBRARY_OBJS
+@@@@ -376,6 +373,11 @@@@ libpython$(VERSION).so: $(LIBRARY_OBJS)
+ libpython$(VERSION).sl: $(LIBRARY_OBJS)
+ 	$(LDSHARED) $(LDFLAGS) -o $@@ $(LIBRARY_OBJS) $(SHLIBS) $(LIBC) $(LIBM) $(LDLAST)
+ 
++# This rule for MirOS BSD and OpenBSD...
++libpython$(VERSION).so.$(MAJOR).$(MINOR):      $(LIBRARY)
++	$(LDSHARED) -o $@@ $(LIBRARY_OBJS)
++
++
+ # This rule is here for OPENSTEP/Rhapsody/MacOSX. It builds a temporary
+ # minimal framework (not including the Lib directory and such) in the current
+ # directory.
+@@@@ -658,14 +660,13 @@@@ bininstall:	altbininstall
+ 	then rm -f $(DESTDIR)$(BINDIR)/$(PYTHON); \
+ 	else true; \
+ 	fi
+-	(cd $(DESTDIR)$(BINDIR); $(LN) python$(VERSION)$(EXE) $(PYTHON))
+ 	-rm -f $(DESTDIR)$(BINDIR)/python-config
+ 	(cd $(DESTDIR)$(BINDIR); $(LN) -s python$(VERSION)-config python-config)
+ 
+ # Install the interpreter with $(VERSION) affixed
+ # This goes into $(exec_prefix)
+ altbininstall:	$(BUILDPYTHON)
+-	@@for i in $(BINDIR) $(LIBDIR); \
++	@@for i in $(BINDIR) $(LIBDIR) $(LIBPL); \
+ 	do \
+ 		if test ! -d $(DESTDIR)$$i; then \
+ 			echo "Creating directory $$i"; \
+@@@@ -674,11 +675,11 @@@@ altbininstall:	$(BUILDPYTHON)
+ 		fi; \
+ 	done
+ 	$(INSTALL_PROGRAM) $(BUILDPYTHON) $(DESTDIR)$(BINDIR)/python$(VERSION)$(EXE)
+-	if test -f libpython$(VERSION)$(SO); then \
++	if test -f libpython$(VERSION)$(SO).$(MAJOR).$(MINOR); then \
+ 		if test "$(SO)" = .dll; then \
+ 			$(INSTALL_SHARED) libpython$(VERSION)$(SO) $(DESTDIR)$(BINDIR); \
+ 		else \
+-			$(INSTALL_SHARED) libpython$(VERSION)$(SO) $(DESTDIR)$(LIBDIR)/$(INSTSONAME); \
++			$(INSTALL_SHARED) libpython$(VERSION)$(SO).$(MAJOR).$(MINOR) $(DESTDIR)$(LIBPL)/libpython$(VERSION)$(SO).$(MAJOR).$(MINOR); \
+ 			if test libpython$(VERSION)$(SO) != $(INSTSONAME); then \
+ 				(cd $(DESTDIR)$(LIBDIR); $(LN) -sf $(INSTSONAME) libpython$(VERSION)$(SO)); \
+ 			fi \
+@@@@ -697,7 +698,7 @@@@ maninstall:
+ 		fi; \
+ 	done
+ 	$(INSTALL_DATA) $(srcdir)/Misc/python.man \
+-		$(DESTDIR)$(MANDIR)/man1/python.1
++		$(DESTDIR)$(MANDIR)/man1/python2.5.1
+ 
+ # Install the library
+ PLATDIR=	plat-$(MACHDEP)
+@@@@ -844,6 +845,7 @@@@ libainstall:	all
+ 				$(INSTALL_DATA) $(LDLIBRARY) $(DESTDIR)$(LIBPL) ; \
+ 			else \
+ 				$(INSTALL_DATA) $(LIBRARY) $(DESTDIR)$(LIBPL)/$(LIBRARY) ; \
++				chmod u+w $(DESTDIR)$(LIBPL)/$(LIBRARY) ; \
+ 				$(RANLIB) $(DESTDIR)$(LIBPL)/$(LIBRARY) ; \
+ 			fi; \
+ 		else \
+@
+
+
+1.4
+log
+@* remove obsolete ffi patches, now that we use system ffi
+* link to CVSweb in changelog
+* chmod u+w before ranlibbing
+* use -D_ALL_SOURCE on MirBSD #10 and up (to #99 ;)
+* fix shlibs for MidnightBSD
+* never pick up /usr/local/{include,lib} - this might be dangerous
+  (e.g. wrong libintl on mnbsd) and is not controlled by MirPorts
+  but not considered part of the base system either
+* never pick up a Berkeley/Sleepycat/Oracle DB3 or DB4, because,
+  if it's detected, the bsddb185 module is not built automatically
+* bump dashver
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/lang/python/2.5/patches/patch-Makefile_pre_in,v 1.3 2008/08/08 20:51:08 tg Exp $
+d3 2
+a4 2
+--- Makefile.pre.in.orig	Wed Dec  5 20:43:57 2007
++++ Makefile.pre.in	Sat Dec  6 15:28:15 2008
+d19 1
+a19 1
+ 	$(LDSHARED) -o $@@ $(LIBRARY_OBJS) $(SHLIBS) $(LIBC) $(LIBM)
+@
+
+
+1.3
+log
+@• pull in libffi, fix ctype module
+• use wctype on !Interix !OpenBSD, i.e. locale aware OSes
+• build loudly
+• fix readline detection and interface
+• bump dashver
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/lang/python/2.5/patches/patch-Makefile_pre_in,v 1.2 2008/08/03 22:06:56 tg Exp $
+d3 2
+a4 2
+--- Makefile.pre.in.orig	Wed Dec  5 20:43:34 2007
++++ Makefile.pre.in	Fri Aug  8 20:05:07 2008
+d68 8
+@
+
+
+1.2
+log
+@fix hardcoded 2.3, add @@option no-default-conflict, _ctypes doesn't build
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/lang/python/2.5/patches/patch-Makefile_pre_in,v 1.1 2008/07/15 19:18:53 bsiegert Exp $
+d3 15
+a17 3
+--- Makefile.pre.in.orig	2007-12-05 21:43:57.000000000 +0100
++++ Makefile.pre.in	2008-04-22 23:09:18.000000000 +0200
+@@@@ -376,6 +376,11 @@@@ libpython$(VERSION).so: $(LIBRARY_OBJS)
+d29 1
+a29 1
+@@@@ -658,14 +663,13 @@@@ bininstall:	altbininstall
+d45 1
+a45 1
+@@@@ -674,11 +678,11 @@@@ altbininstall:	$(BUILDPYTHON)
+d59 1
+a59 1
+@@@@ -697,7 +701,7 @@@@ maninstall:
+@
+
+
+1.1
+log
+@New python 2.5 port, still experimental. Contains security fixes that are
+no longer applied to the unmaintained 2.3 series.
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/lang/python/2.3/patches/patch-Makefile_pre_in,v 1.2 2005/11/15 19:16:58 tg Exp $
+d52 1
+a52 1
++		$(DESTDIR)$(MANDIR)/man1/python2.3.1
+@
+

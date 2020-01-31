@@ -1,0 +1,888 @@
+head	1.15;
+access;
+symbols
+	tg-dev:1.15.0.2
+	tg-test:1.4.0.2;
+locks; strict;
+comment	@# @;
+
+
+1.15
+date	2009.10.24.18.28.24;	author tg;	state Exp;
+branches
+	1.15.2.1;
+next	1.14;
+commitid	1004AE3475F480A96A5;
+
+1.14
+date	2009.08.02.14.35.00;	author tg;	state Exp;
+branches;
+next	1.13;
+commitid	1004A75A41A5D07D5B1;
+
+1.13
+date	2009.08.02.14.09.45;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	1004A759E415349311E;
+
+1.12
+date	2009.01.13.21.39.58;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	100496D0A0E67F8237C;
+
+1.11
+date	2009.01.08.19.48.58;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	100496658AD152D1CC1;
+
+1.10
+date	2009.01.08.19.40.57;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	100496656E0289A98C2;
+
+1.9
+date	2008.12.20.18.15.20;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	100494D363B29022250;
+
+1.8
+date	2008.12.02.20.44.29;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10049359E163BA9AA14;
+
+1.7
+date	2008.07.25.13.45.01;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004889D84B6FA2260E;
+
+1.6
+date	2008.07.20.22.53.08;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004883C1DF3B43F165;
+
+1.5
+date	2008.07.20.21.56.52;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004883B46D088415BD;
+
+1.4
+date	2008.07.20.15.32.04;	author tg;	state Exp;
+branches
+	1.4.2.1;
+next	1.3;
+commitid	10048835A7E5EAB7FBD;
+
+1.3
+date	2008.07.20.01.43.17;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004882975E28CA7BB2;
+
+1.2
+date	2008.07.15.14.01.41;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100487CADCD7229F27D;
+
+1.1
+date	2008.07.13.22.46.29;	author tg;	state Exp;
+branches;
+next	;
+commitid	100487A85B934A39336;
+
+1.15.2.1
+date	2012.11.15.19.45.49;	author tg;	state Exp;
+branches;
+next	;
+commitid	10050A5466452012545;
+
+1.4.2.1
+date	2008.07.20.21.42.56;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004883B1464C07D0FF;
+
+
+desc
+@@
+
+
+1.15
+log
+@let /randfile write 600 byte files, safe to use as ~/.gnupg/random_seed
+
+XXX todo XXX
+• actually default to that file (irssi)
+• use oaathash ipv adler32 (irssi, xchat, tinyirc, sirc)
+• link to homepage, which should be written first though…
+@
+text
+@# Copyright (c) 2008, 2009
+#	Thorsten Glaser <tg@@mirbsd.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un-
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person's immediate fault when using the work as intended.
+#-
+# Irssi extension to support MirSirc's randex protocol
+# /join ##/dev/arandom on irc.mirbsd.org for talk and entropy
+
+use vars qw($VERSION %IRSSI);
+$VERSION = sprintf "%d.%02d",
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.14 2009/08/02 14:35:00 tg Exp $
+    =~ m/,v (\d+)\.(\d+) /;
+# do not send mail to junk@@mirbsd.org
+%IRSSI = (
+	authors		=> 'Thorsten Glaser',
+	contact		=> 'tg@@mirbsd.org',
+	name		=> 'randex',
+	description	=> 'implement MirSirc\'s randex protocol',
+	license		=> 'MirOS',
+	url		=> 'http://cvs.mirbsd.de/ports/net/sirc/dist/dsircp',
+	changed		=> $VERSION,
+	modules		=> 'BSD::arc4random',
+	commands	=> "randex"
+);
+
+use BSD::arc4random qw(:all);
+use Fcntl qw(:DEFAULT :flock);
+use File::Path qw(mkpath);
+use File::Basename qw(dirname);
+
+our $irssi_ctcp_version_reply = '';
+my $running_sum;
+
+sub
+adler32
+{
+	my ($n, $buf) = @@_;
+	my ($s1, $s2);
+
+	$s1 = $n & 0xFFFF;
+	$s2 = ($n >> 16) & 0xFFFF;
+
+	$n = 0;
+	foreach my $ch (unpack("C*", $buf)) {
+		$s1 += $ch;
+		$s2 += $s1;
+		if ($n == 5552) {
+			$s1 %= 65521;
+			$s2 %= 65521;
+			$n = 0;
+		}
+	}
+
+	$n = ($s1 % 65521) | (($s2 % 65521) << 16);
+	return ($n);
+}
+
+sub
+cmd_randex
+{
+	my ($data, $server, $witem) = @@_;
+	my $recip = undef;
+	my $towho = "";
+	my $s;
+
+	if (!$server || !$server->{connected}) {
+		Irssi::print("Not connected to server");
+		return;
+	}
+
+	($towho) = split(' ', $data) if ($data);
+	if ($data && ($towho ne "*")) {
+		$recip = $server;
+	} elsif (($witem && ($witem->{type} eq "QUERY")) || ($towho eq "*")) {
+		$recip = $witem->{server};
+		$towho = $witem->{name};
+	}
+	if (!defined($recip)) {
+		Irssi::print("You must specify a nick or channel!");
+		return;
+	}
+
+	$data = "" unless ($data);
+	$s = pack("u", arc4random_bytes(32, "to $towho for $data"));
+	chop($s);
+	$recip->send_raw("PRIVMSG ${towho} :\caENTROPY ${s}\ca");
+	Irssi::print("Initiating the RANDEX protocol with ${towho}")
+	    unless Irssi::settings_get_bool("rand_quiet");
+}
+
+sub
+cmd_randstir
+{
+	arc4random_stir();
+	Irssi::timeout_remove($tmo_randfile) if defined($tmo_randfile);
+	randfile_timeout(1);
+	Irssi::print("Entropy pool stirred.")
+	    unless Irssi::settings_get_bool("rand_quiet");
+}
+
+sub
+process_entropy_request
+{
+	my ($server, $args, $nick, $address, $target) = @@_;
+	my $evalue = pack("u", arc4random_bytes(32,
+	    "from $nick $args $address $target"));
+	chop($evalue);
+	Irssi::print("${nick} initiated the RANDEX protocol with ${target}")
+	    unless Irssi::settings_get_bool("rand_quiet");
+	$server->ctcp_send_reply("NOTICE ${nick} :\caRANDOM ${evalue}\ca");
+}
+
+sub
+process_random_request
+{
+	my ($server, $args, $nick, $address, $target) = @@_;
+	my $papi = (BSD::arc4random::have_kintf() ? "Perl" : "none");
+	arc4random_pushb("from $nick $args $address $target");
+	Irssi::print("${nick} queried RANDEX protocol information from ${target}")
+	    unless Irssi::settings_get_bool("rand_quiet");
+	$server->ctcp_send_reply("PRIVMSG ${nick} :\caACTION uses the RANDEX plugin v${VERSION} for irssi, push API: ${papi}\ca");
+}
+
+sub
+process_random_response
+{
+	my ($server, $args, $nick, $address, $target) = @@_;
+	my $t = (BSD::arc4random::have_kintf() ? "" : "not ") .
+	    "pushing to kernel";
+
+	$running_sum = arc4random_pushb("by $nick $args $address $target") | 1;
+	Irssi::print("RANDEX protocol reply from $nick to $target, $t")
+	    unless Irssi::settings_get_bool("rand_quiet");
+}
+
+sub
+process_ctcp_before
+{
+	my $v = Irssi::settings_get_str("ctcp_version_reply");
+
+	if (!$v) {
+		$v = 'irssi v$J - running on $sysname $sysarch';
+	}
+	$irssi_ctcp_version_reply = $v;
+	$v .= " (RANDOM=" . $RANDOM . ")";
+	Irssi::settings_set_str("ctcp_version_reply", $v);
+}
+
+sub
+process_ctcp_after
+{
+	if ($irssi_ctcp_version_reply) {
+		Irssi::settings_set_str("ctcp_version_reply",
+		    $irssi_ctcp_version_reply);
+	}
+}
+
+sub
+randfile_loadstore
+{
+	my $randfile = Irssi::settings_get_str("randfile");
+	my $tryread = 0;
+	my $data = '';
+	my $dlen = 0;
+	my $fh;
+	my $fhopen = 0;
+	my $dir;
+
+	$randfile = $ENV{'HOME'} . "/.pgp/randseed.bin"
+	    if (!defined($randfile) || !$randfile);
+	$dir = dirname($randfile);
+	if (! -d $dir) {
+		eval { mkpath([$dir]) };
+		if ($@@) {
+			$randfile = "/tmp/randfile." . $RANDOM;
+		}
+	}
+	$randfile = "/tmp/randfile." . $RANDOM unless (-d dirname($randfile));
+	Irssi::settings_set_str("randfile", $randfile);
+	stat($randfile);
+	if (-b _ || -c _) {
+		$tryread = 4;
+	} elsif (-s _) {
+		$tryread = -s $_;
+	}
+	if ($tryread && sysopen($fh, $randfile, O_RDWR)) {
+		$fhopen = 1;
+		$dlen = sysread($fh, $data, $tryread)
+		    or $fhopen = 0;
+		if (defined($dlen) && $dlen) {
+			my $d = $data;
+
+			$data = arc4random_bytes(300);
+			$dlen = 300;
+			arc4random_addrandom($d);
+		} else {
+			$dlen = 0;
+			$data = '';
+		}
+		close($fh) unless $fhopen;
+	}
+	if (!$fhopen && sysopen($fh, $randfile, O_WRONLY | O_CREAT, 0600)) {
+		$fhopen = 1;
+	}
+	if (!$fhopen) {
+		Irssi::print("Cannot write to randfile '$randfile'!");
+		return;
+	}
+	if (!flock($fh, LOCK_EX)) {
+		Irssi::print("warning: cannot lock '$randfile'");
+	}
+	truncate($fh, 0);
+	$data .= arc4random_bytes(600 - $dlen);
+	syswrite($fh, $data, length($data));
+	close($fh);
+}
+
+my $tmo_randfile = undef;
+my $rmo_randstir = undef;
+my $g_interval;
+my $g_stirival;
+
+sub
+randfile_timeout
+{
+	my $status = shift;
+	my $interval = $g_interval = Irssi::settings_get_int("rand_interval");
+
+	if (!defined($interval) || $interval !~ /^[0-9]+$/) {
+		$interval = 900;
+	}
+	Irssi::settings_set_int("rand_interval", $interval);
+	if (($status == 0 && $interval > 0) || $status == 1) {
+		randfile_loadstore();
+	}
+	$interval = 900 if ($interval == 0);
+	$tmo_randfile = Irssi::timeout_add_once($interval * 1000,
+	    "randfile_timeout", 0);
+}
+
+sub
+randstir_timeout
+{
+	my $status = shift;
+	my $interval = $g_stirival = Irssi::settings_get_int("arc4stir_interval");
+
+	if (!defined($interval) || $interval !~ /^[0-9]+$/) {
+		$interval = 7200;
+	}
+	Irssi::settings_set_int("arc4stir_interval", $interval);
+	if ($status == 0 && $interval > 0) {
+		arc4random_stir();
+	}
+	if (BSD::arc4random::have_kintf()) {
+		# when we can push to the kernel, periodic stirring
+		# is superfluous
+		$tmo_randstir = undef;
+		return;
+	}
+	$interval = 7200 if ($interval == 0);
+	$tmo_randstir = Irssi::timeout_add_once($interval * 1000,
+	    "randstir_timeout", 0);
+}
+
+sub
+sig_setup_changed
+{
+	if ($g_interval != Irssi::settings_get_int("rand_interval")) {
+		Irssi::timeout_remove($tmo_randfile) if defined($tmo_randfile);
+		randfile_timeout(2);
+	}
+	if ($g_stirival != Irssi::settings_get_int("arc4stir_interval")) {
+		Irssi::timeout_remove($tmo_randstir) if defined($tmo_randstir);
+		randstir_timeout(2);
+	}
+}
+
+sub
+sig_quitting
+{
+	randfile_loadstore();
+}
+
+sub
+sig_rawlog
+{
+	my ($rlrec, $data) = @@_;
+	my $s;
+
+	$running_sum = adler32($running_sum, pack("w", arc4random()) . $rlrec);
+	$s = pack("w", time) . pack("L", $running_sum);
+	$running_sum = adler32($running_sum, pack("w", arc4random()) . $data);
+	$s .= pack("L", $running_sum);
+	arc4random_addrandom($s);
+}
+
+# interval in which to re-read and re-write the randseed.bin file (seconds)
+Irssi::settings_add_int("randex", "rand_interval", 900);
+# interval in which to request new entropy from the kernel into the libc
+# pool, in seconds; ignored if we have the kernel push interface
+Irssi::settings_add_int("randex", "arc4stir_interval", 7200);
+# path to the randseed.bin file
+{
+	my $randfile = $ENV{'RANDFILE'};
+
+	if (!defined($randfile) || !$randfile) {
+		# Commonly found on e.g. Debian GNU/HURD (OpenSSL)
+		$randfile = $ENV{'HOME'} . "/.rnd";
+
+		if (! -s $randfile) {
+			$randfile = $ENV{'HOME'} . "/.pgp/randseed.bin";
+		}
+	}
+
+	# IMPORTANT!: do *not* use ~/.gnupg/random_seed,
+	# since it is not just a binary chunk of entropy
+	# but a dumped internal data structure; gpg WILL
+	# NOT LOAD a randseed file we write, pgp-2.6.3in
+	# however is ok with it as are OpenSSL, PuTTY, …
+
+	Irssi::settings_add_str("randex", "randfile", $randfile);
+}
+# do not write to the main window unless something fatal happens
+Irssi::settings_add_bool("randex", "rand_quiet", 0);
+
+Irssi::signal_add('gui exit', \&sig_quitting);
+Irssi::command_bind('randex', 'cmd_randex');
+Irssi::command_bind('randstir', 'cmd_randstir');
+Irssi::signal_add('ctcp msg entropy', \&process_entropy_request);
+Irssi::signal_add('ctcp msg random', \&process_random_request);
+Irssi::signal_add('ctcp reply random', \&process_random_response);
+Irssi::ctcp_register("ENTROPY");
+Irssi::ctcp_register("RANDOM");
+Irssi::signal_add_first('ctcp msg version', \&process_ctcp_before);
+Irssi::signal_add_last('ctcp msg version', \&process_ctcp_after);
+Irssi::print("randex.pl ${VERSION} loaded, entropy is " .
+    (BSD::arc4random::have_kintf() ? "" : "not ") .
+    "pushed to the kernel");
+randfile_timeout(1);
+randstir_timeout(1);
+Irssi::signal_add('setup changed', \&sig_setup_changed);
+$running_sum = arc4random() | 1;
+Irssi::signal_add('rawlog', \&sig_rawlog);
+
+1;
+@
+
+
+1.15.2.1
+log
+@begin converting to use NZAAT hash and allow ~/.gnupg/random_seed (600 bytes)
+
+I’m still not really in the mood to hack, after hours of PHP…
+@
+text
+@d1 1
+a1 1
+# Copyright (c) 2008, 2009, 2012
+d24 1
+a24 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.15 2009/10/24 18:28:24 tg Exp $
+d31 1
+a31 1
+	description	=> 'implement MirSirc RANDEX protocol',
+d33 1
+a33 1
+	url		=> 'https://www.mirbsd.org/cvs.cgi/ports/net/irssi/files/randex.pl',
+d45 1
+a45 1
+my $running_sum = $RANDOM;
+d47 19
+a65 2
+# from src/gnu/usr.bin/perl/t/op/hash.t
+use constant MASK_U32 => 2**32;
+d67 2
+a68 24
+sub NZATUpdateString {
+	my ($h, $s) = @@_;
+	my @@c = split //, $s;
+
+	for (@@c) {
+		$h = ($h + 1 + ord) * 1025;
+		$h %= MASK_U32;
+		$h ^= $h >> 6;
+	}
+	$h;
+}
+sub NZAATFinish {
+	my $h = shift;
+
+	$h *= 1025;
+	$h %= MASK_U32;
+	$h ^= $h >> 6;
+	$h += $h << 3;
+	$h %= MASK_U32;
+	$h ^= $h >> 11;
+#	$h %= MASK_U32;
+	$h += $h << 15;
+	$h %= MASK_U32;
+	$h;
+d71 3
+a73 1
+sub cmd_randex {
+d326 1
+d328 5
+a332 4
+		if (! -s $randfile) {
+			$randfile = $ENV{'HOME'} . "/.gnupg/random_seed";
+		}
+	}
+@
+
+
+1.14
+log
+@CTCP RANDOM is now part of the new RANDEX protocol as well
+@
+text
+@d24 1
+a24 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.12 2009/01/13 21:39:58 tg Exp $
+d206 2
+a207 2
+			$data = arc4random_bytes(1024);
+			$dlen = 1024;
+d226 1
+a226 1
+	$data .= arc4random_bytes(1560 - $dlen);
+@
+
+
+1.13
+log
+@shut up spammers
+@
+text
+@d24 1
+a24 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.11 2009/01/08 19:48:58 tg Exp $
+d127 11
+d343 1
+d346 1
+@
+
+
+1.12
+log
+@improve default “randfile” setting suggestion to include a commonly
+found OpenSSL RANDFILE (e.g. on Debian GNU/HURD) iff it already exists,
+with fallback to the pgp-2.6.3in one we currently use if it doesn’t
+@
+text
+@d26 1
+@
+
+
+1.11
+log
+@• oops, need to set at least one bit in all cases (even though 0 might
+  be random)
+• improve privacy
+@
+text
+@d24 1
+a24 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.10 2009/01/08 19:40:57 tg Exp $
+d308 6
+a313 6
+		# IMPORTANT!: do *not* use ~/.gnupg/random_seed,
+		# since it is not just a binary chunk of entropy
+		# but a dumped internal data structure; gpg WILL
+		# NOT LOAD a randseed file we write, pgp-2.6.3in
+		# however is as fine with it as PuTTY and others
+		$randfile = $ENV{'HOME'} . "/.pgp/randseed.bin";
+d315 7
+@
+
+
+1.10
+log
+@• implement adler32(3) in Perl, following my own minimalistic C implemen-
+  tation but somewhat improved; could be optimised to always use the glo-
+  bal running sum for this case tho…
+• use the low-overhead arc4random_addrandom on a string consisting of the
+  current time (perlber) and adler32 CRCs (binary) of the record and data
+  of a rawlog to also add Vutral’s talking Ergüsse to the programme-local
+  entropy pool (but not, directly, the kernel or public; this is for both
+  speed and security/privacy)
+@
+text
+@d24 1
+a24 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.9 2008/12/20 18:15:20 tg Exp $
+d132 1
+a132 1
+	$running_sum = arc4random_pushb("by $nick $args $address $target");
+d291 1
+a291 1
+	$running_sum = adler32($running_sum, $rlrec);
+d293 1
+a293 1
+	$running_sum = adler32($running_sum, $data);
+@
+
+
+1.9
+log
+@allow optional arguments (seed) to /randex <nick|#chan> [seed]
+@
+text
+@d1 1
+a1 1
+# Copyright (c) 2008
+d24 1
+a24 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.8 2008/12/02 20:44:29 tg Exp $
+d44 25
+d132 1
+a132 1
+	arc4random_pushb("by $nick $args $address $target");
+d285 13
+d334 2
+@
+
+
+1.8
+log
+@* add docs on where to get help in the file header
+* add "/randex *" as alias for current talk item, like MirSirc
+@
+text
+@d24 1
+a24 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.7 2008/07/25 13:45:01 tg Exp $
+d28 1
+a28 1
+	contact		=> 'tg@@mirbsd.de',
+d50 1
+a50 1
+	my $towho;
+d58 2
+a59 1
+	if ($data && ($data ne "*")) {
+d61 1
+a61 2
+		$towho = $data;
+	} elsif (($witem && ($witem->{type} eq "QUERY")) || ($data eq "*")) {
+d70 2
+a71 1
+	$s = pack("u", arc4random_bytes(32, "for $towho"));
+@
+
+
+1.7
+log
+@• fix missing 1 argument in the initial randfile_timeout() invocation
+• new randstir_timeout for periodically running arc4random_stir() unless
+  we have_kintf()
+@
+text
+@d20 1
+d24 1
+a24 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.6 2008/07/20 22:53:08 tg Exp $
+d58 1
+a58 1
+	if ($data) {
+d61 1
+a61 1
+	} elsif ($witem && ($witem->{type} eq "QUERY")) {
+@
+
+
+1.6
+log
+@all:
+• merge arc4random_stir branches
+• improve descriptions, etc.
+randex.pl:
+• remove superfluous rcs id
+• increase size of seed file to pgp-2.6.3in’s
+• add a note why we CAN NOT use gpg’s
+  (and suggest PuTTY’s works well)
+@
+text
+@d23 1
+a23 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.5 2008/07/20 21:56:52 tg Exp $
+d193 1
+d195 1
+d216 24
+d246 4
+d258 1
+d260 4
+d277 1
+d291 2
+a292 1
+randfile_timeout();
+@
+
+
+1.5
+log
+@① I *told* you to help me, as I don’t speak perl… this is what you get:
+  • when n̲o̲t̲ changing the rand_interval setting value, the timeout was lost
+② dynamically generate $VERSION, regex from Mastering Perl by brian d foy
+@
+text
+@a0 2
+# $MirOS: ports/net/irssi/files/randex.pl,v 1.4 2008/07/20 15:32:04 tg Exp $
+#-
+d23 1
+a23 1
+    q$MirOS: ports/net/irssi/files/randex.pl,v 1.4 2008/07/20 15:32:04 tg Exp $
+d77 10
+d167 2
+a168 2
+			$data = arc4random_bytes(256);
+			$dlen = 256;
+d187 1
+a187 1
+	$data .= arc4random_bytes(512 - $dlen);
+d233 5
+d246 1
+@
+
+
+1.4
+log
+@by request of gecko2@@ add a quiet option
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/net/irssi/files/randex.pl,v 1.3 2008/07/20 01:43:17 tg Exp $
+d24 3
+a26 1
+$VERSION = '1.4';
+d208 4
+a211 3
+	Irssi::timeout_remove($tmo_randfile) if defined($tmo_randfile);
+	randfile_timeout(2)
+	    if ($g_interval != Irssi::settings_get_int("rand_interval"));
+@
+
+
+1.4.2.1
+log
+@new /randstir calls arc4random_stir(), rewrites the randseed file, and
+re-schedules the timeout
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/net/irssi/files/randex.pl,v 1.4 2008/07/20 15:32:04 tg Exp $
+a76 10
+cmd_randstir
+{
+	arc4random_stir();
+	Irssi::timeout_remove($tmo_randfile) if defined($tmo_randfile);
+	randfile_timeout(1);
+	Irssi::print("Entropy pool stirred.")
+	    unless Irssi::settings_get_bool("rand_quiet");
+}
+
+sub
+a229 1
+Irssi::command_bind('randstir', 'cmd_randstir');
+@
+
+
+1.3
+log
+@improve randex script by a pool file, especially good if you !have_kintf().
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/net/irssi/files/randex.pl,v 1.2 2008/07/15 14:01:41 tg Exp $
+d24 1
+a24 1
+$VERSION = '20080720';
+d72 2
+a73 1
+	Irssi::print("Initiating the RANDEX protocol with ${towho}");
+d83 2
+a84 1
+	Irssi::print("${nick} initiated the RANDEX protocol with ${target}");
+d96 2
+a97 1
+	Irssi::print("RANDEX protocol reply from $nick to $target, $t");
+d226 1
+@
+
+
+1.2
+log
+@feature sync with MirSirc™ RANDEX protocol and client features
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/net/irssi/files/randex.pl,v 1.1 2008/07/13 22:46:29 tg Exp $
+d24 1
+a24 1
+$VERSION = '20080715';
+d38 3
+d119 106
+d234 2
+@
+
+
+1.1
+log
+@irssi plugin for /randex protocol introduced by MirSirc
+(incomplete, preliminary beta)
+@
+text
+@d1 1
+a1 1
+# $MirOS: contrib/code/Snippets/randex.pl,v 1.3 2008/07/09 00:16:30 tg Exp $
+a22 2
+require BSD::arc4random;
+
+d24 1
+a24 1
+$VERSION = '200807090012';
+d33 1
+a33 1
+	modules		=> '',
+d37 4
+d66 1
+a66 1
+	$s = pack("u", BSD::arc4random::arc4random_bytes(32, "for $towho"));
+d69 1
+d76 2
+a77 2
+	my $evalue = pack("u", BSD::arc4random::arc4random_bytes(32,
+	    "from $nick $args"));
+d79 1
+d87 2
+d90 24
+a113 1
+	BSD::arc4random::arc4random_pushk("by $nick $args");
+d120 7
+@
+

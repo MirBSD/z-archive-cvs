@@ -1,0 +1,297 @@
+head	1.6;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2009.05.30.22.12.40;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004A21AF201444134C;
+
+1.5
+date	2006.07.27.00.58.15;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10044C80EE124197593;
+
+1.4
+date	2006.06.15.01.43.17;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004490BB236D1F4B88;
+
+1.3
+date	2006.03.27.21.28.23;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100442858EF0A0704E9;
+
+1.2
+date	2006.03.24.22.25.17;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100442471D02BCAAFAA;
+
+1.1
+date	2005.12.14.23.28.24;	author tg;	state Exp;
+branches;
+next	;
+commitid	10043A0AA0E5A220A51;
+
+
+desc
+@@
+
+
+1.6
+log
+@The line
+│    if (byte_equal(ip+12,4,V6any)) c=V6any;
+is wrong in just so many ways. Firstly, it must be
+│    if (byte_equal(ip+12,4,V4any)) c=V6any;
+of course (hello Felix). Secondly, it just is broken.
+
+0.0.0.0 is *not* the same as [::] but [::FFFF:0.0.0.0]
+in this software. You shan’t bind to [::] if I set the
+env/IP variable to 0.0.0.0, ever. Dual vs Doble Stack.
+@
+text
+@#include "scan.h"
+#include "ip4.h"
+#include "ip6.h"
+#include "byte.h"
+#include "fromhex.h"
+
+__RCSID("$MirOS$");
+
+/*
+ * IPv6 addresses are really ugly to parse.
+ * Syntax: (h = hex digit)
+ *   1. hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh
+ *   2. any number of 0000 may be abbreviated as "::", but only once
+ *   3. The last two words may be written as IPv4 address
+ */
+
+unsigned int ip6_scan(const char *s,char ip[16])
+{
+  unsigned int i;
+  unsigned int len=0;
+  unsigned long u;
+
+  char suffix[16];
+  int prefixlen=0;
+  int suffixlen=0;
+
+  if ((i=ip4_scan(s,ip+12))) {
+    const char *c=V4mappedprefix;
+    for (len=0; len<12; ++len) ip[len]=c[len];
+    return i;
+  }
+  for (i=0; i<16; i++) ip[i]=0;
+  for (;;) {
+    if (*s == ':') {
+      len++;
+      if (s[1] == ':') {	/* Found "::", skip to part 2 */
+	s+=2;
+	len++;
+	break;
+      }
+      s++;
+    }
+    i = scan_xlong(s,&u);
+    if (!i) return 0;
+    if (prefixlen==12 && s[i]=='.') {
+      /* the last 4 bytes may be written as IPv4 address */
+      i=ip4_scan(s,ip+12);
+      if (i)
+	return i+len;
+      else
+	return 0;
+    }
+    ip[prefixlen++] = (u >> 8);
+    ip[prefixlen++] = (u & 255);
+    s += i; len += i;
+    if (prefixlen==16)
+      return len;
+  }
+
+/* part 2, after "::" */
+  if (fromhex(*s) == -1)
+    return len;
+  for (;;) {
+    if (*s == ':') {
+      if (suffixlen==0)
+	break;
+      s++;
+      len++;
+    } else if (suffixlen!=0)
+      break;
+    i = scan_xlong(s,&u);
+    if (!i) {
+      len--;
+      break;
+    }
+    if (suffixlen+prefixlen<=12 && s[i]=='.') {
+      int j=ip4_scan(s,suffix+suffixlen);
+      if (j) {
+	suffixlen+=4;
+	len+=j;
+	break;
+      } else
+	prefixlen=12-suffixlen;	/* make end-of-loop test true */
+    }
+    suffix[suffixlen++] = (u >> 8);
+    suffix[suffixlen++] = (u & 255);
+    s += i; len += i;
+    if (prefixlen+suffixlen==16)
+      break;
+  }
+  for (i=0; i<suffixlen; i++)
+    ip[16-suffixlen+i] = suffix[i];
+  return len;
+}
+
+unsigned int ip6_scan_flat(const char *s,char ip[16])
+{
+  int i;
+  for (i=0; i<16; i++) {
+    int tmp;
+    tmp=fromhex(*s++);
+    if (tmp<0) return 0;
+    ip[i]=tmp << 4;
+    tmp=fromhex(*s++);
+    if (tmp<0) return 0;
+    ip[i]+=tmp;
+  }
+  return 32;
+}
+@
+
+
+1.5
+log
+@* make zonenotify connect to IPv6 (DNS or numeric) too
+* make zonenotify connect to all IPs of the hostname given
+* make axfrdns log IPv6 addresses (have to move it though)
+  XXX pending making DJB_V6ONLY the default and only case
+* put fromhex into common file while here
+* centralise licence info for my diffs while here
+* bump patchlevel
+
+new zonenotify loosely tested, new axfrdns log format seems okay
+thanks gecko2 for providing bind9 backup NS on ipv6
+@
+text
+@a0 2
+/* $MirOS: ports/net/djbdns/files/build/src/ip6_scan.c,v 1.4 2006/06/15 01:43:17 tg Exp $ */
+
+d7 2
+a28 1
+    if (byte_equal(ip+12,4,V6any)) c=V6any;
+@
+
+
+1.4
+log
+@* enable tinydnst6 to listen on IPv4 addresses too
+  (do I have all now? if so, can I nuke the v4 transport versions?)
+* fix a buglet in my :: address fix
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/net/djbdns/files/build/src/ip6_scan.c,v 1.3 2006/03/27 21:28:23 tg Exp $ */
+d7 1
+a7 2
+
+static inline int fromhex(unsigned char);
+a96 10
+static inline int fromhex(unsigned char c) {
+  if (c>='0' && c<='9')
+    return c-'0';
+  else if (c>='A' && c<='F')
+    return c-'A'+10;
+  else if (c>='a' && c<='f')
+    return c-'a'+10;
+  return -1;
+}
+
+@
+
+
+1.3
+log
+@my previous patch fixed :: but not 1::
+this one should do it
+
+thanks to Fefe <leitner@@codeblau.de> for, ahem, reminding me;
+patch sent to him again
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/net/djbdns/files/build/src/ip6_scan.c,v 1.2 2006/03/24 22:25:17 tg Exp $ */
+d8 2
+d63 1
+a63 1
+  if (*s == '\0')
+d98 1
+a98 1
+static long int fromhex(unsigned char c) {
+@
+
+
+1.2
+log
+@ip6_scan: fix return value for case of parsing "::"
+unbreaks running tinydnst6 on IN6ADDR_ANY
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d62 1
+a62 1
+    return 2;
+@
+
+
+1.1
+log
+@* update to fefe's djbdns-1.05-test23.diff
+  with djbdns-1.05-ixfr.diff
+* slightly change naming of v6-transport binaries
+* consolidate all added source files in a central directory
+  so it can be reused by the v6-transport stuff
+* integrate the v6 transport binaries
+* fix spacing
+* sync descriptive texts with reality
+* sync European ORSN (v4 and v6) to their root.hint
+* sync OpenNIC too
+* Open-RSC seeminly ceased to exist recently
+* Apply compiler-temporary-filename.patch
+  from http://homepages.tesco.net/~J.deBoynePollard/FGA/djbdns-problems.html
+* apply dnscache-cname-handling.patch
+* apply dnscache-strict-forwardonly.patch w/ IPv6 tweak
+* apply dnscacheip-space-separator.patch
+* apply tinydns-alias-chain-truncation.patch
+* apply tinydns-data-semantic-error.patch
+  appropriately for 6 and 3, too
+* fix shell code and path to includes
+* fix relative paths
+* fix names of library and programmes; NOMAN=yes here (t6)
+* Add support for the IPv6 transport module to communicate,
+  as a client, with IPv4 transport name servers as well.
+
+  WFM
+* build it with -Wall -Werror
+* honour ${SYSCONFDIR} throughout the port
+@
+text
+@d1 2
+d61 2
+@
+

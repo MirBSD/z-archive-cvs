@@ -1,0 +1,789 @@
+head	1.1;
+branch	1.1.109;
+access;
+symbols
+	lynx-2_8_8dev_16:1.1.109.7
+	lynx-2_8_8dev_15e:1.1.109.7
+	lynx-2_8_8dev_15:1.1.109.6
+	lynx-2_8_8dev_14:1.1.109.6
+	lynx-2_8_8dev_12:1.1.109.6
+	lynx-2_8_8dev_11:1.1.109.6
+	lynx-2_8_8dev_10a:1.1.109.6
+	lynx-2_8_8dev_7a:1.1.109.5
+	lynx-2_8_8dev_7:1.1.109.5
+	lynx-2_8_7rel_1:1.1.109.4
+	lynx-2_8_7dev_12:1.1.109.3
+	lynx-2_8_7dev_11a:1.1.109.3
+	MIRBSD_10:1.1.109.2.0.4
+	MIRBSD_10_BASE:1.1.109.2
+	lynx-2_8_7dev_8:1.1.109.2
+	lynx-2_8_7dev_7:1.1.109.2
+	lynx-2_8_7dev_5:1.1.109.2
+	lynx-2_8_7dev_2:1.1.109.2
+	lynx-2_8_6pre_5:1.1.109.2
+	lynx-2_8_6pre_4:1.1.109.2
+	lynx-2_8_6pre_3:1.1.109.2
+	MIRBSD_9_BASE:1.1.109.2
+	lynx-2_8_6dev_18c:1.1.109.2
+	lynx-2_8_6dev_18:1.1.109.2
+	MIRBSD_8:1.1.109.2.0.2
+	MIRBSD_8_BASE:1.1.109.2
+	lynx-2_8_6dev_16:1.1.109.2
+	lynx:1.1.109;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.03.27.22.12.09;	author tg;	state Exp;
+branches
+	1.1.109.1;
+next	;
+
+1.1.109.1
+date	2005.03.27.22.12.09;	author tg;	state Exp;
+branches;
+next	1.1.109.2;
+
+1.1.109.2
+date	2005.10.21.21.34.08;	author tg;	state Exp;
+branches;
+next	1.1.109.3;
+commitid	2f9543595ec47e83;
+
+1.1.109.3
+date	2008.12.16.23.13.11;	author tg;	state Exp;
+branches;
+next	1.1.109.4;
+commitid	100494835F965A87026;
+
+1.1.109.4
+date	2009.08.09.14.37.52;	author tg;	state Exp;
+branches;
+next	1.1.109.5;
+commitid	1004A7EDF4952738297;
+
+1.1.109.5
+date	2010.12.19.18.12.46;	author tg;	state Exp;
+branches;
+next	1.1.109.6;
+commitid	1004D0E4B24304015D1;
+
+1.1.109.6
+date	2012.02.19.18.29.45;	author tg;	state Exp;
+branches;
+next	1.1.109.7;
+commitid	1004F413EF328BF0E26;
+
+1.1.109.7
+date	2013.05.18.14.44.02;	author tg;	state Exp;
+branches;
+next	;
+commitid	100519793BB3FCC7E2F;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#include <HTUtils.h>
+#include <HTAlert.h>
+#include <LYUtils.h>
+#include <LYStrings.h>
+#include <LYGlobalDefs.h>
+#include <LYJump.h>
+#include <LYKeymap.h>
+#include <GridText.h>
+
+#include <LYLeaks.h>
+
+#ifdef _WINDOWS
+#include <stdlib.h>		/* bsearch() */
+#endif
+
+#ifdef VMS
+#include <fab.h>
+#endif /* VMS */
+
+struct JumpTable *JThead = NULL;
+
+static int LYCompare(const void *e1, const void *e2);
+static unsigned LYRead_Jumpfile(struct JumpTable *jtp);
+
+void LYJumpTable_free(void)
+{
+    struct JumpTable *cur = JThead;
+    struct JumpTable *next;
+
+    while (cur) {
+	next = cur->next;
+	FREE(cur->msg);
+	FREE(cur->file);
+	FREE(cur->shortcut);
+	if (cur->history) {
+	    LYFreeStringList(cur->history);
+	    cur->history = NULL;
+	}
+	FREE(cur->table);
+	FREE(cur->mp);
+	FREE(cur);
+	cur = next;
+    }
+    JThead = NULL;
+    return;
+}
+
+/*
+ * Utility for listing shortcuts, making any repeated
+ * shortcut the most current in the list. - FM
+ */
+void LYAddJumpShortcut(HTList *historyp, char *shortcut)
+{
+    char *tmp = NULL;
+    char *old;
+    HTList *cur = historyp;
+
+    if (!historyp || isEmpty(shortcut))
+	return;
+
+    StrAllocCopy(tmp, shortcut);
+
+    while (NULL != (old = (char *) HTList_nextObject(cur))) {
+	if (!strcmp(old, tmp)) {
+	    HTList_removeObject(historyp, old);
+	    FREE(old);
+	    break;
+	}
+    }
+    HTList_addObject(historyp, tmp);
+
+    return;
+}
+
+BOOL LYJumpInit(char *config)
+{
+    struct JumpTable *jtp;
+    char *cp;
+
+    /*
+     * Create a JumpTable structure.
+     */
+    jtp = typecalloc(struct JumpTable);
+
+    if (jtp == NULL) {
+	outofmem(__FILE__, "LYJumpInit");
+    }
+
+    /*
+     * config is JUMPFILE:path[:optional_key[:optional_prompt]]
+     *
+     * Skip JUMPFILE.
+     */
+    cp = strtok(config, ":\n");
+    if (!cp) {
+	FREE(jtp);
+	return FALSE;
+    }
+
+    /*
+     * Get the path.
+     */
+    cp = strtok(NULL, ":\n");
+    if (!cp) {
+	FREE(jtp);
+	return FALSE;
+    }
+    StrAllocCopy(jtp->file, cp);
+#ifdef LY_FIND_LEAKS
+    if (!JThead)
+	atexit(LYJumpTable_free);
+#endif /* LY_FIND_LEAKS */
+
+    /*
+     * Get the key, if present.
+     */
+    cp = strtok(NULL, ":\n");
+
+    /*
+     * If no key, check whether we are resetting the default jumps file.
+     */
+    if (!cp && JThead) {
+	struct JumpTable *jtptmp = JThead;
+
+	jumpfile = jtp->file;
+	FREE(jtp);
+	while (jtptmp && jtptmp->key)
+	    jtptmp = jtptmp->next;
+	if (!jtptmp)
+	    return FALSE;
+	StrAllocCopy(jtptmp->file, jumpfile);
+	StrAllocCopy(jtptmp->msg, jumpprompt);
+	return TRUE;
+    }
+
+    /*
+     * If a key is present and we have no default, create one,
+     * using the path from config, and the current jumpprompt.
+     */
+    if (cp && !JThead) {
+	JThead = jtp;
+	StrAllocCopy(JThead->msg, jumpprompt);
+	if (!jumpfile)
+	    StrAllocCopy(jumpfile, JThead->file);
+	jtp = typecalloc(struct JumpTable);
+
+	if (jtp == NULL) {
+	    outofmem(__FILE__, "LYJumpInit");
+	}
+	StrAllocCopy(jtp->file, JThead->file);
+    }
+
+    /*
+     * Complete the initialization of config.
+     */
+    if (cp) {
+	jtp->key = remap(cp, "JUMP", FALSE);	/* key is present, (re)map it */
+	cp = strtok(NULL, "\n");	/* get prompt, if present */
+	if (non_empty(cp))
+	    StrAllocCopy(jtp->msg, cp);		/* prompt is present, load it */
+	else
+	    cp = NULL;
+    }
+    if (!cp)			/* no prompt, use default */
+	StrAllocCopy(jtp->msg, jumpprompt);
+    if (jtp->msg[strlen(jtp->msg) - 1] != ' ')	/* ensure a trailing space */
+	StrAllocCat(jtp->msg, " ");
+    jtp->history = HTList_new();
+    jtp->next = JThead;
+    JThead = jtp;
+    return TRUE;
+}
+
+char *LYJump(int key)
+{
+    JumpDatum seeking;
+    JumpDatum *found;
+    static char buf[124];
+    char *bp, *cp;
+    struct JumpTable *jtp;
+    int ch;
+    RecallType recall;
+    int ShortcutTotal;
+    int ShortcutNum;
+    BOOLEAN FirstShortcutRecall = TRUE;
+
+    if (!JThead)
+	return NULL;
+    jtp = JThead;
+    while (jtp && jtp->key && jtp->key != key)
+	jtp = jtp->next;
+    if (!jtp) {
+	char *msg = 0;
+
+	HTSprintf0(&msg, KEY_NOT_MAPPED_TO_JUMP_FILE, key);
+	HTAlert(msg);
+	FREE(msg);
+	return NULL;
+    }
+    if (!jtp->table)
+	jtp->nel = LYRead_Jumpfile(jtp);
+    if (jtp->nel == 0)
+	return NULL;
+
+    if (!jump_buffer || isEmpty(jtp->shortcut))
+	*buf = '\0';
+    else if (non_empty(jtp->shortcut)) {
+	if (strlen(jtp->shortcut) > 119)
+	    jtp->shortcut[119] = '\0';
+	strcpy(buf, jtp->shortcut);
+    }
+
+    ShortcutTotal = (jtp->history ? HTList_count(jtp->history) : 0);
+    if (jump_buffer && *buf) {
+	recall = ((ShortcutTotal > 1) ? RECALL_URL : NORECALL);
+	ShortcutNum = 0;
+	FirstShortcutRecall = FALSE;
+    } else {
+	recall = ((ShortcutTotal >= 1) ? RECALL_URL : NORECALL);
+	ShortcutNum = ShortcutTotal;
+	FirstShortcutRecall = TRUE;
+    }
+
+    statusline(jtp->msg);
+    if ((ch = LYgetstr(buf, VISIBLE, (sizeof(buf) - 4), recall)) < 0) {
+	/*
+	 * User cancelled the Jump via ^G. - FM
+	 */
+	HTInfoMsg(CANCELLED);
+	return NULL;
+    }
+
+  check_recall:
+    bp = buf;
+    if (TOUPPER(key) == 'G' && strncmp(buf, "o ", 2) == 0)
+	bp++;
+    bp = LYSkipBlanks(bp);
+    if (*bp == '\0' &&
+	!(recall && (ch == UPARROW || ch == DNARROW))) {
+	/*
+	 * User cancelled the Jump via a zero-length string. - FM
+	 */
+	*buf = '\0';
+	StrAllocCopy(jtp->shortcut, buf);
+	HTInfoMsg(CANCELLED);
+	return NULL;
+    }
+#ifdef PERMIT_GOTO_FROM_JUMP
+    if (strchr(bp, ':') || strchr(bp, '/')) {
+	char *temp = NULL;
+
+	LYJumpFileURL = FALSE;
+	if (no_goto) {
+	    *buf = '\0';
+	    StrAllocCopy(jtp->shortcut, buf);
+	    HTUserMsg(RANDOM_URL_DISALLOWED);
+	    return NULL;
+	}
+	sprintf(buf, "Go %.*s", (int) sizeof(buf) - 4, bp);
+	return (bp = buf);
+    }
+#endif /* PERMIT_GOTO_FROM_JUMP */
+
+    if (recall && ch == UPARROW) {
+	if (FirstShortcutRecall) {
+	    /*
+	     * Use last Shortcut in the list. - FM
+	     */
+	    FirstShortcutRecall = FALSE;
+	    ShortcutNum = 0;
+	} else {
+	    /*
+	     * Go back to the previous Shortcut in the list. - FM
+	     */
+	    ShortcutNum++;
+	}
+	if (ShortcutNum >= ShortcutTotal)
+	    /*
+	     * Roll around to the last Shortcut in the list. - FM
+	     */
+	    ShortcutNum = 0;
+	if ((cp = (char *) HTList_objectAt(jtp->history,
+					   ShortcutNum)) != NULL) {
+	    LYstrncpy(buf, cp, sizeof(buf) - 1);
+	    if (jump_buffer && jtp->shortcut &&
+		!strcmp(buf, jtp->shortcut)) {
+		_statusline(EDIT_CURRENT_SHORTCUT);
+	    } else if ((jump_buffer && ShortcutTotal == 2) ||
+		       (!jump_buffer && ShortcutTotal == 1)) {
+		_statusline(EDIT_THE_PREV_SHORTCUT);
+	    } else {
+		_statusline(EDIT_A_PREV_SHORTCUT);
+	    }
+	    if ((ch = LYgetstr(buf, VISIBLE,
+			       sizeof(buf), recall)) < 0) {
+		/*
+		 * User cancelled the jump via ^G.
+		 */
+		HTInfoMsg(CANCELLED);
+		return NULL;
+	    }
+	    goto check_recall;
+	}
+    } else if (recall && ch == DNARROW) {
+	if (FirstShortcutRecall) {
+	    /*
+	     * Use the first Shortcut in the list. - FM
+	     */
+	    FirstShortcutRecall = FALSE;
+	    ShortcutNum = ShortcutTotal - 1;
+	} else {
+	    /*
+	     * Advance to the next Shortcut in the list. - FM
+	     */
+	    ShortcutNum--;
+	}
+	if (ShortcutNum < 0)
+	    /*
+	     * Roll around to the first Shortcut in the list. - FM
+	     */
+	    ShortcutNum = ShortcutTotal - 1;
+	if ((cp = (char *) HTList_objectAt(jtp->history,
+					   ShortcutNum)) != NULL) {
+	    LYstrncpy(buf, cp, sizeof(buf) - 1);
+	    if (jump_buffer && jtp->shortcut &&
+		!strcmp(buf, jtp->shortcut)) {
+		_statusline(EDIT_CURRENT_SHORTCUT);
+	    } else if ((jump_buffer && ShortcutTotal == 2) ||
+		       (!jump_buffer && ShortcutTotal == 1)) {
+		_statusline(EDIT_THE_PREV_SHORTCUT);
+	    } else {
+		_statusline(EDIT_A_PREV_SHORTCUT);
+	    }
+	    if ((ch = LYgetstr(buf, VISIBLE, sizeof(buf), recall)) < 0) {
+		/*
+		 * User cancelled the jump via ^G.
+		 */
+		HTInfoMsg(CANCELLED);
+		return NULL;
+	    }
+	    goto check_recall;
+	}
+    }
+
+    seeking.key = bp;
+    found = (JumpDatum *) bsearch((char *) &seeking, (char *) jtp->table,
+				  jtp->nel, sizeof(JumpDatum), LYCompare);
+    if (!found) {
+	user_message("Unknown target '%s'", buf);
+	LYSleepAlert();
+    }
+
+    StrAllocCopy(jtp->shortcut, bp);
+    LYAddJumpShortcut(jtp->history, jtp->shortcut);
+    return found ? found->url : NULL;
+}
+
+static unsigned LYRead_Jumpfile(struct JumpTable *jtp)
+{
+    struct stat st;
+    unsigned int nel;
+    char *mp;
+    int fd;
+
+#ifdef VMS
+    FILE *fp;
+    BOOL IsStream_LF = TRUE;
+#endif /* VMS */
+    char *cp;
+    unsigned i;
+
+    if (isEmpty(jtp->file))
+	return 0;
+
+    CTRACE((tfp, "Read Jumpfile %s\n", jtp->file));
+    if (stat(jtp->file, &st) < 0) {
+	HTAlert(CANNOT_LOCATE_JUMP_FILE);
+	return 0;
+    }
+
+    /* allocate storage to read entire file */
+    if ((mp = typecallocn(char, st.st_size + 1)) == NULL) {
+	HTAlert(OUTOF_MEM_FOR_JUMP_FILE);
+	return 0;
+    }
+#ifdef VMS
+    if (st.st_fab_rfm != (char) FAB$C_STMLF) {
+	/** It's a record-oriented file. **/
+	IsStream_LF = FALSE;
+	if ((fp = fopen(jtp->file, "r", "mbc=32")) == NULL) {
+	    HTAlert(CANNOT_OPEN_JUMP_FILE);
+	    FREE(mp);
+	    return 0;
+	}
+    } else if ((fd = open(jtp->file, O_RDONLY, "mbc=32")) < 0)
+#else
+    if ((fd = open(jtp->file, O_RDONLY)) < 0)
+#endif /* VMS */
+    {
+	HTAlert(CANNOT_OPEN_JUMP_FILE);
+	FREE(mp);
+	return 0;
+    }
+#ifdef VMS
+    if (IsStream_LF) {
+    /** Handle as a stream. **/
+#endif /* VMS */
+	if (read(fd, mp, st.st_size) < st.st_size) {
+	    HTAlert(ERROR_READING_JUMP_FILE);
+	    FREE(mp);
+	    return 0;
+	}
+	mp[st.st_size] = '\0';
+	close(fd);
+#ifdef VMS
+    } else {
+	/** Handle as a series of records. **/
+	if (fgets(mp, 1024, fp) == NULL) {
+	    HTAlert(ERROR_READING_JUMP_FILE);
+	    FREE(mp);
+	    return 0;
+	} else
+	    while (fgets(mp + strlen(mp), 1024, fp) != NULL) {
+		;
+	    }
+	LYCloseInput(fp);
+    }
+#endif /* VMS */
+
+    /* quick scan for approximate number of entries */
+    nel = 0;
+    cp = mp;
+    while ((cp = strchr(cp, '\n')) != NULL) {
+	nel++;
+	cp++;
+    }
+
+    jtp->table = (JumpDatum *) malloc(nel * sizeof(JumpDatum));
+    if (jtp->table == NULL) {
+	HTAlert(OUTOF_MEM_FOR_JUMP_TABLE);
+	FREE(mp);
+	return 0;
+    }
+
+    cp = jtp->mp = mp;
+    for (i = 0; i < nel;) {
+	if (strncmp(cp, "<!--", 4) == 0 || strncmp(cp, "<dl>", 4) == 0) {
+	    cp = strchr(cp, '\n');
+	    if (cp == NULL)
+		break;
+	    cp++;
+	    continue;
+	}
+	cp = LYstrstr(cp, "<dt>");
+	if (cp == NULL)
+	    break;
+	cp += 4;
+	jtp->table[i].key = cp;
+	cp = LYstrstr(cp, "<dd>");
+	if (cp == NULL)
+	    break;
+	*cp = '\0';
+	cp += 4;
+	cp = LYstrstr(cp, "href=\"");
+	if (cp == NULL)
+	    break;
+	cp += 6;
+	jtp->table[i].url = cp;
+	cp = strchr(cp, '"');
+	if (cp == NULL)
+	    break;
+	*cp = '\0';
+	cp++;
+	cp = strchr(cp, '\n');
+	if (cp == NULL)
+	    break;
+	cp++;
+	CTRACE((tfp, "Read jumpfile[%d] key='%s', url='%s'\n",
+		i, jtp->table[i].key, jtp->table[i].url));
+	i++;
+	if (!cp)
+	    break;
+    }
+
+    return i;
+}
+
+static int LYCompare(const void *e1, const void *e2)
+{
+    return strcasecomp(((const JumpDatum *) e1)->key,
+		       ((const JumpDatum *) e2)->key);
+}
+@
+
+
+1.1.109.1
+log
+@Lynx 2.8.6dev.11h (pre-patch) minus
+* lib
+* po
+* scripts
+@
+text
+@@
+
+
+1.1.109.2
+log
+@Import new Lynx snapshot
+@
+text
+@d478 1
+a478 1
+	CTRACE((tfp, "Read jumpfile[%u] key='%s', url='%s'\n",
+@
+
+
+1.1.109.3
+log
+@Import Lynx 2.8.7dev.11a via eMail from Tom Dickey:
+Message-ID: <20081215010313.GA8373@@invisible-island.net>
+Message-ID: <20081216012408.GA15364@@invisible-island.net>
+@
+text
+@a0 3
+/*
+ * $LynxId: LYJump.c,v 1.33 2008/12/07 22:13:37 tom Exp $
+ */
+a365 1
+    int blocksize = 1024;
+d418 1
+a418 1
+	if (fgets(mp, blocksize, fp) == NULL) {
+d423 1
+a423 1
+	    while (fgets(mp + strlen(mp), blocksize, fp) != NULL) {
+@
+
+
+1.1.109.4
+log
+@Woohoo, there’s a new Lynx release!
+@
+text
+@d2 1
+a2 1
+ * $LynxId: LYJump.c,v 1.34 2009/01/01 22:41:04 tom Exp $
+d386 1
+a386 1
+    if ((mp = typecallocn(char, (size_t) st.st_size + 1)) == NULL) {
+d412 1
+a412 1
+	if (read(fd, mp, (size_t) st.st_size) < st.st_size) {
+@
+
+
+1.1.109.5
+log
+@Import lynx-current
+@
+text
+@d2 1
+a2 1
+ * $LynxId: LYJump.c,v 1.39 2010/09/25 11:19:37 tom Exp $
+a91 2
+    assert(jtp != NULL);
+
+a152 3
+
+	assert(jtp != NULL);
+
+d228 1
+a228 1
+    if ((ch = LYGetStr(buf, VISIBLE, (sizeof(buf) - 4), recall)) < 0) {
+d238 1
+a238 1
+    if (TOUPPER(key) == 'G' && StrNCmp(buf, "o ", 2) == 0)
+d287 1
+a287 1
+	    LYStrNCpy(buf, cp, sizeof(buf) - 1);
+d297 1
+a297 1
+	    if ((ch = LYGetStr(buf, VISIBLE,
+d327 1
+a327 1
+	    LYStrNCpy(buf, cp, sizeof(buf) - 1);
+d337 1
+a337 1
+	    if ((ch = LYGetStr(buf, VISIBLE, sizeof(buf), recall)) < 0) {
+d350 1
+a350 1
+				  (size_t) jtp->nel, sizeof(JumpDatum), LYCompare);
+d451 1
+a451 1
+	if (StrNCmp(cp, "<!--", 4) == 0 || StrNCmp(cp, "<dl>", 4) == 0) {
+@
+
+
+1.1.109.6
+log
+@Import Lynx 2.8.8dev.10 plus dev.10a patch from invisible-island plus
+fix for “lynx -help” output by KIHARA Hideto, by import-3rdpty,v 1.43
+@
+text
+@d2 1
+a2 1
+ * $LynxId: LYJump.c,v 1.43 2012/02/09 13:02:30 tom Exp $
+a183 2
+    static bstring *buf = NULL;
+
+d186 1
+d213 6
+a218 9
+    if (!jump_buffer || isEmpty(jtp->shortcut)) {
+	BStrCopy0(buf, "");
+    } else if (non_empty(jtp->shortcut)) {
+	size_t len = (size_t) BStrLen(buf);
+
+	if (strlen(jtp->shortcut) > len) {
+	    jtp->shortcut[len] = '\0';
+	    BStrCopy0(buf, jtp->shortcut);
+	}
+d222 1
+a222 1
+    if (jump_buffer && !isBEmpty(buf)) {
+d233 1
+a233 1
+    if ((ch = LYgetBString(&buf, VISIBLE, 0, recall)) < 0) {
+d242 2
+a243 2
+    bp = buf->str;
+    if (TOUPPER(key) == 'G' && StrNCmp(buf->str, "o ", 2) == 0)
+d251 2
+a252 2
+	BStrCopy0(buf, "");
+	StrAllocCopy(jtp->shortcut, buf->str);
+d262 2
+a263 2
+	    BStrCopy0(buf, "");
+	    StrAllocCopy(jtp->shortcut, buf->str);
+d267 2
+a268 4
+	HTSprintf0(&temp, "Go %s", bp);
+	BStrCopy0(buf, temp);
+	FREE(temp);
+	return (bp = buf->str);
+d292 1
+a292 1
+	    BStrCopy0(buf, cp);
+d294 1
+a294 1
+		!strcmp(buf->str, jtp->shortcut)) {
+d302 2
+a303 1
+	    if ((ch = LYgetBString(&buf, VISIBLE, 0, recall)) < 0) {
+d332 1
+a332 1
+	    BStrCopy0(buf, cp);
+d334 1
+a334 1
+		!strcmp(buf->str, jtp->shortcut)) {
+d342 1
+a342 1
+	    if ((ch = LYgetBString(&buf, VISIBLE, 0, recall)) < 0) {
+d357 1
+a357 1
+	user_message("Unknown target '%s'", buf->str);
+d447 1
+a447 1
+    jtp->table = (JumpDatum *) malloc((nel + 1) * sizeof(JumpDatum));
+@
+
+
+1.1.109.7
+log
+@Update to the latest Lynx patchkit
+@
+text
+@d2 1
+a2 1
+ * $LynxId: LYJump.c,v 1.45 2013/01/05 00:28:46 tom Exp $
+a424 1
+	    close(fd);
+a434 1
+	    close(fd);
+d436 1
+a436 1
+	} else {
+a439 1
+	}
+a440 1
+	close(fd);
+d495 2
+@
+
+

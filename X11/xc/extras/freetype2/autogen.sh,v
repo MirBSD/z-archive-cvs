@@ -1,0 +1,492 @@
+head	1.4;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype:1.1.115;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2017.04.15.19.19.58;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10058F2723111C7BEE2;
+
+1.3
+date	2013.08.06.19.46.22;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100520152445E05B912;
+
+1.2
+date	2008.02.26.20.04.08;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	10047C470A72A1E13CE;
+
+1.1
+date	2006.06.29.18.36.34;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10044A41DBD6368BED5;
+
+1.1.1.1
+date	2008.02.26.19.51.43;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.115.1
+date	2006.06.29.18.36.34;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.2
+date	2013.08.06.19.12.09;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.3
+date	2017.04.15.15.41.44;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.4
+log
+@first cut at a quickmerge
+@
+text
+@#!/bin/sh
+
+# Copyright 2005-2016 by
+# David Turner, Robert Wilhelm, and Werner Lemberg.
+#
+# This file is part of the FreeType project, and may only be used, modified,
+# and distributed under the terms of the FreeType project license,
+# LICENSE.TXT.  By continuing to use, modify, or distribute this file you
+# indicate that you have read the license and understand and accept it
+# fully.
+
+run ()
+{
+  echo "running \`$*'"
+  eval $*
+
+  if test $? != 0 ; then
+    echo "error while running \`$*'"
+    exit 1
+  fi
+}
+
+get_major_version ()
+{
+  echo $1 | sed -e 's/\([0-9][0-9]*\)\..*/\1/g'
+}
+
+get_minor_version ()
+{
+  echo $1 | sed -e 's/[0-9][0-9]*\.\([0-9][0-9]*\).*/\1/g'
+}
+
+get_patch_version ()
+{
+  # tricky: some version numbers don't include a patch
+  # separated with a point, but something like 1.4-p6
+  patch=`echo $1 | sed -e 's/[0-9][0-9]*\.[0-9][0-9]*\.\([0-9][0-9]*\).*/\1/g'`
+  if test "$patch" = "$1"; then
+    patch=`echo $1 | sed -e 's/[0-9][0-9]*\.[0-9][0-9]*\-p\([0-9][0-9]*\).*/\1/g'`
+    # if there isn't any patch number, default to 0
+    if test "$patch" = "$1"; then
+      patch=0
+    fi
+  fi
+  echo $patch
+}
+
+# $1: version to check
+# $2: minimum version
+
+compare_to_minimum_version ()
+{
+  MAJOR1=`get_major_version $1`
+  MAJOR2=`get_major_version $2`
+  if test $MAJOR1 -lt $MAJOR2; then
+    echo 0
+    return
+  else
+    if test $MAJOR1 -gt $MAJOR2; then
+      echo 1
+      return
+    fi
+  fi
+
+  MINOR1=`get_minor_version $1`
+  MINOR2=`get_minor_version $2`
+  if test $MINOR1 -lt $MINOR2; then
+    echo 0
+    return
+  else
+    if test $MINOR1 -gt $MINOR2; then
+      echo 1
+      return
+    fi
+  fi
+
+  PATCH1=`get_patch_version $1`
+  PATCH2=`get_patch_version $2`
+  if test $PATCH1 -lt $PATCH2; then
+    echo 0
+  else
+    echo 1
+  fi
+}
+
+# check the version of a given tool against a minimum version number
+#
+# $1: tool path
+# $2: tool usual name (e.g. `aclocal')
+# $3: tool variable  (e.g. `ACLOCAL')
+# $4: minimum version to check against
+# $5: option field index used to extract the tool version from the
+#     output of --version
+
+check_tool_version ()
+{
+  field=$5
+  # assume the output of "[TOOL] --version" is "toolname (GNU toolname foo bar) version"
+  if test "$field"x = x; then
+    field=3  # default to 3 for all GNU autotools, after filtering enclosed string
+  fi
+  version=`$1 --version | head -1 | sed 's/([^)]*)/()/g' | cut -d ' ' -f $field`
+  version_check=`compare_to_minimum_version $version $4`
+  if test "$version_check"x = 0x; then
+    echo "ERROR: Your version of the \`$2' tool is too old."
+    echo "       Minimum version $4 is required (yours is version $version)."
+    echo "       Please upgrade or use the $3 variable to point to a more recent one."
+    echo ""
+    exit 1
+  fi
+}
+
+if test ! -f ./builds/unix/configure.raw; then
+  echo "You must be in the same directory as \`autogen.sh'."
+  echo "Bootstrapping doesn't work if srcdir != builddir."
+  exit 1
+fi
+
+# On MacOS X, the GNU libtool is named `glibtool'.
+HOSTOS=`uname`
+if test "$LIBTOOLIZE"x != x; then
+  :
+elif test "$HOSTOS"x = Darwinx; then
+  LIBTOOLIZE=glibtoolize
+else
+  LIBTOOLIZE=libtoolize
+fi
+
+if test "$ACLOCAL"x = x; then
+  ACLOCAL=aclocal
+fi
+
+if test "$AUTOCONF"x = x; then
+  AUTOCONF=autoconf
+fi
+
+check_tool_version $ACLOCAL    aclocal    ACLOCAL    1.10.1
+check_tool_version $LIBTOOLIZE libtoolize LIBTOOLIZE 2.2.4
+check_tool_version $AUTOCONF   autoconf   AUTOCONF   2.62
+
+# This sets freetype_major, freetype_minor, and freetype_patch.
+eval `sed -nf version.sed include/freetype/freetype.h`
+
+# We set freetype-patch to an empty value if it is zero.
+if test "$freetype_patch" = ".0"; then
+  freetype_patch=
+fi
+
+cd builds/unix
+
+echo "generating \`configure.ac'"
+sed -e "s;@@VERSION@@;$freetype_major$freetype_minor$freetype_patch;" \
+  < configure.raw > configure.ac
+
+run aclocal -I . --force
+run $LIBTOOLIZE --force --copy --install
+run autoconf --force
+
+chmod +x install-sh
+
+cd ../..
+
+chmod +x ./configure
+
+# EOF
+@
+
+
+1.3
+log
+@fastmerge
+@
+text
+@d3 1
+a3 1
+# Copyright 2005, 2006, 2007, 2008, 2009, 2010 by
+d58 1
+a58 1
+  else 
+d70 1
+a70 1
+  else 
+d121 3
+a123 2
+LIBTOOLIZE=libtoolize
+if test "$HOSTOS"x = Darwinx; then
+d125 2
+a158 1
+chmod +x mkinstalldirs
+@
+
+
+1.2
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d3 1
+a3 1
+# Copyright 2005, 2006, 2007 by
+d23 90
+d119 19
+d150 1
+a150 8
+    < configure.raw > configure.ac
+
+# On MacOS X, the GNU libtool is named `glibtool'.
+HOSTOS=`uname`
+LIBTOOLIZE=libtoolize
+if test "$HOSTOS"x = Darwinx; then
+  LIBTOOLIZE=glibtoolize
+fi
+d153 1
+a153 1
+run $LIBTOOLIZE --force --copy
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d3 1
+a3 1
+# Copyright 2005, 2006 by
+d43 7
+d51 1
+a51 1
+run libtoolize --force --copy
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d3 1
+a3 1
+# Copyright 2005, 2006, 2007 by
+a42 7
+# On MacOS X, the GNU libtool is named `glibtool'.
+HOSTOS=`uname`
+LIBTOOLIZE=libtoolize
+if test "$HOSTOS"x = Darwinx; then
+  LIBTOOLIZE=glibtoolize
+fi
+
+d44 1
+a44 1
+run $LIBTOOLIZE --force --copy
+@
+
+
+1.1.115.1
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@@
+
+
+1.1.115.2
+log
+@we need newer freetype for advance calculation
+@
+text
+@d3 1
+a3 1
+# Copyright 2005, 2006, 2007, 2008, 2009, 2010 by
+a22 90
+get_major_version ()
+{
+  echo $1 | sed -e 's/\([0-9][0-9]*\)\..*/\1/g'
+}
+
+get_minor_version ()
+{
+  echo $1 | sed -e 's/[0-9][0-9]*\.\([0-9][0-9]*\).*/\1/g'
+}
+
+get_patch_version ()
+{
+  # tricky: some version numbers don't include a patch
+  # separated with a point, but something like 1.4-p6
+  patch=`echo $1 | sed -e 's/[0-9][0-9]*\.[0-9][0-9]*\.\([0-9][0-9]*\).*/\1/g'`
+  if test "$patch" = "$1"; then
+    patch=`echo $1 | sed -e 's/[0-9][0-9]*\.[0-9][0-9]*\-p\([0-9][0-9]*\).*/\1/g'`
+    # if there isn't any patch number, default to 0
+    if test "$patch" = "$1"; then
+      patch=0
+    fi
+  fi
+  echo $patch
+}
+
+# $1: version to check
+# $2: minimum version
+
+compare_to_minimum_version ()
+{
+  MAJOR1=`get_major_version $1`
+  MAJOR2=`get_major_version $2`
+  if test $MAJOR1 -lt $MAJOR2; then
+    echo 0
+    return
+  else 
+    if test $MAJOR1 -gt $MAJOR2; then
+      echo 1
+      return
+    fi
+  fi
+
+  MINOR1=`get_minor_version $1`
+  MINOR2=`get_minor_version $2`
+  if test $MINOR1 -lt $MINOR2; then
+    echo 0
+    return
+  else 
+    if test $MINOR1 -gt $MINOR2; then
+      echo 1
+      return
+    fi
+  fi
+
+  PATCH1=`get_patch_version $1`
+  PATCH2=`get_patch_version $2`
+  if test $PATCH1 -lt $PATCH2; then
+    echo 0
+  else
+    echo 1
+  fi
+}
+
+# check the version of a given tool against a minimum version number
+#
+# $1: tool path
+# $2: tool usual name (e.g. `aclocal')
+# $3: tool variable  (e.g. `ACLOCAL')
+# $4: minimum version to check against
+# $5: option field index used to extract the tool version from the
+#     output of --version
+
+check_tool_version ()
+{
+  field=$5
+  # assume the output of "[TOOL] --version" is "toolname (GNU toolname foo bar) version"
+  if test "$field"x = x; then
+    field=3  # default to 3 for all GNU autotools, after filtering enclosed string
+  fi
+  version=`$1 --version | head -1 | sed 's/([^)]*)/()/g' | cut -d ' ' -f $field`
+  version_check=`compare_to_minimum_version $version $4`
+  if test "$version_check"x = 0x; then
+    echo "ERROR: Your version of the \`$2' tool is too old."
+    echo "       Minimum version $4 is required (yours is version $version)."
+    echo "       Please upgrade or use the $3 variable to point to a more recent one."
+    echo ""
+    exit 1
+  fi
+}
+
+a28 19
+# On MacOS X, the GNU libtool is named `glibtool'.
+HOSTOS=`uname`
+LIBTOOLIZE=libtoolize
+if test "$HOSTOS"x = Darwinx; then
+  LIBTOOLIZE=glibtoolize
+fi
+
+if test "$ACLOCAL"x = x; then
+  ACLOCAL=aclocal
+fi
+
+if test "$AUTOCONF"x = x; then
+  AUTOCONF=autoconf
+fi
+
+check_tool_version $ACLOCAL    aclocal    ACLOCAL    1.10.1
+check_tool_version $LIBTOOLIZE libtoolize LIBTOOLIZE 2.2.4
+check_tool_version $AUTOCONF   autoconf   AUTOCONF   2.62
+
+d41 1
+a41 1
+  < configure.raw > configure.ac
+d44 1
+a44 1
+run $LIBTOOLIZE --force --copy --install
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d3 1
+a3 1
+# Copyright 2005-2016 by
+d58 1
+a58 1
+  else
+d70 1
+a70 1
+  else
+d121 2
+a122 3
+if test "$LIBTOOLIZE"x != x; then
+  :
+elif test "$HOSTOS"x = Darwinx; then
+a123 2
+else
+  LIBTOOLIZE=libtoolize
+d156 1
+@
+
+

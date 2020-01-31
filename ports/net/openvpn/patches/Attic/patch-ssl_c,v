@@ -1,0 +1,162 @@
+head	1.4;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2015.07.19.18.48.55;	author tg;	state dead;
+branches;
+next	1.3;
+commitid	10055ABF11C1F495374;
+
+1.3
+date	2010.09.21.21.23.56;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C992261692DCA0F;
+
+1.2
+date	2006.08.18.18.05.50;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044E6018100C580D3;
+
+1.1
+date	2006.02.21.19.48.16;	author tg;	state Exp;
+branches;
+next	;
+commitid	10043FB6DF81E8040F6;
+
+
+desc
+@@
+
+
+1.4
+log
+@new OpenVPN; modulo HMAC errors thrown on server side…
+@
+text
+@$MirOS: ports/net/openvpn/patches/patch-ssl_c,v 1.3 2010/09/21 21:23:56 tg Exp $
+
+same patch as with openssh - push back randomness found
+by exchanging keys with server into kernel entropy pool
+
+--- ssl.c.orig	Tue Dec 13 17:09:39 2005
++++ ssl.c	Tue Sep 21 18:48:11 2010
+@@@@ -2228,6 +2228,19 @@@@ key_source2_read (struct key_source2 *k2
+   if (!buf_read (buf, k->random2, sizeof (k->random2)))
+     return 0;
+ 
++#if HAVE_ARC4RANDOM_PUSHB_FAST
++  arc4random_pushb_fast(&now, sizeof(now));
++  arc4random_pushb_fast(&buf, sizeof(buf));
++  arc4random_pushb_fast(k, sizeof(struct key_source));
++#elif HAVE_ARC4RANDOM_PUSH
++  {
++    int j, kv = (int)now + (int)buf;
++    for (j = 0; j < sizeof (struct key_source); ++j)
++      kv ^= ((uint8_t *)k)[j] << ((j & 3) << 3);
++    arc4random_push(kv);
++  }
++#endif
++
+   return 1;
+ }
+ 
+@@@@ -2531,6 +2544,19 @@@@ key_method_1_read (struct buffer *buf, s
+ 	   "TLS Error: Error reading data channel key from plaintext buffer");
+       goto error;
+     }
++
++#if HAVE_ARC4RANDOM_PUSHB
++  arc4random_pushb_fast(&now, sizeof(now));
++  arc4random_pushb_fast(&buf, sizeof(buf));
++  arc4random_pushb_fast(&key, sizeof(key));
++#elif HAVE_ARC4RANDOM_PUSH
++  {
++    int j, kv = (int)now + (int)buf;
++    for (j = 0; j < sizeof (key); ++j)
++      kv ^= ((uint8_t *)&key)[j] << ((j & 3) << 3);
++    arc4random_push(kv);
++  }
++#endif
+ 
+   if (!check_key (&key, &session->opt->key_type))
+     {
+@
+
+
+1.3
+log
+@use arc4random() a bit more efficiently
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/openvpn/patches/patch-ssl_c,v 1.2 2006/08/18 18:05:50 tg Exp $
+@
+
+
+1.2
+log
+@simplify and speed up by using arc4random_pushb and update a comment
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/openvpn/patches/patch-ssl_c,v 1.1 2006/02/21 19:48:16 tg Exp $
+d7 2
+a8 2
++++ ssl.c	Fri Aug 18 17:46:14 2006
+@@@@ -2228,6 +2228,18 @@@@ key_source2_read (struct key_source2 *k2
+d12 4
+a15 3
++#if HAVE_ARC4RANDOM_PUSHB
++  arc4random_push((int)now + (int)buf);
++  arc4random_pushb(k, sizeof (struct key_source));
+d28 1
+a28 1
+@@@@ -2531,6 +2543,18 @@@@ key_method_1_read (struct buffer *buf, s
+d34 3
+a36 2
++  arc4random_push((int)now + (int)buf);
++  arc4random_pushb(&key, sizeof (key));
+@
+
+
+1.1
+log
+@* patch-configure_ac: check for arc4random(3), arc4random_push(3)
+* patch-crypto_{c,h}: use arc4random(3) if available, for PRNG
+* patch-ssl_c: if arc4random_push(3) MirOS extension is available,
+  mimic recent ssh(1)/sshd(8) patches and push back randomness
+  gained by kex with the peer (tls, both methods) - sadly cannot
+  use pings, neither does preshared keys help
+* patch-tun_c: reduce diffs while here
+* Makefile: bump
+
+checked to run against thorvpn (not patched)
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d6 3
+a8 3
+--- ssl.c.orig	Tue Feb 21 18:42:25 2006
++++ ssl.c	Tue Feb 21 19:29:37 2006
+@@@@ -2228,6 +2228,15 @@@@ key_source2_read (struct key_source2 *k2
+d12 4
+a15 1
++#if HAVE_ARC4RANDOM_PUSH
+d27 1
+a27 1
+@@@@ -2531,6 +2540,15 @@@@ key_method_1_read (struct buffer *buf, s
+d32 4
+a35 1
++#if HAVE_ARC4RANDOM_PUSH
+@
+

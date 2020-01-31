@@ -1,0 +1,346 @@
+head	1.7;
+access;
+symbols
+	MIRBSD_10:1.6.0.2
+	MIRBSD_10_BASE:1.6
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200509212000:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.7
+date	2008.08.01.23.50.01;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004893A1383FC8DFE5;
+
+1.6
+date	2007.02.06.23.33.22;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10045C90F193C3DFE53;
+
+1.5
+date	2007.02.06.23.07.31;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10045C9096C0D13B82B;
+
+1.4
+date	2007.02.01.23.43.29;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10045C27A5403C6060F;
+
+1.3
+date	2007.01.22.16.44.25;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10045B4E9A2570E493F;
+
+1.2
+date	2006.06.02.02.29.53;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100447FA28346FF91C0;
+
+1.1
+date	2005.09.21.20.34.25;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+commitid	20cd4331c3c732a2;
+
+1.1.1.1
+date	2005.09.21.20.34.25;	author tg;	state Exp;
+branches;
+next	;
+commitid	20cd4331c3c732a2;
+
+
+desc
+@@
+
+
+1.7
+log
+@experimential transition to optu8to16(3)
+@
+text
+@/* $MirOS: src/lib/libc/stdio/fgetwc.c,v 1.6 2007/02/06 23:33:22 tg Exp $ */
+/* $OpenBSD: fgetwc.c,v 1.1 2005/06/17 20:40:32 espie Exp $	*/
+/* $NetBSD: fgetwc.c,v 1.3 2003/03/07 07:11:36 tshiozak Exp $ */
+
+/*-
+ * Copyright (c) 2007, 2008 Thorsten Glaser
+ * Copyright (c)2001 Citrus Project,
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * $Citrus$
+ */
+
+#include <errno.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <wchar.h>
+#include "local.h"
+
+__RCSID("$MirOS: src/lib/libc/stdio/fgetwc.c,v 1.6 2007/02/06 23:33:22 tg Exp $");
+
+wint_t __fgetwc_unlock(FILE *);
+
+wint_t
+__fgetwc_unlock(FILE *fp)
+{
+	struct wchar_io_data *wcio;
+	mbstate_t *st;
+	wchar_t wc;
+	size_t size;
+
+	_SET_ORIENTATION(fp, 1);
+	wcio = WCIO_GET(fp);
+	if (wcio == 0) {
+		errno = ENOMEM;
+		return WEOF;
+	}
+
+	/* if there're ungetwc'ed wchars, use them */
+	if (wcio->wcio_ungetwc_inbuf) {
+		wc = wcio->wcio_ungetwc_buf[--wcio->wcio_ungetwc_inbuf];
+
+		return wc;
+	}
+
+	st = &wcio->wcio_mbstate_in;
+
+	do {
+		char c;
+		int ch = __sgetc(fp);
+
+		if (ch == EOF) {
+			if (optu8to16(&wc, NULL, 0, st) == 0)
+				return (wc);
+			return WEOF;
+		}
+
+		c = ch;
+		size = optu8to16(&wc, &c, 1, st);
+		if (size == 0) {
+			ungetc(ch, fp);
+			return (wc);
+		}
+	} while (size == (size_t)-2);
+
+	return wc;
+}
+
+wint_t
+fgetwc(FILE *fp)
+{
+	wint_t r;
+
+	flockfile(fp);
+	r = __fgetwc_unlock(fp);
+	funlockfile(fp);
+
+	return (r);
+}
+@
+
+
+1.6
+log
+@use mbsreset() and mbrtowc_rollback()
+XXX ungetc(EOF, fp) is safe, according to SUSv3
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/libc/stdio/fgetwc.c,v 1.5 2007/02/06 23:07:31 tg Exp $ */
+d6 1
+a6 1
+ * Copyright (c) 2007 Thorsten Glaser
+d40 1
+a40 1
+__RCSID("$MirOS: src/lib/libc/stdio/fgetwc.c,v 1.5 2007/02/06 23:07:31 tg Exp $");
+a50 1
+	bool firstc = true;
+d73 2
+d79 4
+a82 10
+		size = mbrtowc(&wc, &c, 1, st);
+		if (size == (size_t)-1) {
+			if (!firstc) {
+				ungetc(ch, fp);
+				ungetc(mbrtowc_rollback(st), fp);
+			}
+			mbsreset(st);
+			fp->_flags |= __SERR;
+			errno = EILSEQ;
+			return WEOF;
+a83 1
+		firstc = false;
+@
+
+
+1.5
+log
+@if we encounter a three-byte sequence, where the first two are
+valid 3-byte multibyte sequence beginning and middle char and
+the last one is not a valid 3-byte multibyte sequence end char,
+do not only ungetc(3) the last but also the middle byte, which
+is won back from the mbstate_t information.
+
+This works because:
+* the encoding is UCS-2 (wide char) and UTF-8 (multibyte)
+* mbstate_t encoding is like we use it
+* non-minimalistic encoding errors are handled as EILSEQ
+* EILSEQ returns without changing mbstate_t *ps argument
+
+Effect: <valid> <valid> <invalid> now yields WEOF WEOF <…>
+instead of WEOF <…> (where <…> is what the invalid char
+starts), therefore, when WEOF+EILSEQ is cought and mapped
+into U+FFFD and retry, giving a more original-like idea
+of how the input looked like.
+
+This rollback could be adapted for UCS-4 + UTF-8, but
+that's outside of my scope.
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d40 1
+a40 1
+__RCSID("$MirOS: src/lib/libc/stdio/fgetwc.c,v 1.4 2007/02/01 23:43:29 tg Exp $");
+d82 1
+a82 2
+				if (st->count == 1 && st->value >= 0x20)
+					ungetc(0x80 | (st->value & 0x3F), fp);
+d84 1
+a84 1
+			st->count = 0;	/* clear mbstate_t */
+@
+
+
+1.4
+log
+@change the code to be not only standards-conforming, but have
+additional functions guarantees:
+* you can mix wide-oriented and byte-oriented I/O functions
+  (XXX really?)
+* if fgetwc(3) and friends return WEOF, set the error indicator
+  and set errno to EILSEQ, input processing can continue. The
+  first byte of the invalid multi-byte sequence is eaten in any
+  case; if there were more than one octet processed, the last
+  one is pushed back so that it can be re-retrieved and at most
+  one multibyte character is lost
+
+the standards say these two are undefined, so why shouldn't we
+be so liberal and define them to something that actually makes
+sense? (I could even implement an unget buffer so that all but
+the first octet are eaten, but that'd slow down I guess.) Code
+in the base system is hereby allowed to use this, and all fol-
+lowing, enhancements to the standards, because MirOS is a core
+oriented "comes as a package" OS and we do not need to require
+our own tools to only use normed functions unless it's made to
+a portable package.
+@
+text
+@d1 2
+a2 1
+/*	$OpenBSD: fgetwc.c,v 1.1 2005/06/17 20:40:32 espie Exp $	*/
+d6 1
+d40 1
+a40 1
+__RCSID("$MirOS: src/lib/libc/stdio/fgetwc.c,v 1.3 2007/01/22 16:44:25 tg Exp $");
+d80 1
+a80 1
+			if (!firstc)
+d82 4
+a85 1
+			memset(st, 0, sizeof (mbstate_t));
+@
+
+
+1.3
+log
+@SUSv3 says to set the error indicator on the stream for encoding
+errors, i.e. EILSEQ. However, it says, the stream position is
+undefined afterwards, so a patch like
++       while (1) {
++               errno = 0;      /* because getwchar() preserves it if no err */
++               ch = getwchar();
++               if (errno == EILSEQ) {
++                       // ungetc(0x80, stdin);
++                       continue;
++               }
++               if (ch == WEOF)
++                       break;
+for col(1) wouldn't work unless we did an ungetc(c)
+before the if (size == (size_t)-1) { line here, or
+uncomment the ungetc above (bad kludge).
+@
+text
+@d33 1
+d38 1
+a38 1
+__RCSID("$MirOS$");
+d49 1
+d78 3
+d85 1
+@
+
+
+1.2
+log
+@__CRAZY cleanliness for most of libc
+not: net/rpc/etc., time, thread, sys
+@
+text
+@d37 2
+d76 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d37 2
+@
+
+
+1.1.1.1
+log
+@Import OpenBSD's libc as of today, minus some of the locale stuff,
+and with brk malloc instead of mmap malloc
+@
+text
+@@

@@ -1,0 +1,303 @@
+head	1.6;
+access;
+symbols
+	mirbsd:1.1.7;
+locks; strict;
+comment	@# @;
+
+
+1.6
+date	2006.03.29.01.32.08;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004429E39748B28C8F;
+
+1.5
+date	2006.03.20.00.22.39;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100441DF5E5030C7ED9;
+
+1.4
+date	2006.03.20.00.16.53;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100441DF48314386FAC;
+
+1.3
+date	2005.12.17.05.46.07;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10043A3A3E65E20A413;
+
+1.2
+date	2005.05.25.23.50.29;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	715c42950f4ccef2;
+
+1.1
+date	2005.02.05.02.36.15;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.02.05.02.36.15;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.6
+log
+@'exit' aborts the whole programme, but we want to use
+'return' which only exits(sic!) the function.
+@
+text
+@#!/bin/mksh
+# $MirOS: contrib/code/heartbeat/hbbackend.sample,v 1.5 2006/03/20 00:22:39 tg Exp $
+#-
+# Copyright (c) 2004, 2006
+#	Thorsten Glaser <tg@@mirbsd.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+# Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+# express, or implied, to the maximum extent permitted by applicable
+# law, without malicious intent or gross negligence; in no event may
+# licensor, an author or contributor be held liable for any indirect
+# or other damage, or direct damage except proven a consequence of a
+# direct error of said person and intended use of this work, loss or
+# other issues arising in any way out of its use, even if advised of
+# the possibility of such damage or existence of a nontrivial bug.
+#-
+# This is a "just log it" example for a backend script to "hbserver"
+# which must be chmod'd +x to work.
+# This framework can be extended to a full-blown backend.
+
+exec >>log
+
+myuser=
+mypass=
+mystat=DOWN
+mydown=
+let thecookie=0
+
+function triggerdown
+{
+	trap 'exit 0' USR1
+	sleep 202 & wait %sleep
+	s="DISABLE TUNNEL $myuser nothing $(date +%s)"
+	sc="$s $mypass"
+	sp="$s $(print -nr -- $sc | md5)"
+	print -n -- "${sp}\0" | nc -4nuw0 127.0.0.1 3740
+	print sending $sp
+}
+
+function do_heartbeat
+{
+	state=$1
+	if [[ -n $mydown ]]; then
+		kill -USR1 $mydown
+		mydown=
+	fi
+	chstate $state
+	triggerdown &
+	mydown=$!
+	mystat=UP
+	do_dnsup &
+}
+
+function do_idle
+{
+	[[ $mystat = UP ]] || return
+	if [[ -n $mydown ]]; then
+		kill -USR1 $mydown
+		mydown=
+	fi
+	triggerdown &
+	mydown=$!
+}
+
+function do_down
+{
+	if [[ -n $mydown ]]; then
+		kill -USR1 $mydown
+		mydown=
+	fi
+	chstate DOWN
+	mystat=DOWN
+}
+
+function chstate
+{
+	state=$1
+	print -n "$(date +"%b %e %T") "
+	case $state {
+	DOWN)
+		print "new state: DOWN"
+		;;
+	IP*)
+		print "new IP: ${state#IP}"
+		;;
+	QUIT)
+		print "new state: QUIT"
+		;;
+	*)
+		print "invalid new state: $state"
+		;;
+	}
+}
+
+function do_dnsup
+{
+	sleep 5
+	print "triggered dnsup" | logger
+}
+
+function do_quit
+{
+	[[ $mystat = UP ]] && do_down
+	chstate QUIT
+	exit 0
+}
+
+
+while read line; do
+	case $line {
+	DOWN)
+		do_down
+		;;
+	IDLE)
+		do_idle
+		;;
+	INIT*)
+		set -A foo -- $line
+		myuser=${foo[1]}
+		mypass=${foo[2]}
+		print "INIT: user=$myuser pass=$mypass"
+		;;
+	IP*)
+		do_heartbeat $line
+		;;
+	PASS)
+		set -A foo -- $line
+		mypass=${foo[1]}
+		print "PASS: user=$myuser pass=$mypass"
+		;;
+	SETCOOKIE*)
+		set -A foo -- $line
+		let thecookie=${foo[1]}
+		print "SETCOOKIE: received $thecookie"
+		;;
+	QUIT)
+		do_quit
+		;;
+	}
+done
+do_quit
+@
+
+
+1.5
+log
+@sort
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.sample,v 1.4 2006/03/20 00:16:53 tg Exp $
+d66 1
+a66 1
+	[[ $mystat = UP ]] || exit
+@
+
+
+1.4
+log
+@add an "action script" capability
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.6 2006/01/24 22:24:02 tg Rel $
+a132 5
+	SETCOOKIE*)
+		set -A foo -- $line
+		let thecookie=${foo[1]}
+		print "SETCOOKIE: received $thecookie"
+		;;
+d141 5
+@
+
+
+1.3
+log
+@big fat licence update (I left some which are bsiegert@@'s alone though)
+also, remove licence boilerplate from some .h files who don't deserve it
+and remove and add some advertising clauses because I say so
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.sample,v 1.2 2005/05/25 23:50:29 tg Exp $
+d4 2
+a5 2
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+d37 1
+d133 5
+@
+
+
+1.2
+log
+@mksh is pretty mature; switch most of contrib/ to it
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbbackend.sample,v 1.1.7.1 2005/02/05 02:36:15 tg Exp $
+d18 8
+a25 7
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+a2 2
+#!/bin/ksh
+# $MirOS$
+@
+
+
+1.1.7.1
+log
+@All the code in the contributed section
+@
+text
+@@

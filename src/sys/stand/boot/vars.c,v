@@ -1,0 +1,536 @@
+head	1.9;
+access;
+symbols
+	tg-use_ldscript:1.8.0.2
+	tg-beforemerge-ksrc10:1.1.1.2
+	cvs-200808011000:1.1.1.2
+	MIRBSD_10:1.4.0.2
+	MIRBSD_10_BASE:1.4
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.9
+date	2018.04.28.02.14.36;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1005AE3D91A742324FF;
+
+1.8
+date	2009.01.14.22.22.43;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	100496E65BC344A5FF9;
+
+1.7
+date	2009.01.14.22.14.59;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100496E63F44F2923FE;
+
+1.6
+date	2008.12.31.16.38.35;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100495BA02136D7BE32;
+
+1.5
+date	2008.08.01.11.25.05;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004892F2924667C00D;
+
+1.4
+date	2007.10.01.21.09.01;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100470162042EA19FE8;
+
+1.3
+date	2007.10.01.20.41.39;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10047015B8902CABF55;
+
+1.2
+date	2006.11.21.02.53.39;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045626A132AE542D0;
+
+1.1
+date	2005.02.05.17.29.15;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.15;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2008.08.01.10.28.38;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004892E54805BE97AB;
+
+
+desc
+@@
+
+
+1.9
+log
+@i386 and documentation part for -D argument to boot
+@
+text
+@/**	$MirOS: src/sys/stand/boot/vars.c,v 1.7 2009/01/14 22:14:59 tg Exp $ */
+/*	$OpenBSD: vars.c,v 1.13 2005/05/24 20:48:35 uwe Exp $	*/
+
+/*
+ * Copyright (c) 1998-2000 Michael Shalayeff
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF MIND, USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */
+
+#include <sys/param.h>
+#include <libsa.h>
+#include <sys/reboot.h>
+#include "cmd.h"
+
+extern char prog_ident[];
+extern int debug;
+
+static int Xaddr(void);
+static int Xdevice(void);
+#ifdef DEBUG
+static int Xdebug(void);
+#endif
+#ifndef SMALL_KERNEL
+static int Xdoboot(void);
+#endif
+static int Ximage(void);
+static int Xhowto(void);
+static int Xtty(void);
+static int Xtimeout(void);
+int Xset(void);
+int Xenv(void);
+
+const struct cmd_table cmd_set[] = {
+	{"addr",   CMDT_VAR, Xaddr},
+	{"howto",  CMDT_VAR, Xhowto},
+#ifdef DEBUG
+	{"debug",  CMDT_VAR, Xdebug},
+#endif
+	{"device", CMDT_VAR, Xdevice},
+#ifndef SMALL_KERNEL
+	{"doboot", CMDT_VAR, Xdoboot},
+#endif
+	{"tty",    CMDT_VAR, Xtty},
+	{"image",  CMDT_VAR, Ximage},
+	{"timeout",CMDT_VAR, Xtimeout},
+	{NULL,0}
+};
+
+#ifdef DEBUG
+static int
+Xdebug(void)
+{
+	if (cmd.argc != 2)
+		printf( "o%s\n", debug? "n": "ff" );
+	else
+		debug = (cmd.argv[1][0] == '0' ||
+			 (cmd.argv[1][0] == 'o' && cmd.argv[1][1] == 'f'))?
+			 0: 1;
+	return 0;
+}
+#endif
+
+static int
+Xtimeout(void)
+{
+	if (cmd.argc != 2)
+		printf( "%d\n", cmd.timeout );
+	else
+		cmd.timeout = (int)strtol( cmd.argv[1], (char **)NULL, 0 );
+	return 0;
+}
+
+/* called only w/ no arguments */
+int
+Xset(void)
+{
+	const struct cmd_table *ct;
+
+	printf("%s\n", prog_ident);
+	for (ct = cmd_set; ct->cmd_name != NULL; ct++) {
+		printf("%s\t ", ct->cmd_name);
+		(*ct->cmd_exec)();
+	}
+	return 0;
+}
+
+static int
+Xdevice(void)
+{
+	if (cmd.argc != 2)
+		printf("%s\n", cmd.bootdev);
+	else {
+		memcpy(cmd.bootdev, cmd.argv[1], BOOTDEVLEN);
+		cmd.bootdev[BOOTDEVLEN - 1] = '\0';
+	}
+	return 0;
+}
+
+static int
+Ximage(void)
+{
+	if (cmd.argc != 2)
+		printf("%s\n", cmd.image);
+	else {
+		char *dp = cmd.image, *ep = dp + sizeof (cmd.image) - 1;
+		const char *sp = cmd.argv[1];
+
+		while (*sp && dp < ep)
+			if (*sp != '@@')
+				*dp++ = *sp++;
+			else {
+				memcpy(dp, MACHINE, sizeof (MACHINE));
+				while (*dp)
+					++dp;
+				++sp;
+			}
+		*dp = '\0';
+	}
+	return 0;
+}
+
+static int
+Xaddr(void)
+{
+	if (cmd.argc != 2)
+		printf("%p\n", cmd.addr);
+	else
+		cmd.addr = (void *)strtol(cmd.argv[1], NULL, 0);
+	return 0;
+}
+
+static int
+Xtty(void)
+{
+	dev_t dev;
+
+	if (cmd.argc != 2)
+		printf("%s\n", ttyname(0));
+	else {
+		dev = ttydev(cmd.argv[1]);
+		if (dev == NODEV)
+			printf("%s not a console device\n", cmd.argv[1]);
+		else {
+			printf("switching console to %s\n", cmd.argv[1]);
+			if (cnset(dev))
+				printf("%s console not present\n",
+				    cmd.argv[1]);
+			else
+				printf("%s\n", prog_ident);
+		}
+	}
+	return 0;
+}
+
+static int
+Xhowto(void)
+{
+	if (cmd.argc == 1) {
+		if (cmd.boothowto) {
+			putchar('-');
+			if (cmd.boothowto & RB_ASKNAME)
+				putchar('a');
+#ifdef notused
+			if (cmd.boothowto & RB_HALT)
+				putchar('b');
+#endif
+			if (cmd.boothowto & RB_CONFIG)
+				putchar('c');
+			if (cmd.boothowto & RB_SINGLE)
+				putchar('s');
+			if (cmd.boothowto & RB_NO_KSYMS)
+				putchar('D');
+			if (cmd.boothowto & RB_KDB)
+				putchar('d');
+		}
+		putchar('\n');
+	} else
+		bootparse(1);
+	return 0;
+}
+
+int
+bootparse(int i)
+{
+	char *cp;
+	int howto = cmd.boothowto;
+
+	for (; i < cmd.argc; i++) {
+		cp = cmd.argv[i];
+		if (*cp == '-') {
+			while (*++cp) {
+				switch (*cp) {
+				case 'a':
+					howto |= RB_ASKNAME;
+					break;
+#ifdef notused
+	/*
+	 * one day i get the same nice drink i was having
+	 * and figure out what is it supposed to be used for
+	 */
+				case 'b':
+					howto |= RB_HALT;
+					break;
+#endif
+				case 'c':
+					howto |= RB_CONFIG;
+					break;
+				case 's':
+					howto |= RB_SINGLE;
+					break;
+				case 'D':
+					howto |= RB_NO_KSYMS;
+					break;
+				case 'd':
+					howto |= RB_KDB;
+					break;
+				default:
+					printf("howto: bad option: %c\n", *cp);
+					return 1;
+				}
+			}
+		} else {
+			printf("boot: illegal argument %s\n", cmd.argv[i]);
+			return 1;
+		}
+	}
+	cmd.boothowto = howto;
+	return 0;
+}
+
+#ifndef SMALL_BOOT
+/*
+ * maintain environment as a sequence of '\n' separated
+ * variable definitions in the form <name>=[<value>]
+ * terminated by the usual '\0'
+ */
+char *environ;
+
+int
+Xenv(void)
+{
+	if (cmd.argc == 1) {
+		if (environ)
+			printf("%s", environ);
+		else
+			printf("empty\n");
+	} else {
+		char *p, *q;
+		int l;
+
+		for (p = environ; p && *p; p = q) {
+			l = strlen(cmd.argv[1]);
+			for (q = p; *q != '='; q++)
+				;
+			l = max(l, q - p) + 1;
+			for (q = p; *q != '\n'; q++)
+				;
+			if (*q)
+				q++;
+			if (!strncmp(p, cmd.argv[1], l)) {
+				while((*p++ = *q++))
+					;
+				p--;
+			}
+		}
+		if (!p)
+			p = environ = alloc(4096);
+		snprintf(p, environ + 4096 - p, "%s=%s\n",
+		    cmd.argv[1], (cmd.argc==3?cmd.argv[2]:""));
+	}
+
+	return 0;
+}
+#endif
+
+#ifndef SMALL_KERNEL
+static int
+Xdoboot(void)
+{
+	extern int doboot;
+
+	if (cmd.argc != 2)
+		printf("%d\n", doboot);
+	else
+		doboot = (int)strtol(cmd.argv[1], NULL, 0);
+	return (0);
+}
+#endif
+@
+
+
+1.8
+log
+@get rid of strlcpy here (most things are safe or we sell rope anyway)
+@
+text
+@d192 2
+d232 3
+@
+
+
+1.7
+log
+@ability to disable auto-boot on CR
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/stand/boot/vars.c,v 1.6 2008/12/31 16:38:35 tg Exp $ */
+d113 4
+a116 2
+	else
+		strlcpy(cmd.bootdev, cmd.argv[1], sizeof(cmd.bootdev));
+d133 1
+a133 2
+				strlcpy(dp, MACHINE,
+				    sizeof (cmd.image) - (dp - cmd.image));
+@
+
+
+1.6
+log
+@shrink fdboot, nuke unused junk
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/stand/boot/vars.c,v 1.5 2008/08/01 11:25:05 tg Exp $ */
+d44 3
+d61 3
+d290 14
+@
+
+
+1.5
+log
+@merge and reduce diff to obsd
+XXX not yet tested
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/stand/boot/vars.c,v 1.4 2007/10/01 21:09:01 tg Exp $ */
+d240 1
+d283 1
+@
+
+
+1.4
+log
+@oops
+@
+text
+@d1 2
+a2 2
+/**	$MirOS: src/sys/stand/boot/vars.c,v 1.3 2007/10/01 20:41:39 tg Exp $ */
+/*	$OpenBSD: vars.c,v 1.11 2004/01/29 00:54:08 tom Exp $	*/
+d162 2
+d252 1
+a252 1
+			printf(environ);
+@
+
+
+1.3
+log
+@allow 'set image /v10/@@/bsd' where @@ is replaced by i386 or sparc
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d129 1
+@
+
+
+1.2
+log
+@remove dead and insecure code
+@
+text
+@d1 1
+d117 15
+a131 2
+	else
+		strlcpy(cmd.image, cmd.argv[1], sizeof(cmd.image));
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@a32 1
+#include <lib/libkern/funcs.h>
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@import bootloader-related pieces from openbsd, as first part of the
+aspired 4.4 merge… and something else
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: vars.c,v 1.13 2005/05/24 20:48:35 uwe Exp $	*/
+a147 2
+			else
+				printf("%s\n", prog_ident);
+d236 1
+a236 1
+			printf("%s", environ);
+@
+

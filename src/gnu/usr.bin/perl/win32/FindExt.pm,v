@@ -1,0 +1,228 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	OPENBSD_4_4:1.1.1.2
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200606302200:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200601311430:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2005.02.05.17.24.09;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.09;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.06.30.22.47.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	10044A5A6F7276AA324;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@package FindExt;
+
+our $VERSION = '1.00';
+
+# We (probably) have not got a Config.pm yet 
+BEGIN { $INC{'Config.pm'} = __FILE__ };
+
+use strict;
+use File::Find;
+use File::Basename;
+use Cwd;
+
+my $no = join('|',qw(DynaLoader GDBM_File ODBM_File NDBM_File DB_File
+		     Syslog SysV Langinfo));
+$no = qr/^(?:$no)$/i;
+
+my %ext;
+my $ext;
+sub scan_ext
+{
+ my $here = getcwd();
+ my $dir  = shift;
+ chdir($dir) || die "Cannot cd to $dir\n";
+ ($ext = getcwd()) =~ s,/,\\,g;
+ find(\&find_ext,'.');
+ chdir($here) || die "Cannot cd to $here\n";
+ my @@ext = extensions();
+}
+
+sub dynamic_extensions
+{
+ return grep $ext{$_} eq 'dynamic',keys %ext;
+}
+
+sub noxs_extensions
+{
+ return grep $ext{$_} eq 'nonxs',keys %ext;
+}
+
+sub extensions
+{
+ return keys %ext;
+}
+
+sub find_ext
+{
+ if (/^(.*)\.pm$/i || /^(.*)_pm\.PL$/i || /^(.*)\.xs$/i)
+  {
+   my $name = $1;
+   return if $name =~ $no; 
+   my $dir = $File::Find::dir; 
+   $dir =~ s,./,,;
+   return if exists $ext{$dir};
+   return unless -f "$ext/$dir/Makefile.PL";
+   if ($dir =~ /$name$/i)
+    {
+     if (-f "$ext/$dir/$name.xs")
+      {
+       $ext{$dir} = 'dynamic'; 
+      }
+     else
+      {
+       $ext{$dir} = 'nonxs'; 
+      }
+    }
+  }
+}
+
+1;
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import Perl 5.8.8 from OpenLSD
+@
+text
+@d3 4
+a6 1
+our $VERSION = '1.01';
+d9 3
+a11 1
+use warnings;
+d13 1
+a13 1
+my $no = join('|',qw(GDBM_File ODBM_File NDBM_File DB_File
+a18 19
+my %static;
+
+sub getcwd {
+    $ENV{'PWD'} = Win32::GetCwd();
+    $ENV{'PWD'} =~ s:\\:/:g ;
+    return $ENV{'PWD'};
+}
+
+sub set_static_extensions
+{
+    # adjust results of scan_ext, and also save
+    # statics in case scan_ext hasn't been called yet.
+    %static = ();
+    for (@@_) {
+        $static{$_} = 1;
+        $ext{$_} = 'static' if $ext{$_} && $ext{$_} eq 'dynamic';
+    }
+}
+
+d25 1
+a25 1
+ find_ext('');
+d30 1
+a30 6
+sub dynamic_ext
+{
+ return sort grep $ext{$_} eq 'dynamic',keys %ext;
+}
+
+sub static_ext
+d32 1
+a32 1
+ return sort grep $ext{$_} eq 'static',keys %ext;
+d35 1
+a35 1
+sub nonxs_ext
+d37 1
+a37 1
+ return sort grep $ext{$_} eq 'nonxs',keys %ext;
+d42 1
+a42 12
+ return sort grep $ext{$_} ne 'known',keys %ext;
+}
+
+sub known_extensions
+{
+ # faithfully copy Configure in not including nonxs extensions for the nonce
+ return sort grep $ext{$_} ne 'nonxs',keys %ext;
+}
+
+sub is_static
+{
+ return $ext{$_[0]} eq 'static'
+a44 2
+# Function to recursively find available extensions, ignoring DynaLoader
+# NOTE: recursion limit of 10 to prevent runaway in case of symlink madness
+d47 18
+a64 26
+    opendir my $dh, '.';
+    my @@items = grep { !/^\.\.?$/ } readdir $dh;
+    closedir $dh;
+    for my $xxx (@@items) {
+        if ($xxx ne "DynaLoader") {
+            if (-f "$xxx/$xxx.xs") {
+                $ext{"$_[0]$xxx"} = $static{"$_[0]$xxx"} ? 'static' : 'dynamic';
+            } elsif (-f "$xxx/Makefile.PL") {
+                $ext{"$_[0]$xxx"} = 'nonxs';
+            } else {
+                if (-d $xxx && @@_ < 10) {
+                    chdir $xxx;
+                    find_ext("$_[0]$xxx/", @@_);
+                    chdir "..";
+                }
+            }
+            $ext{"$_[0]$xxx"} = 'known' if $ext{"$_[0]$xxx"} && $xxx =~ $no;
+        }
+    }
+
+# Special case:  Add in threads/shared since it is not picked up by the
+# recursive find above (and adding in general recursive finding breaks
+# SDBM_File/sdbm).  A.D.  10/25/2001.
+
+    if (!$_[0] && -d "threads/shared") {
+        $ext{"threads/shared"} = 'dynamic';
+d66 1
+@
+

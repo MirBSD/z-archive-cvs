@@ -1,0 +1,304 @@
+head	1.4;
+access;
+symbols
+	MIRBSD_10:1.3.0.4
+	MIRBSD_10_BASE:1.3
+	cvs-200706211400:1.1.1.1
+	MIRBSD_9_BASE:1.3
+	MIRBSD_8:1.3.0.2
+	MIRBSD_8_BASE:1.3
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2013.10.31.20.07.06;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005272B7081B0E5655;
+
+1.3
+date	2005.11.24.13.20.33;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	11f34385be32929b;
+
+1.2
+date	2005.11.24.12.37.43;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	2fda4385b415ddd6;
+
+1.1
+date	2005.02.05.17.29.42;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.42;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@adapt most __attribute__((…)) occurrences to new KNF style(9)
+@
+text
+@/*	$OpenBSD: error.c,v 1.12 2004/04/07 13:11:35 espie Exp $ */
+
+/*
+ * Copyright © 2013
+ *	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+ * Copyright (c) 2001 Marc Espie.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE OPENBSD PROJECT AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OPENBSD
+ * PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+
+#include "config.h"
+#include "defines.h"
+#include "error.h"
+#include "job.h"
+#include "targ.h"
+
+#include "lowparse.h"
+
+__RCSID("$MirOS: src/usr.bin/make/error.c,v 1.3 2005/11/24 13:20:33 tg Exp $");
+
+int	    fatal_errors = 0;
+static void ParseVErrorInternal(const char *, unsigned long, int,
+    const char *, va_list) __attribute__((__format__(__printf__, 4, 0)));
+/*-
+ * Error --
+ *	Print an error message given its format.
+ */
+/* VARARGS */
+void
+Error(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	(void)vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	(void)fprintf(stderr, "\n");
+}
+
+/*-
+ * Fatal --
+ *	Produce a Fatal error message. If jobs are running, waits for them
+ *	to finish.
+ *
+ * Side Effects:
+ *	The program exits
+ */
+/* VARARGS */
+void
+Fatal(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	Job_Wait();
+
+	(void)vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	(void)fprintf(stderr, "\n");
+
+	if (DEBUG(GRAPH2))
+		Targ_PrintGraph(2);
+	exit(2);		/* Not 1 so -q can distinguish error */
+}
+
+/*
+ * Punt --
+ *	Major exception once jobs are being created. Kills all jobs, prints
+ *	a message and exits.
+ *
+ * Side Effects:
+ *	All children are killed indiscriminately and the program Lib_Exits
+ */
+/* VARARGS */
+void
+Punt(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	(void)fprintf(stderr, "make: ");
+	(void)vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	(void)fprintf(stderr, "\n");
+
+	DieHorribly();
+}
+
+/*-
+ * DieHorribly --
+ *	Exit without giving a message.
+ *
+ * Side Effects:
+ *	A big one...
+ */
+void
+DieHorribly(void)
+{
+	Job_AbortAll();
+	if (DEBUG(GRAPH2))
+		Targ_PrintGraph(2);
+	exit(2);		/* Not 1, so -q can distinguish error */
+}
+
+/*
+ * Finish --
+ *	Called when aborting due to errors in child shell to signal
+ *	abnormal exit.
+ *
+ * Side Effects:
+ *	The program exits
+ */
+void
+Finish(int errors) /* number of errors encountered in Make_Make */
+{
+	Fatal("%d error%s", errors, errors == 1 ? "" : "s");
+}
+
+
+/*-
+ * ParseVErrorInternal	--
+ *	Error message abort function for parsing. Prints out the context
+ *	of the error (line number and file) as well as the message with
+ *	two optional arguments.
+ *
+ * Side Effects:
+ *	"fatals" is incremented if the level is PARSE_FATAL.
+ */
+/* VARARGS */
+static void
+ParseVErrorInternal(const char *cfname, unsigned long clineno, int type,
+	const char *fmt, va_list ap)
+{
+	if (cfname)
+	    (void)fprintf(stderr, "\"%s\", line %lu: ", cfname, clineno);
+	if (type == PARSE_WARNING)
+		(void)fprintf(stderr, "warning: ");
+	(void)vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	(void)fprintf(stderr, "\n");
+	if (type == PARSE_FATAL)
+		fatal_errors ++;
+}
+
+/*-
+ * Parse_Error	--
+ *	External interface to ParseVErrorInternal; uses the default filename
+ *	Line number.
+ */
+/* VARARGS */
+void
+Parse_Error(int type, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	ParseVErrorInternal(Parse_Getfilename(), Parse_Getlineno(), type,
+	    fmt, ap);
+	va_end(ap);
+}
+@
+
+
+1.3
+log
+@make __CRAZY clean
+@
+text
+@a0 1
+/**	$MirOS$ */
+d4 2
+d42 1
+a42 1
+__RCSID("$MirOS$");
+d46 1
+a46 1
+    const char *, va_list) __attribute__((format (printf, 4, 0)));
+@
+
+
+1.2
+log
+@* make it easier for later makes to build it portably
+* start __CRAZY cleanup, but with -Wno-cast-qual (and checking)
+@
+text
+@d1 1
+a1 1
+/*	$OpenPackages$ */
+d41 2
+d153 1
+a153 1
+ParseVErrorInternal(const char *cfname, unsigned long clineno, int type, 
+d179 1
+a179 1
+	ParseVErrorInternal(Parse_Getfilename(), Parse_Getlineno(), type, 
+a182 1
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d42 2
+a43 1
+static void ParseVErrorInternal(const char *, unsigned long, int, const char *, va_list);
+d50 1
+a50 1
+Error(char *fmt, ...)
+d70 1
+a70 1
+Fatal(char *fmt, ...)
+d96 1
+a96 1
+Punt(char *fmt, ...)
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

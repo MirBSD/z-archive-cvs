@@ -1,0 +1,670 @@
+head	1.15;
+access;
+symbols
+	MIRBSD_10:1.12.0.2
+	MIRBSD_10_BASE:1.12;
+locks; strict;
+comment	@ * @;
+
+
+1.15
+date	2013.09.28.19.55.20;	author tg;	state dead;
+branches;
+next	1.14;
+commitid	100524733DE1CEE6C8A;
+
+1.14
+date	2008.12.27.22.16.47;	author tg;	state Exp;
+branches;
+next	1.13;
+commitid	1004956A9624DB6729A;
+
+1.13
+date	2008.12.27.22.15.31;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	1004956A919073DAEFD;
+
+1.12
+date	2007.09.28.20.04.13;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	10046FD5E352AD53838;
+
+1.11
+date	2007.09.28.19.49.43;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	10046FD5AE914B0F3C5;
+
+1.10
+date	2007.09.28.19.47.52;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	10046FD5A5F07ECF293;
+
+1.9
+date	2007.08.06.09.52.24;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10046B6EF663B8AB9E5;
+
+1.8
+date	2007.07.18.23.12.34;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	100469E9E4C47F1993A;
+
+1.7
+date	2007.07.18.21.47.12;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100469E8A372D04650C;
+
+1.6
+date	2007.07.10.15.12.43;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004693A1FD5D99A397;
+
+1.5
+date	2007.07.09.22.53.37;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004692BC801FA36EAE;
+
+1.4
+date	2007.07.09.07.37.08;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004691E58469BABCD3;
+
+1.3
+date	2007.07.09.00.13.37;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10046917DB072B0F21C;
+
+1.2
+date	2007.07.08.01.54.05;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100469043B0797839CC;
+
+1.1
+date	2007.07.07.20.32.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	100468FF6665289063C;
+
+
+desc
+@@
+
+
+1.15
+log
+@ITIMER_PROF is driven from hardintr, not rtcintr, what a shame!
+with this cprng(8) brings virtually no entropy but at pretty high
+CPU cost nevertheless (I never liked it much, anyway…) so rid it
+(think about adding jytter later)
+
+basically we’ll need something that signals us at stathz intervals
+(or profhz), for this to work
+@
+text
+@/*-
+ * Copyright (c) 2007
+ *	Thorsten Glaser <tg@@mirbsd.de>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ */
+
+/*-
+ * This is designed after the “truerand” entropy generator written by
+ * Don Mitchell.  The basic idea is to measure the difference between
+ * the mainboard clock and the CPU clock then pass the output through
+ * whitening.  It's been designed for a SPARCstation 20 (under SunOS)
+ * and a Pentium-100 (under BSD/OS), so it should be find with MirOS.
+ * This is deliberately written to use as few libc calls as possible.
+ *
+ * The raw output stream has an entropy of about 7.8 bit/byte (97.5%)
+ * if 1024 bytes of raw output are run through ports/math/ent, that's
+ * why I chose to let random(9) care about post-processing instead of
+ * adding arcfour output compression to this programme.
+ *
+ * See stathz(9) for more information on the -p flag's timer choice.
+ */
+
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/ioctl.h>
+#if defined(__OpenBSD__)
+#include <dev/rndioctl.h>
+#endif
+#include <fcntl.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <unistd.h>
+
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.14 2008/12/27 22:16:47 tg Exp $");
+
+#ifndef MAYPROF
+#if defined(SIGPROF) && defined(ITIMER_PROF)
+#define MAYPROF	1
+#else
+#define MAYPROF	0
+#endif
+#endif
+
+static volatile sig_atomic_t glocke;
+static useconds_t littlesleep = 2000;
+static uint8_t obuf[1024];
+static uint64_t intropy = 0;
+#if MAYPROF
+static bool doprof = false;
+#endif
+
+static void laeuten(int);
+static int getbits(void);
+static void getent(uint8_t *, size_t)
+    __attribute__((bounded (string, 1, 2)));
+
+#ifdef __MirBSD__
+/* to keep us small */
+extern void _exit__(int) __dead;
+void exit(int);
+int atexit(void (*)(void));
+#endif
+
+static void
+laeuten(int s __attribute__((unused)))
+{
+	glocke = 1;
+}
+
+static int
+getbits(void)
+{
+	unsigned count = 0;
+	struct itimerval itv = {
+		.it_interval = {
+			.tv_sec = 0,
+			.tv_usec = 0
+		},
+		.it_value = {
+			.tv_sec = 0,
+			.tv_usec = 16667
+		}
+	};
+
+	glocke = 0;
+	setitimer(
+#if MAYPROF
+	    doprof ? ITIMER_PROF :
+#endif
+	    ITIMER_REAL, &itv, NULL);
+	while (!glocke)
+		++count;
+
+	usleep(littlesleep);
+	return (count);
+}
+
+static void
+getent(uint8_t *buf, size_t n)
+{
+	int value = 0, bits = 0, t1, t2, tb;
+
+	goto getent_entry;
+
+ getent_loop:
+	if ((t1 & 1) != (t2 & 1)) {
+		value = (value << 1) | (t1 & 1);
+		if (++bits == 8) {
+			*buf++ = (uint8_t)value;
+			if (--n == 0)
+				return;
+			bits = 0;
+		}
+	}
+	t1 >>= 1;
+	t2 >>= 1;
+	if (--tb == 0) {
+ getent_entry:
+		t1 = getbits();
+		t2 = getbits();
+		tb = 12;
+	}
+	goto getent_loop;
+}
+
+static const char dmsg[] = "Cannot open random device!\n";
+static const char emsg[] = "Syntax error!\n";
+static const char fmsg[] = "Cannot daemonise!\n";
+
+int
+main(int argc, char *argv[])
+{
+	size_t num;
+	int c = 0;
+	unsigned u;
+	char *cp;
+
+#if MAYPROF
+	signal(SIGPROF, laeuten);
+#endif
+	signal(SIGALRM, laeuten);
+	if (argc == 2 && *(cp = argv[1]) == '-') {
+		switch (argv[1][1]) {
+		case 'r':
+			c = 1;
+			break;
+		case 'p':
+			doprof = true;
+			break;
+		}
+		switch (argv[1][2]) {
+		case 'r':
+			c = 1;
+			break;
+		case 'p':
+			doprof = true;
+			break;
+		}
+		if (c)
+			goto out_bytes;
+	} else if (argc > 1) {
+		write(2, emsg, sizeof (emsg) - 1);
+		return (1);
+	}
+
+	switch (fork()) {
+	case -1:
+ edetach:
+		write(2, fmsg, sizeof (fmsg) - 1);
+		return (3);
+	case 0:
+		break;
+	default:
+		return(0);
+	}
+
+	if (setsid() == -1)
+		goto edetach;
+
+	if (chdir("/") || (c = open("dev/urandom", O_RDWR)) < 0) {
+		write(2, dmsg, sizeof (dmsg) - 1);
+		return (2);
+	}
+
+	close(0);
+	close(1);
+	close(2);
+
+ main_loop:
+	getent(obuf, 12 + 1);
+	write(c, obuf, 12);
+	u = 94;
+	ioctl(c, RNDADDTOENTCNT, &u);
+	usleep(littlesleep);
+	if (!intropy)
+		read(c, &intropy, sizeof (intropy));
+	u = intropy & 0x0F;
+	intropy >>= 4;
+	u = ((u << 4) | u) ^ obuf[12];
+	sleep((u & 0x0F) + 7);
+	littlesleep = ((u & 0xF0) << 4) + 42000;
+	goto main_loop;
+
+ out_bytes:
+	while (*cp < '0' || *cp > '9')
+		++cp;
+	if ((c = cp[0]) > '0' && c <= '9') {
+		num = c - '0';
+		if ((c = cp[1]) >= '0' && c <= '9') {
+			num = num * 10 + c - '0';
+			if ((c = cp[2]) >= '0' && c <= '9') {
+				num = num * 10 + c - '0';
+				if ((c = cp[3]) >= '0' && c <= '9')
+					num = num * 10 + c - '0';
+			}
+		}
+		if (num > sizeof (obuf))
+			num = sizeof (obuf);
+	} else
+		num = 16;
+
+	getent(obuf, num);
+	write(1, obuf, num);
+	return (0);
+}
+
+#ifdef __MirBSD__
+void
+exit(int status)
+{
+	close(0);
+	close(1);
+	close(2);
+	_exit__(status);
+}
+
+int
+atexit(void (*function)(void) __attribute__((unused)))
+{
+	return (-1);
+}
+#endif
+@
+
+
+1.14
+log
+@even smaller
+@
+text
+@d49 1
+a49 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.13 2008/12/27 22:15:31 tg Exp $");
+@
+
+
+1.13
+log
+@keep us still small with the change
+@
+text
+@d49 1
+a49 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.12 2007/09/28 20:04:13 tg Exp $");
+d59 4
+a62 4
+volatile sig_atomic_t glocke;
+useconds_t littlesleep = 2000;
+uint8_t obuf[1024];
+uint64_t intropy = 0;
+d64 1
+a64 1
+bool doprof = false;
+@
+
+
+1.12
+log
+@writes to /dev/arandom reset/reseed the arc4random(9) flag/state
+thusly switch back to /dev/urandom for our purposes
+
+now we don’t shoot ourselves into the foot any longer
+@
+text
+@d49 1
+a49 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.11 2007/09/28 19:49:43 tg Exp $");
+d74 1
+d249 1
+a249 1
+	_exit(status);
+@
+
+
+1.11
+log
+@RNDADDTOENTCNT
+@
+text
+@d49 1
+a49 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.10 2007/09/28 19:47:52 tg Exp $");
+d194 1
+a194 1
+	if (chdir("/") || (c = open("dev/arandom", O_RDWR)) < 0) {
+@
+
+
+1.10
+log
+@cache a little; even a read of one byte dequeues a lot
+10x RNDGETENTCNT ioctl
+@
+text
+@d40 3
+d49 1
+a49 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.9 2007/08/06 09:52:24 tg Exp $");
+d206 2
+@
+
+
+1.9
+log
+@make MAYPROF a boolean (on/off), fix indenting
+@
+text
+@d46 1
+a46 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.8 2007/07/18 23:12:34 tg Exp $");
+d59 1
+d146 1
+d204 7
+a210 3
+	read(c, obuf, 1);
+	sleep(((obuf[0] ^ obuf[12]) & 0x0F) + 7);
+	littlesleep = ((unsigned)((obuf[0] ^ obuf[12]) & 0xF0) << 4) + 42000;
+@
+
+
+1.8
+log
+@meh, just use daemon(3) [inlined, for portability and return codes/msgs]
+and default to the profile clock instead of the system clock
+(implications not scientifically proven yet)
+@
+text
+@d46 1
+a46 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.7 2007/07/18 21:47:12 tg Exp $");
+d48 1
+d50 1
+a50 1
+#define MAYPROF
+d52 2
+a53 1
+#undef MAYPROF
+d59 2
+a60 2
+#ifdef MAYPROF
+	bool doprof = false;
+d97 1
+a97 1
+#ifdef MAYPROF
+d147 1
+a147 1
+#ifdef MAYPROF
+@
+
+
+1.7
+log
+@add an option (-p) to use the profhz(9) instead of the hz(9),
+since the former is driven by the stathz(9) from an independent
+timer if one is available – quality on nwt (the 80486DX box,
+remember?) is (only VERY slightly tho) better: 0.5 ipv 0.01
+@
+text
+@d33 2
+d46 1
+a46 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.6 2007/07/10 15:12:43 tg Exp $");
+d136 1
+d173 9
+a181 3
+	if ((c = open("/dev/tty", O_RDWR)) >= 0) {
+		ioctl(c, TIOCNOTTY);
+		close(c);
+d184 3
+@
+
+
+1.6
+log
+@portability: uint8_t is defined in C99
+@
+text
+@d40 1
+d44 7
+a50 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.5 2007/07/09 22:53:37 tg Exp $");
+d55 3
+d92 5
+a96 1
+	setitimer(ITIMER_REAL, &itv, NULL);
+d139 2
+a140 1
+	int c;
+d142 3
+d146 20
+a165 3
+	if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 'r')
+		goto out_bytes;
+	if (argc > 1) {
+d194 3
+a196 1
+	if ((c = argv[1][2]) > '0' && c <= '9') {
+d198 1
+a198 1
+		if ((c = argv[1][3]) >= '0' && c <= '9') {
+d200 1
+a200 1
+			if ((c = argv[1][4]) >= '0' && c <= '9') {
+d202 1
+a202 1
+				if ((c = argv[1][5]) >= '0' && c <= '9')
+@
+
+
+1.5
+log
+@keeping ourselves small only works on mbsd ☺
+@
+text
+@d40 1
+d43 1
+a43 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.4 2007/07/09 07:37:08 tg Exp $");
+@
+
+
+1.4
+log
+@use /dev/arandom: it's the exactly same as /dev/urandom for writing,
+and for reading, it goes with the principle that multiple users of it
+are actually increasing the entropy of the device
+@
+text
+@d42 1
+a42 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.3 2007/07/09 00:13:37 tg Exp $");
+d53 1
+d57 1
+d178 1
+d193 1
+@
+
+
+1.3
+log
+@• write only three dwords of entropy to the kernel each run instead of four
+• distribute the load a little more evenly, increasing “during” sleep times
+• reduce the “in-between” sleep times' constant factor a little
+@
+text
+@d42 1
+a42 1
+__RCSID("$MirOS: src/libexec/cprng/cprng.c,v 1.1 2007/07/07 20:32:06 tg Exp $");
+d137 1
+a137 1
+	if (chdir("/") || (c = open("dev/urandom", O_RDWR)) < 0) {
+@
+
+
+1.2
+log
+@use TIOCNOTTY to disassociate from the controlling terminal
+(yes it's deprecated but smaller than fork and setsid, which
+don't provide nice error handling)
+@
+text
+@a0 2
+/* $MirOS: src/libexec/cprng/cprng.c,v 1.1 2007/07/07 20:32:06 tg Exp $ */
+
+d45 1
+a45 1
+useconds_t littlesleep = 20000;
+d147 2
+a148 2
+	getent(obuf, 17);
+	write(c, obuf, 16);
+d151 2
+a152 2
+	sleep(((obuf[0] ^ obuf[16]) & 0x0F) + 12);
+	littlesleep = ((unsigned)((obuf[0] ^ obuf[16]) & 0xF0) << 4) + 20000;
+a155 1
+	littlesleep = 2000;
+@
+
+
+1.1
+log
+@add cprng, a RNG feeding entropy generated from the oscillation differences
+between the CPU clock and the mainboard/bus clock into /dev/urandom (by de-
+fault and if run by root), or writing them to stdout (under quite high load
+for the CPU), after whitening. The entropy is quite good (if you get enough
+to feed ports/math/ent), only the χ² lets me worry.
+
+Tested on my systems:
+• nwt (80486DX-33): 7.3 bit per byte, but as bad as rand()
+• demo (SPARCstaion 20): 7.4 bit per byte, not much better
+• herc (Pentium 233 MMX): 7.6 bit per byte, quality sort of okay
+• odem (Athlon XP 500): 7.8 bit per byte, quality very good
+• odem (Athlon XP 1200): 7.8 bit per byte, no difference to clocked-down
+
+Instead of adding more post-processing or other functions to improve output
+especially on the slower systems (I know I could manage quite something) it
+is just fed to the kernel random(9) subsystem; users shall get /dev/arandom
+if they require entropy of good quality or /dev/urandom if a high entrophic
+values (actual randomness per bit) is desired (almost only for generating a
+key for asymmetric cryptography, and even then you want to mix in a few bit
+from arcfour).
+
+This dæmon runs by default on our installer, installed system and the base-
+live CD; users should disable it on their system after installation if they
+have enough entropy sources (for example, interactive input). Users of slow
+non-interactively-used servers should combine cprng with hotbits or similar
+(see the commented out entries in the default crontab) for quality.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/share/misc/licence.template,v 1.20 2006/12/11 21:04:56 tg Rel $ */
+d39 1
+d44 1
+a44 1
+__RCSID("$MirOS$");
+d134 5
+@
+

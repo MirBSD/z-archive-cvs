@@ -1,0 +1,630 @@
+head	1.13;
+access;
+symbols
+	bsiegert-cfgfile_BASE:1.12
+	bsiegert-cfgfile:1.12.0.2
+	MIRBSD_8_BASE:1.1.7.1;
+locks; strict;
+comment	@ * @;
+
+
+1.13
+date	2010.09.02.09.42.50;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	1004C7F71891FEBACB6;
+
+1.12
+date	2008.11.02.19.32.53;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	100490E0072100861EC;
+
+1.11
+date	2008.11.02.19.28.43;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	100490DFF6A7E5B0051;
+
+1.10
+date	2008.11.02.19.05.49;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	100490DFA1E4C107742;
+
+1.9
+date	2008.11.02.18.56.29;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	100490DF7B930A3A3BD;
+
+1.8
+date	2008.11.02.18.19.52;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	100490DEF535C71F010;
+
+1.7
+date	2008.10.12.15.35.22;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10048F218B2228D17F9;
+
+1.6
+date	2008.10.12.14.35.17;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10048F20B342E297907;
+
+1.5
+date	2007.04.30.12.48.09;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004635E58C058F2789;
+
+1.4
+date	2007.03.30.23.20.11;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	100460D99284E3410CC;
+
+1.3
+date	2006.08.24.20.18.15;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10044EE098A5CE5A7B2;
+
+1.2
+date	2006.02.25.15.49.55;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	10044007C2C1AC43BDA;
+
+1.1
+date	2005.03.18.15.47.16;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.47.16;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.13
+log
+@replace all remaining calls to system(…) with sxsystem(false, …)
+and switch piperead() to use mksh, to fulfil our guarantees
+@
+text
+@/*-
+ * Copyright (c) 2010
+ *	Thorsten Glaser <tg@@mirbsd.org>
+ * Copyright (c) 2006, 2007
+ *	Benny Siegert <bsiegert@@mirbsd.org>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ */
+
+#include <err.h>
+#include <fcntl.h>
+#include <pwd.h>
+#include "lib.h"
+#include <sys/wait.h>
+
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.12 2008/11/02 19:32:53 tg Exp $");
+
+#ifdef AS_USER
+static bool PrivsDropped = false;
+#endif
+
+/*
+ * Execute the command, read one line of output, and return it as a
+ * pointer to a static internal buffer. Read errors, eof, and exit
+ * status are ignored.
+ */
+char *
+piperead(const char *command)
+{
+	size_t len;
+	char *cmdp, *shellp;
+	static char buf[FILENAME_MAX]; /* XXX arbitrary size */
+	FILE *stream;
+
+	/* shellp := 「mksh -c 'escaped-command'」 */
+	xasprintf(&shellp, "mksh -c %s", (cmdp = format_arg(command)));
+	xfree(cmdp);
+
+	stream = popen(shellp, "r");
+	buf[0] = '\0';
+	(void)fgets(buf, sizeof(buf), stream);
+	if (ferror(stream)) {
+		pwarn("Failed to read output from command '%s'", command);
+		/* buffer contents are indeterminate if an error occurred */
+		buf[0] = '\0';
+	}
+	len = strlen(buf);
+	if (len > 0 && buf[len - 1] == '\n')
+		buf[--len] = '\0';
+	if (pclose(stream) == -1) {
+		pwarn("Failed to close pipe to '%s'", command);
+	}
+
+	xfree(shellp);
+	return (buf);
+}
+
+/*
+ * If run under sudo, this drops privileges to those of the user calling
+ * sudo.
+ */
+
+void
+drop_privs(void)
+{
+#ifdef AS_USER
+	char *login = getlogin();
+	struct passwd *pwent;
+
+	if (!geteuid() && strcmp(login, "root")) {
+		pwent = getpwnam(login);
+		if (!pwent) {
+			pwarnx("drop_privs: Cannot get passwd entry for user %s\n", login);
+			return;
+		}
+		if (Verbose)
+			printf("Dropping privileges to %s (uid %d)\n",
+					login, pwent->pw_uid);
+		seteuid(pwent->pw_uid);
+		PrivsDropped = true;
+	}
+#endif
+}
+
+/*
+ * Raise privileges after they have been dropped.
+ */
+
+void
+raise_privs(void)
+{
+#ifdef AS_USER
+	if (PrivsDropped) {
+		seteuid(0);
+		PrivsDropped = false;
+		if (Verbose)
+			printf("Raising privileges to root\n");
+	} else if (Verbose)
+		pwarnx("raise_privs: incorrect attempt to raise privs\n");
+#endif
+}
+
+/*
+ * Determine whether the system has the given binary emulation layer.
+ * In case of an error, return false.
+ */
+bool
+have_emulation(char *emul)
+{
+	char *buf;
+	bool rv = false;
+
+	if (!emul || !emul[0])
+		return (true);
+
+	/* first: are we already running the right OS? */
+	if (!strcasecmp(emul, piperead("uname -s"))) {
+		if (Verbose)
+			printf("- natively running %s\n", emul);
+		return (true);
+	}
+
+	/* On BSD: is the emulation enabled? */
+	/* calling sysctl via popen encapsulates platform-specific stuff */
+	xasprintf(&buf, "sysctl -n kern.emul.%s 2>/dev/null", emul);
+	if (!strcmp("1", piperead(buf))) {
+		if (Verbose)
+			printf("- %s emulation enabled\n", emul);
+		rv = true;
+	}
+	xfree(buf);
+	return (rv);
+}
+@
+
+
+1.12
+log
+@this is much better style than having *huge* buffers on the stack
+@
+text
+@d2 2
+d29 1
+a29 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.11 2008/11/02 19:28:43 tg Exp $");
+d43 2
+a45 1
+	int len;
+d48 5
+a52 1
+	stream = popen(command, "r");
+d66 3
+a68 1
+	return buf;
+d127 1
+a127 1
+		return true;
+d133 1
+a133 1
+		return true;
+@
+
+
+1.11
+log
+@the remaining code in here is exclusively by bsiegert@@ as confirmed
+by Netcra^Wcvs annotate, so remove the PHK copyright
+@
+text
+@d27 1
+a27 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.10 2008/11/02 19:05:49 tg Exp $");
+d114 2
+a115 1
+	char buf[FILENAME_MAX]; /* XXX arbitrary size */
+d123 1
+a123 1
+			printf("- natively running %s\n", buf);
+d129 1
+a129 2
+	snprintf(buf, sizeof(buf), "sysctl -n kern.emul.%s 2>/dev/null",
+			emul);
+d133 1
+a133 1
+		return true;
+d135 2
+a136 1
+	return false;
+@
+
+
+1.10
+log
+@runcomm is no longer needed now, either
+@
+text
+@d1 3
+a3 15
+/**	$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.9 2008/11/02 18:56:29 tg Exp $ */
+/*	$OpenBSD: exec.c,v 1.8 2003/09/05 19:40:42 tedu Exp $	*/
+
+/*
+ * FreeBSD install - a package for the installation and maintainance
+ * of non-core utilities.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+d5 5
+a9 2
+ * Jordan K. Hubbard
+ * 18 July 1993
+d11 8
+a18 1
+ * Miscellaneous system routines.
+d27 1
+a27 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.9 2008/11/02 18:56:29 tg Exp $");
+@
+
+
+1.9
+log
+@• add new memory management functions (xcalloc, xrealloc, xfree, xstrdup,
+  xasprintf, xvasprintf)
+• add new process calling functions which can optionally unlimit datasize
+• add safe formatting functions (untested)
+• retire asystem for xsystem
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.8 2008/11/02 18:19:52 tg Exp $ */
+d29 1
+a29 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.8 2008/11/02 18:19:52 tg Exp $");
+a35 53
+ * Yet another way to run an external command *sigh*
+ */
+int
+runcomm_(const char *whom, int nargs, const char * const *args,
+    const char *outf)
+{
+	int i = 0;
+	pid_t pid;
+
+	if (Verbose) {
+		fputs("Running \"", stdout);
+		while (i < nargs)
+			printf("%s ", args[i++]);
+		if (outf)
+			printf(">%s", outf);
+		fputs("\"\n", stdout);
+	}
+
+	if ((pid = fork()) < 0)
+		err(2, "failed to fork");
+	else if (pid == 0) {
+		union mksh_ccphack {
+			char **rw;
+			const char * const *ro;
+		} argvec;
+
+		if (outf) {
+			int fd;
+
+			if ((fd = open(outf, O_WRONLY | O_CREAT | O_TRUNC,
+			    0666)) < 0) {
+				warn("cannot open '%s' for writing", outf);
+				return (-1);
+			}
+			if (dup2(fd, STDOUT_FILENO) == -1) {
+				warn("cannot dup2");
+				return (-1);
+			}
+			if (fd != STDOUT_FILENO)
+				/* do not care about errors here */
+				close(fd);
+		}
+		/* stupid API */
+		argvec.ro = args;
+		execvp(whom, argvec.rw);
+		warn("failed to execute %s command", whom);
+		return (-1);
+	}
+	wait(&i);
+	return (i);
+}
+
+/*
+@
+
+
+1.8
+log
+@rename vsystem into asystem, because v* are these who take a va_list
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.7 2008/10/12 15:35:22 tg Exp $ */
+d29 1
+a29 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.7 2008/10/12 15:35:22 tg Exp $");
+a35 38
+ * Unusual system() substitute.  Accepts format string and args,
+ * builds and executes command.  Returns exit code.
+ */
+
+int
+asystem(const char *fmt, ...)
+{
+	va_list	args;
+	char	*cmd;
+	ssize_t	maxargs;
+	int	ret;
+
+	if ((maxargs = sysconf(_SC_ARG_MAX)) == -1) {
+		pwarnx("asystem can't retrieve max args");
+		return 1;
+	}
+	maxargs -= 32;			/* some slop for the sh -c */
+	if ((cmd = (char *) malloc((size_t)maxargs)) == NULL) {
+		pwarnx("asystem can't alloc arg space");
+		return 1;
+	}
+
+	va_start(args, fmt);
+	if (vsnprintf(cmd, (size_t)maxargs, fmt, args) >= maxargs) {
+		pwarnx("asystem args are too long");
+		free(cmd);
+		return 1;
+	}
+#ifdef DEBUG
+	printf("Executing %s\n", cmd);
+#endif
+	ret = system(cmd);
+	va_end(args);
+	free(cmd);
+	return ret;
+}
+
+/*
+@
+
+
+1.7
+log
+@Support for LZMA compressed binary packages (experimental!)
+
+Tested:
+• tg@@bleu:/usr/ports/archivers/mpczar $ mmake PKG_SUFX=.clz install clean
+• tg@@bleu:~ $ sudo pkg_upgrade -fva /usr/ports/Packages/ssfe-20070109-1.clz
+
+Dependencies on LZMA are *not* handled automatically, also you must use
+PKG_SUFX=.clz to enable and ensure lzma is installed prior. This is some-
+what hacky, but our package tools suck anyway. The infrastructure allows
+for other compressors such as bzip2 too (but that one is not much of a
+saving compared to lzma (ratio) and gzip (resource usage) so I did *not*
+add it), but in a *lot* of places… should unify that or better, rewrite
+all of the package tools in mksh… anyway, please test.
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.6 2008/10/12 14:35:17 tg Exp $ */
+d29 1
+a29 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.6 2008/10/12 14:35:17 tg Exp $");
+d41 1
+a41 1
+vsystem(const char *fmt, ...)
+d49 1
+a49 1
+		pwarnx("vsystem can't retrieve max args");
+d54 1
+a54 1
+		pwarnx("vsystem can't alloc arg space");
+d60 1
+a60 1
+		pwarnx("vsystem args are too long");
+@
+
+
+1.6
+log
+@generalise running of subcommand
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.5 2007/04/30 12:48:09 tg Exp $ */
+d24 1
+d29 1
+a29 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.5 2007/04/30 12:48:09 tg Exp $");
+d77 2
+a78 1
+runcomm_(const char *whom, int nargs, const char * const *args)
+d87 2
+d100 16
+@
+
+
+1.5
+log
+@bsiegert@@ you broke installing @@emul packages and much more;
+pre-increment is different from post-increment…
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.4 2007/03/30 23:20:11 bsiegert Exp $ */
+d26 1
+d28 1
+a28 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.4 2007/03/30 23:20:11 bsiegert Exp $");
+d73 34
+@
+
+
+1.4
+log
+@Implement one of the points from my todo list: @@emul directives for
+plists. If EMUL is set in a port's Makefile (e.g. EMUL=linux for a port
+which needs linux emulation), this fact is entered into the package.
+pkg_add checks for the relevant emulation.
+
+- introduce new piperead() function, which executes a command and reads
+  one line of output. Carefully crafted to avoid errors.
+- new option for pkg_create: -e gives an initial value for @@emul
+- bsd.port.mk: add -e to PKG_ARGS if EMUL given
+- new function have_emulation(): Is the emulation enabled (via sysctl
+  -n) or, alternatively, are we already running the "right" OS?
+- pkg_info: show @@emul directive
+- documentation: document EMUL and @@emul
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.3 2006/08/24 20:18:15 bsiegert Exp $ */
+d27 1
+a27 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.3 2006/08/24 20:18:15 bsiegert Exp $");
+d93 1
+a93 1
+		buf[len--] = '\0';
+@
+
+
+1.3
+log
+@Add debug messages to raise_privs if Verbose
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.2 2006/02/25 15:49:55 bsiegert Exp $ */
+d27 1
+a27 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.2 2006/02/25 15:49:55 bsiegert Exp $");
+d72 29
+d144 31
+@
+
+
+1.2
+log
+@Add two new routines, drop_privs and raise_privs, to be used in pkg_add.
+These don't do anything useful yet.
+
+(wohoo, a commit!)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.1.7.1 2005/03/18 15:47:16 tg Exp $ */
+d27 1
+a27 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/exec.c,v 1.1.7.1 2005/03/18 15:47:16 tg Exp $");
+d109 4
+a112 1
+	}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d24 1
+d27 5
+a31 1
+__RCSID("$MirOS$");
+d70 42
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

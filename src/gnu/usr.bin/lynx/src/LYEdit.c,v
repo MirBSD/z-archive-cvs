@@ -1,0 +1,703 @@
+head	1.7;
+access;
+symbols
+	lynx-2_8_8dev_16:1.1.109.6
+	lynx-2_8_8dev_15e:1.1.109.6
+	lynx-2_8_8dev_15:1.1.109.6
+	lynx-2_8_8dev_14:1.1.109.6
+	lynx-2_8_8dev_12:1.1.109.6
+	lynx-2_8_8dev_11:1.1.109.6
+	lynx-2_8_8dev_10a:1.1.109.6
+	lynx-2_8_8dev_7a:1.1.109.6
+	lynx-2_8_8dev_7:1.1.109.6
+	lynx-2_8_7rel_1:1.1.109.5
+	lynx-2_8_7dev_12:1.1.109.5
+	lynx-2_8_7dev_11a:1.1.109.4
+	MIRBSD_10:1.1.109.3.0.2
+	MIRBSD_10_BASE:1.1.109.3
+	lynx-2_8_7dev_8:1.1.109.3
+	lynx-2_8_7dev_7:1.1.109.2
+	lynx-2_8_7dev_5:1.1.109.2
+	lynx-2_8_7dev_2:1.1.109.1
+	lynx-2_8_6pre_5:1.1.109.1
+	lynx-2_8_6pre_4:1.1.109.1
+	lynx-2_8_6pre_3:1.1.109.1
+	MIRBSD_9_BASE:1.1.109.1
+	lynx-2_8_6dev_18c:1.1.109.1
+	lynx-2_8_6dev_18:1.1.109.1
+	MIRBSD_8:1.1.109.1.0.2
+	MIRBSD_8_BASE:1.1.109.1
+	lynx-2_8_6dev_16:1.1.109.1
+	lynx:1.1.109;
+locks; strict;
+comment	@ * @;
+
+
+1.7
+date	2010.12.19.19.22.28;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004D0E5B7B7150A62A;
+
+1.6
+date	2009.01.18.19.40.54;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100497385D57954483F;
+
+1.5
+date	2008.12.16.23.27.10;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004948395D7D988D96;
+
+1.4
+date	2008.03.12.12.05.25;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10047D7C71611335C54;
+
+1.3
+date	2007.05.20.09.43.26;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004650182E2FFFB588;
+
+1.2
+date	2007.02.13.18.57.47;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045D20A38044F4836;
+
+1.1
+date	2005.03.27.22.12.09;	author tg;	state Exp;
+branches
+	1.1.109.1;
+next	;
+
+1.1.109.1
+date	2005.03.27.22.12.09;	author tg;	state Exp;
+branches;
+next	1.1.109.2;
+
+1.1.109.2
+date	2007.05.19.22.30.16;	author tg;	state Exp;
+branches;
+next	1.1.109.3;
+commitid	100464F7A1519624932;
+
+1.1.109.3
+date	2008.03.09.17.32.15;	author tg;	state Exp;
+branches;
+next	1.1.109.4;
+commitid	10047D41E626DF0F5D0;
+
+1.1.109.4
+date	2008.12.16.23.13.11;	author tg;	state Exp;
+branches;
+next	1.1.109.5;
+commitid	100494835F965A87026;
+
+1.1.109.5
+date	2009.01.18.19.31.28;	author tg;	state Exp;
+branches;
+next	1.1.109.6;
+commitid	1004973839C3B701938;
+
+1.1.109.6
+date	2010.12.19.18.12.46;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004D0E4B24304015D1;
+
+
+desc
+@@
+
+
+1.7
+log
+@fastmerge; break since I can’t get autoconf-2.13 to work and it’s late
+@
+text
+@/* $LynxId: LYEdit.c,v 1.41 2010/09/24 00:07:26 tom Exp $ */
+#include <HTUtils.h>
+#include <HTParse.h>
+#include <HTAlert.h>
+#include <LYCurses.h>
+#include <LYUtils.h>
+#include <LYGlobalDefs.h>
+#include <LYStrings.h>
+#include <LYEdit.h>
+#ifdef VMS
+#include <unixio.h>
+#endif /* VMS */
+
+#include <LYLeaks.h>
+#include <www_wait.h>
+
+BOOLEAN editor_can_position(void)
+{
+    char *value;
+    HTList *p = positionable_editor;
+    static const char *table[] =
+    {
+#ifdef VMS
+	"sedt",
+#else
+	"emacs",		/* + xemacs */
+	"jed",
+	"jmacs",
+	"joe",			/* + rjoe */
+	"jove",
+	"jstar",
+	"jupp",
+	"nano",
+	"pico",			/* + jpico */
+	"vi"			/* + vim, xvi, vile, elvis, view... + likely false matches */
+#endif
+    };
+    unsigned n;
+
+    for (n = 0; n < TABLESIZE(table); n++) {
+	if (LYstrstr(editor, table[n]) != 0) {
+	    return TRUE;
+	}
+    }
+    /*
+     * This really isn't right.  LYstrstr() might be too lax,
+     * but this should at least match basename to basename...
+     */
+    if (positionable_editor != NULL) {
+	while ((value = (char *) HTList_nextObject(p)) != NULL) {
+	    if (strcmp(editor, value) == 0) {
+		return TRUE;
+	    }
+	}
+    }
+    return FALSE;
+}
+
+/*
+ * In edit mode invoke the given (or default) editor to display and edit the
+ * current file.  For editors listed in 'editor_can_position()', Lynx will open
+ * the file to the same line that the screen cursor is on (or close...) when
+ * editing is invoked.
+ *
+ * Returns FALSE if file is uneditable.
+ */
+int edit_current_file(char *newfile,
+		      int cur,
+		      int lineno)
+{
+    int result = FALSE;
+    char *filename = NULL;
+
+#if !(defined(VMS) || defined(USE_DOS_DRIVES))
+    char *colon;
+#endif
+    char *number_sign;
+    char position[80];
+
+#if defined(VMS) || defined(CANT_EDIT_UNWRITABLE_FILES)
+    FILE *fp;
+#endif
+
+    CTRACE((tfp, "edit_current_file(newfile=%s, cur=%d, lineno=%d)\n",
+	    newfile, cur, lineno));
+
+    /*
+     * If it's a remote file then we can't edit it.
+     */
+    if (!LYisLocalFile(newfile)) {
+	HTUserMsg(CANNOT_EDIT_REMOTE_FILES);
+	return FALSE;
+    }
+
+    /*
+     * If there's a fragment, trim it.  - FM
+     */
+    number_sign = trimPoundSelector(newfile);
+
+    /*
+     * On Unix, first try to open it as a completely referenced file, then via
+     * the path alone.
+     *
+     * On VMS, only try the path.
+     */
+#if defined (VMS) || defined (USE_DOS_DRIVES)
+    filename = HTParse(newfile, "", PARSE_PATH + PARSE_PUNCTUATION);
+    HTUnEscape(filename);
+    StrAllocCopy(filename, HTSYS_name(filename));
+    if (!LYCanReadFile(filename)) {
+#ifdef SH_EX
+	HTUserMsg2(COULD_NOT_EDIT_FILE, filename);
+#else
+	HTAlert(COULD_NOT_ACCESS_FILE);
+#endif
+	CTRACE((tfp, "filename: '%s'\n", filename));
+	goto done;
+    }
+#else /* something like UNIX */
+    if (StrNCmp(newfile, "file://localhost/", 16) == 0)
+	colon = newfile + 16;
+    else
+	colon = strchr(newfile, ':');
+    StrAllocCopy(filename, (colon + 1));
+    HTUnEscape(filename);
+    if (!LYCanReadFile(filename)) {
+	FREE(filename);
+	filename = HTParse(newfile, "", PARSE_PATH + PARSE_PUNCTUATION);
+	HTUnEscape(filename);
+	if (!LYCanReadFile(HTSYS_name(filename))) {
+	    HTAlert(COULD_NOT_ACCESS_FILE);
+	    goto done;
+	}
+    }
+#endif
+
+#if defined(VMS) || defined(CANT_EDIT_UNWRITABLE_FILES)
+    /*
+     * Don't allow editing if user lacks append access.
+     */
+    if ((fp = fopen(filename, TXT_A)) == NULL) {
+	HTUserMsg(NOAUTH_TO_EDIT_FILE);
+	goto done;
+    }
+    fclose(fp);
+#endif /* VMS || CANT_EDIT_UNWRITABLE_FILES */
+
+    /*
+     * Make sure cur is at least zero.  - FM
+     */
+    if (cur < 0) {
+	cur = 0;
+    }
+
+    /*
+     * Set up the command for the editor.  - FM
+     */
+    if (lineno >= 0) {
+	*position = 0;
+#ifdef VMS
+	lineno--;
+#endif
+	lineno += (nlinks ? links[cur].ly : 0);
+	if (lineno > 0)
+	    sprintf(position, "%d", lineno);
+    } else {
+	*position = '\0';
+    }
+
+    edit_temporary_file(filename, position, NULL);
+    result = TRUE;
+
+  done:
+    /*
+     * Restore the fragment if there was one.  - FM
+     */
+    restorePoundSelector(number_sign);
+
+    FREE(filename);
+    CTRACE((tfp, "edit_current_file returns %d\n", result));
+    return (result);
+}
+
+void edit_temporary_file(char *filename,
+			 const char *position,
+			 const char *message)
+{
+#ifdef UNIX
+    struct stat stat_info;
+#endif
+    const char *format = "%s %s";
+    char *command = NULL;
+    const char *editor_arg = "";
+    int params = 1;
+    int rv;
+
+    if (LYstrstr(editor, "pico")) {
+	editor_arg = " -t";	/* No prompt for filename to use */
+    }
+    if (editor_can_position() && *position) {
+#ifdef VMS
+	format = "%s %s -%s%s";
+	HTAddXpand(&command, format, params++, editor);
+	HTAddParam(&command, format, params++, filename);
+	HTAddParam(&command, format, params++, position);
+	HTAddParam(&command, format, params++, editor_arg);
+	HTEndParam(&command, format, params);
+#else
+	format = "%s +%s%s %s";
+	HTAddXpand(&command, format, params++, editor);
+	HTAddParam(&command, format, params++, position);
+	HTAddParam(&command, format, params++, editor_arg);
+	HTAddParam(&command, format, params++, filename);
+	HTEndParam(&command, format, params);
+#endif
+    }
+#ifdef DOSPATH
+    else if (StrNCmp(editor, "VZ", 2) == 0) {
+	/* for Vz editor */
+	format = "%s %s -%s";
+	HTAddXpand(&command, format, params++, editor);
+	HTAddParam(&command, format, params++, HTDOS_short_name(filename));
+	HTAddParam(&command, format, params++, position);
+	HTEndParam(&command, format, params);
+    } else if (StrNCmp(editor, "edit", 4) == 0) {
+	/* for standard editor */
+	HTAddXpand(&command, format, params++, editor);
+	HTAddParam(&command, format, params++, HTDOS_short_name(filename));
+	HTEndParam(&command, format, params);
+    }
+#endif
+    else {
+#ifdef _WINDOWS
+	if (strchr(editor, ' '))
+	    HTAddXpand(&command, format, params++, HTDOS_short_name(editor));
+	else
+	    HTAddXpand(&command, format, params++, editor);
+#else
+	HTAddXpand(&command, format, params++, editor);
+#endif
+	HTAddParam(&command, format, params++, filename);
+	HTEndParam(&command, format, params);
+    }
+    if (message != NULL) {
+	_statusline(message);
+    }
+
+    CTRACE((tfp, "LYEdit: %s\n", command));
+    CTRACE_SLEEP(MessageSecs);
+
+    stop_curses();
+
+#ifdef UNIX
+    set_errno(0);
+#endif
+    if ((rv = LYSystem(command)) != 0) {	/* Spawn Editor */
+	start_curses();
+	/*
+	 * If something went wrong, we should probably return soon; currently
+	 * we don't, but at least put out a message.  - kw
+	 */
+	{
+#if defined(UNIX) && defined(WIFEXITED)
+	    int save_err = errno;
+
+	    CTRACE((tfp, "ExtEditForm: system() returned %d (0x%x), %s\n",
+		    rv, rv,
+		    (save_err
+		     ? LYStrerror(save_err)
+		     : "reason unknown")));
+	    LYFixCursesOn("show error warning:");
+	    if (rv == -1) {
+		HTUserMsg2(gettext("Error starting editor, %s"),
+			   LYStrerror(save_err));
+	    } else if (WIFSIGNALED(rv)) {
+		HTAlwaysAlert(NULL, gettext("Editor killed by signal"));
+	    } else if (WIFEXITED(rv) && WEXITSTATUS(rv) != 127) {
+		char exitcode[80];
+
+		sprintf(exitcode, "%d", WEXITSTATUS(rv));
+		HTUserMsg2(gettext("Editor returned with error status %s"),
+			   exitcode);
+	    } else
+#endif
+		HTAlwaysAlert(NULL, ERROR_SPAWNING_EDITOR);
+	}
+    } else {
+	start_curses();
+    }
+#ifdef UNIX
+    /*
+     * Delete backup file, if that's your style.
+     */
+    HTSprintf0(&command, "%s~", filename);
+    if (stat(command, &stat_info) == 0)
+	remove(command);
+#endif
+    FREE(command);
+}
+@
+
+
+1.6
+log
+@fastmerge
+@
+text
+@d1 1
+a1 1
+/* $LynxId: LYEdit.c,v 1.38 2008/12/29 01:00:53 tom Exp $ */
+d8 1
+a24 1
+	"SEDT"
+d26 1
+a26 1
+	"emacs",
+d29 1
+a29 1
+	"joe",
+a30 1
+	"jpico",
+d34 2
+a35 3
+	"pico",
+	"rjoe",
+	"vi"
+d41 1
+a41 1
+	if (strstr(editor, table[n]) != 0) {
+d45 4
+d120 1
+a120 1
+    if (strncmp(newfile, "file://localhost/", 16) == 0)
+d158 2
+a159 1
+    *position = 0;
+d161 1
+a161 1
+    lineno--;
+d163 6
+a168 3
+    lineno += (nlinks ? links[cur].ly : 0);
+    if (lineno > 0)
+	sprintf(position, "%d", lineno);
+d197 1
+a197 1
+    if (strstr(editor, "pico")) {
+d218 1
+a218 1
+    else if (strncmp(editor, "VZ", 2) == 0) {
+d225 1
+a225 1
+    } else if (strncmp(editor, "edit", 4) == 0) {
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d1 1
+a1 1
+/* $LynxId: LYEdit.c,v 1.37 2008/03/18 00:39:05 Paul.B.Mahol Exp $ */
+d257 1
+a257 1
+#ifdef UNIX
+@
+
+
+1.4
+log
+@jupp ~= jstar
+@
+text
+@d1 1
+d18 2
+d47 7
+@
+
+
+1.3
+log
+@• merge (except configure)
+• reduce diff against upstream
+
+untested
+@
+text
+@d30 2
+@
+
+
+1.2
+log
+@&& -> & typo
+from that other bsd
+@
+text
+@d13 1
+d246 1
+a246 1
+	    int rvhi = (rv >> 8);
+d249 4
+a252 1
+		    rv, rv, errno ? LYStrerror(errno) : "reason unknown"));
+d254 4
+a257 1
+	    if (rv != -1 && (rv & 0xff) && !rvhi) {
+d259 6
+a264 5
+	    } else if (!(rv == -1 || (rvhi == 127 && errno))) {
+		HTUserMsg2(gettext("Editor returned with error status, %s"),
+			   (errno
+			    ? LYStrerror(errno)
+			    : gettext("reason unknown.")));
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d250 1
+a250 1
+	    if (rv != -1 && (rv && 0xff) && !rvhi) {
+@
+
+
+1.1.109.1
+log
+@Lynx 2.8.6dev.11h (pre-patch) minus
+* lib
+* po
+* scripts
+@
+text
+@@
+
+
+1.1.109.2
+log
+@Finally, a new Lynx snapshot!
+@
+text
+@a12 1
+#include <www_wait.h>
+d245 1
+a245 1
+	    int save_err = errno;
+d248 1
+a248 4
+		    rv, rv,
+		    (save_err
+		     ? LYStrerror(save_err)
+		     : "reason unknown")));
+d250 1
+a250 4
+	    if (rv == -1) {
+		HTUserMsg2(gettext("Error starting editor, %s"),
+			   LYStrerror(save_err));
+	    } else if (WIFSIGNALED(rv)) {
+d252 5
+a256 6
+	    } else if (WIFEXITED(rv) && WEXITSTATUS(rv) != 127) {
+		char exitcode[80];
+
+		sprintf(exitcode, "%d", WEXITSTATUS(rv));
+		HTUserMsg2(gettext("Editor returned with error status %s"),
+			   exitcode);
+@
+
+
+1.1.109.3
+log
+@Import Lynx 2.8.7dev.8
+@
+text
+@a29 1
+	"nano",
+@
+
+
+1.1.109.4
+log
+@Import Lynx 2.8.7dev.11a via eMail from Tom Dickey:
+Message-ID: <20081215010313.GA8373@@invisible-island.net>
+Message-ID: <20081216012408.GA15364@@invisible-island.net>
+@
+text
+@a0 1
+/* $LynxId: LYEdit.c,v 1.37 2008/03/18 00:39:05 Paul.B.Mahol Exp $ */
+a16 2
+    char *value;
+    HTList *p = positionable_editor;
+a42 7
+    if (positionable_editor != NULL) {
+	while ((value = (char *) HTList_nextObject(p)) != NULL) {
+	    if (strcmp(editor, value) == 0) {
+		return TRUE;
+	    }
+	}
+    }
+@
+
+
+1.1.109.5
+log
+@Import Lynx 2.8.7dev.12
+@
+text
+@d1 1
+a1 1
+/* $LynxId: LYEdit.c,v 1.38 2008/12/29 01:00:53 tom Exp $ */
+d256 1
+a256 1
+#if defined(UNIX) && defined(WIFEXITED)
+@
+
+
+1.1.109.6
+log
+@Import lynx-current
+@
+text
+@d1 1
+a1 1
+/* $LynxId: LYEdit.c,v 1.41 2010/09/24 00:07:26 tom Exp $ */
+a7 1
+#include <LYStrings.h>
+d24 1
+d26 1
+a26 1
+	"emacs",		/* + xemacs */
+d29 1
+a29 1
+	"joe",			/* + rjoe */
+d31 1
+d34 3
+a36 2
+	"pico",			/* + jpico */
+	"vi"			/* + vim, xvi, vile, elvis, view... + likely false matches */
+d42 1
+a42 1
+	if (LYstrstr(editor, table[n]) != 0) {
+a45 4
+    /*
+     * This really isn't right.  LYstrstr() might be too lax,
+     * but this should at least match basename to basename...
+     */
+d117 1
+a117 1
+    if (StrNCmp(newfile, "file://localhost/", 16) == 0)
+d155 1
+a155 2
+    if (lineno >= 0) {
+	*position = 0;
+d157 1
+a157 1
+	lineno--;
+d159 3
+a161 6
+	lineno += (nlinks ? links[cur].ly : 0);
+	if (lineno > 0)
+	    sprintf(position, "%d", lineno);
+    } else {
+	*position = '\0';
+    }
+d190 1
+a190 1
+    if (LYstrstr(editor, "pico")) {
+d211 1
+a211 1
+    else if (StrNCmp(editor, "VZ", 2) == 0) {
+d218 1
+a218 1
+    } else if (StrNCmp(editor, "edit", 4) == 0) {
+@
+
+

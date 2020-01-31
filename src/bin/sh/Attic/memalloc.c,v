@@ -1,0 +1,428 @@
+head	1.4;
+access;
+symbols
+	MIRBSD_9_BASE:1.3
+	MIRBSD_8:1.3.0.2
+	MIRBSD_8_BASE:1.3
+	cvs-200507231800:1.1.3.1
+	netbsd:1.1.3;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2007.03.19.15.31.49;	author tg;	state dead;
+branches;
+next	1.3;
+commitid	10045FEABF71FCB0511;
+
+1.3
+date	2005.07.23.20.33.23;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	184042e2a997cde1;
+
+1.2
+date	2005.07.23.20.07.46;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	29cb42e2a3a1ab1b;
+
+1.1
+date	2005.07.23.18.58.25;	author tg;	state Exp;
+branches
+	1.1.3.1;
+next	;
+commitid	186c42e2935537a6;
+
+1.1.3.1
+date	2005.07.23.18.58.25;	author tg;	state Exp;
+branches;
+next	;
+commitid	186c42e2935537a6;
+
+
+desc
+@@
+
+
+1.4
+log
+@nuke nbsh(1) – I switched back to mksh(1) as /bin/sh a while ago due to
+bugs in nbsh(1) which will be made available as port, and it's cruel
+code, using strcpy(3) et al. all over the place; using mksh as /bin/sh
+will lead to less portable shell scripting in our base system, some of
+which can then only be detected when using the bash, ash, nbsh, pdksh,
+zsh or Heirloom sh ports (some of which are to be done…), but actually
+I somehow don't care.
+
+I guess the policy, starting from now, is:
+• use “#!/bin/mksh” or, if it's not definitively MirOS-only,
+  use “#!/usr/bin/env mksh” instead; do *not* use “#!/bin/sh”
+  if you use any extensions unless it's for the common subset
+  of bash and mksh and that's clearly documented (or it uses
+  some kind of re-exec technique like src/etc/rc,v 1.62)
+• make(1) – MirMake – has been using mksh for a while
+• stuff that's run with /bin/sh from the base system, i.e.
+  /etc/rc and friends, are OK to use mksh witho̲u̲t̲ a re-exec
+  technique, starting from now
+@
+text
+@/**	$MirOS: src/bin/sh/memalloc.c,v 1.3 2005/07/23 20:33:23 tg Exp $ */
+/*	$NetBSD: memalloc.c,v 1.28 2003/08/07 09:05:34 agc Exp $	*/
+
+/*-
+ * Copyright (c) 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Kenneth Almquist.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/cdefs.h>
+__SCCSID("@@(#)memalloc.c	8.3 (Berkeley) 5/4/95");
+__RCSID("$MirOS: src/bin/sh/memalloc.c,v 1.3 2005/07/23 20:33:23 tg Exp $");
+
+#include <stdlib.h>
+#include <unistd.h>
+
+#include "shell.h"
+#include "output.h"
+#include "memalloc.h"
+#include "error.h"
+#include "machdep.h"
+#include "mystring.h"
+
+/*
+ * Like malloc, but returns an error when out of space.
+ */
+
+pointer
+ckmalloc(int nbytes)
+{
+	pointer p;
+
+	p = malloc(nbytes);
+	if (p == NULL)
+		error("Out of space");
+	return p;
+}
+
+
+/*
+ * Same for realloc.
+ */
+
+pointer
+ckrealloc(pointer p, int nbytes)
+{
+	p = realloc(p, nbytes);
+	if (p == NULL)
+		error("Out of space");
+	return p;
+}
+
+
+/*
+ * Make a copy of a string in safe storage.
+ */
+
+char *
+savestr(const char *s)
+{
+	char *p;
+
+	p = ckmalloc(strlen(s) + 1);
+	strcpy(p, s);
+	return p;
+}
+
+
+/*
+ * Parse trees for commands are allocated in lifo order, so we use a stack
+ * to make this more efficient, and also to avoid all sorts of exception
+ * handling code to handle interrupts in the middle of a parse.
+ *
+ * The size 504 was chosen because the Ultrix malloc handles that size
+ * well.
+ */
+
+#define MINSIZE 504		/* minimum size of a block */
+
+struct stack_block {
+	struct stack_block *prev;
+	char space[MINSIZE];
+};
+
+struct stack_block stackbase;
+struct stack_block *stackp = &stackbase;
+struct stackmark *markp;
+char *stacknxt = stackbase.space;
+int stacknleft = MINSIZE;
+int sstrnleft;
+int herefd = -1;
+
+pointer
+stalloc(int nbytes)
+{
+	char *p;
+
+	nbytes = SHELL_ALIGN(nbytes);
+	if (nbytes > stacknleft) {
+		int blocksize;
+		struct stack_block *sp;
+
+		blocksize = nbytes;
+		if (blocksize < MINSIZE)
+			blocksize = MINSIZE;
+		INTOFF;
+		sp = ckmalloc(sizeof(struct stack_block) - MINSIZE + blocksize);
+		sp->prev = stackp;
+		stacknxt = sp->space;
+		stacknleft = blocksize;
+		stackp = sp;
+		INTON;
+	}
+	p = stacknxt;
+	stacknxt += nbytes;
+	stacknleft -= nbytes;
+	return p;
+}
+
+
+void
+stunalloc(pointer p)
+{
+	if (p == NULL) {
+		write(2, "stunalloc\n", 10);
+		abort();
+	}
+	stacknleft += stacknxt - (char *)p;
+	stacknxt = p;
+}
+
+
+
+void
+setstackmark(struct stackmark *mark)
+{
+	mark->stackp = stackp;
+	mark->stacknxt = stacknxt;
+	mark->stacknleft = stacknleft;
+	mark->marknext = markp;
+	markp = mark;
+}
+
+
+void
+popstackmark(struct stackmark *mark)
+{
+	struct stack_block *sp;
+
+	INTOFF;
+	markp = mark->marknext;
+	while (stackp != mark->stackp) {
+		sp = stackp;
+		stackp = sp->prev;
+		ckfree(sp);
+	}
+	stacknxt = mark->stacknxt;
+	stacknleft = mark->stacknleft;
+	INTON;
+}
+
+
+/*
+ * When the parser reads in a string, it wants to stick the string on the
+ * stack and only adjust the stack pointer when it knows how big the
+ * string is.  Stackblock (defined in stack.h) returns a pointer to a block
+ * of space on top of the stack and stackblocklen returns the length of
+ * this block.  Growstackblock will grow this space by at least one byte,
+ * possibly moving it (like realloc).  Grabstackblock actually allocates the
+ * part of the block that has been used.
+ */
+
+void
+growstackblock(void)
+{
+	int newlen = SHELL_ALIGN(stacknleft * 2 + 100);
+
+	if (stacknxt == stackp->space && stackp != &stackbase) {
+		struct stack_block *oldstackp;
+		struct stackmark *xmark;
+		struct stack_block *sp;
+
+		INTOFF;
+		oldstackp = stackp;
+		sp = stackp;
+		stackp = sp->prev;
+		sp = ckrealloc((pointer)sp,
+		    sizeof(struct stack_block) - MINSIZE + newlen);
+		sp->prev = stackp;
+		stackp = sp;
+		stacknxt = sp->space;
+		stacknleft = newlen;
+
+		/*
+		 * Stack marks pointing to the start of the old block
+		 * must be relocated to point to the new block 
+		 */
+		xmark = markp;
+		while (xmark != NULL && xmark->stackp == oldstackp) {
+			xmark->stackp = stackp;
+			xmark->stacknxt = stacknxt;
+			xmark->stacknleft = stacknleft;
+			xmark = xmark->marknext;
+		}
+		INTON;
+	} else {
+		char *oldspace = stacknxt;
+		int oldlen = stacknleft;
+		char *p = stalloc(newlen);
+
+		(void)memcpy(p, oldspace, oldlen);
+		stacknxt = p;			/* free the space */
+		stacknleft += newlen;		/* we just allocated */
+	}
+}
+
+void
+grabstackblock(int len)
+{
+	len = SHELL_ALIGN(len);
+	stacknxt += len;
+	stacknleft -= len;
+}
+
+/*
+ * The following routines are somewhat easier to use than the above.
+ * The user declares a variable of type STACKSTR, which may be declared
+ * to be a register.  The macro STARTSTACKSTR initializes things.  Then
+ * the user uses the macro STPUTC to add characters to the string.  In
+ * effect, STPUTC(c, p) is the same as *p++ = c except that the stack is
+ * grown as necessary.  When the user is done, she can just leave the
+ * string there and refer to it using stackblock().  Or she can allocate
+ * the space for it using grabstackstr().  If it is necessary to allow
+ * someone else to use the stack temporarily and then continue to grow
+ * the string, the user should use grabstack to allocate the space, and
+ * then call ungrabstr(p) to return to the previous mode of operation.
+ *
+ * USTPUTC is like STPUTC except that it doesn't check for overflow.
+ * CHECKSTACKSPACE can be called before USTPUTC to ensure that there
+ * is space for at least one character.
+ */
+
+char *
+growstackstr(void)
+{
+	int len = stackblocksize();
+	if (herefd >= 0 && len >= 1024) {
+		xwrite(herefd, stackblock(), len);
+		sstrnleft = len - 1;
+		return stackblock();
+	}
+	growstackblock();
+	sstrnleft = stackblocksize() - len - 1;
+	return stackblock() + len;
+}
+
+/*
+ * Called from CHECKSTRSPACE.
+ */
+
+char *
+makestrspace(void)
+{
+	int len = stackblocksize() - sstrnleft;
+	growstackblock();
+	sstrnleft = stackblocksize() - len;
+	return stackblock() + len;
+}
+
+void
+ungrabstackstr(char *s, char *p)
+{
+	stacknleft += stacknxt - s;
+	stacknxt = s;
+	sstrnleft = stacknleft - (p - s);
+
+}
+@
+
+
+1.3
+log
+@more build fixes for __CRAZY (not finished), and cleanup
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/bin/sh/bltin.h,v 1.2 2005/07/23 19:16:50 tg Exp $ */
+d38 1
+a38 1
+__RCSID("$MirOS: memalloc.c,v 1.28 2003/08/07 09:05:34 agc Exp $");
+@
+
+
+1.2
+log
+@kill more #if and string madness
+@
+text
+@d1 1
+d37 2
+a38 7
+#ifndef lint
+#if 0
+static char sccsid[] = "@@(#)memalloc.c	8.3 (Berkeley) 5/4/95";
+#else
+__RCSID("$NetBSD: memalloc.c,v 1.28 2003/08/07 09:05:34 agc Exp $");
+#endif
+#endif /* not lint */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d94 1
+a94 1
+	scopy(s, p);
+d154 1
+a154 1
+	if (p == NULL) {		/*DEBUG */
+@
+
+
+1.1.3.1
+log
+@Import selected files from TNF's sh(1), an ash derivate
+@
+text
+@@

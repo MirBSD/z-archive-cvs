@@ -1,0 +1,524 @@
+head	1.3;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.3.4.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.4
+	cvs-20101220:1.1.1.4
+	mbsd-20101220:1.1.1.3.0.4
+	cvs-201012191730:1.1.1.3
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.3
+	cvs-200805071200:1.1.1.3
+	MIRBSD_10:1.1.1.3.0.2
+	MIRBSD_10_BASE:1.1.1.3
+	cvs-200803022030:1.1.1.3
+	cvs-200707152000:1.1.1.3
+	cvs-200704292000:1.1.1.3
+	cvs-200702051700:1.1.1.3
+	cvs-200609121900:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.2
+	cvs-200606151800:1.1.1.2
+	cvs-200603231300:1.1.1.2
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2014.06.09.15.18.00;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005395CFC65E5646F1;
+
+1.2
+date	2011.07.02.15.04.12;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E0F31C5496AB95F;
+
+1.1
+date	2005.02.05.17.24.29;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.29;	author tg;	state Exp;
+branches
+	1.1.1.1.2.1;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.03.23.13.10.11;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	10044229DEA33D36552;
+
+1.1.1.3
+date	2007.02.05.17.06.49;	author tg;	state Exp;
+branches
+	1.1.1.3.4.1;
+next	1.1.1.4;
+commitid	10045C763C551AABAF7;
+
+1.1.1.4
+date	2011.07.02.15.01.09;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.1.2.1
+date	2006.03.30.19.28.11;	author tg;	state Exp;
+branches;
+next	;
+commitid	100442C309C7183FA09;
+
+1.1.1.3.4.1
+date	2011.07.02.15.03.00;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.127.1
+date	2010.12.19.14.45.47;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2014.06.09.14.29.19;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@/*
+ * Copyright (c) 1999-2001 Proofpoint, Inc. and its suppliers.
+ *	All rights reserved.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ *
+ * Contributed by Exactis.com, Inc.
+ *
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: timers.c,v 8.27 2013-11-22 20:51:57 ca Exp $")
+
+#if _FFR_TIMERS
+# include <sys/types.h>
+# include <sm/time.h>
+# include "sendmail.h"
+# include <sys/resource.h>	/* Must be after sendmail.h for NCR MP-RAS */
+
+static TIMER	BaseTimer;		/* current baseline */
+static int	NTimers;		/* current pointer into stack */
+static TIMER	*TimerStack[MAXTIMERSTACK];
+
+static void
+# ifdef __STDC__
+warntimer(const char *msg, ...)
+# else /* __STDC__ */
+warntimer(msg, va_alist)
+	const char *msg;
+	va_dcl
+# endif /* __STDC__ */
+{
+	char buf[MAXLINE];
+	SM_VA_LOCAL_DECL
+
+# if 0
+	if (!tTd(98, 30))
+		return;
+# endif /* 0 */
+	SM_VA_START(ap, msg);
+	(void) sm_vsnprintf(buf, sizeof(buf), msg, ap);
+	SM_VA_END(ap);
+	sm_syslog(LOG_NOTICE, CurEnv->e_id, "%s; e_timers=0x%lx",
+		  buf, (unsigned long) &CurEnv->e_timers);
+}
+
+static void
+zerotimer(ptimer)
+	TIMER *ptimer;
+{
+	memset(ptimer, '\0', sizeof(*ptimer));
+}
+
+static void
+addtimer(ta, tb)
+	TIMER *ta;
+	TIMER *tb;
+{
+	tb->ti_wall_sec += ta->ti_wall_sec;
+	tb->ti_wall_usec += ta->ti_wall_usec;
+	if (tb->ti_wall_usec > 1000000)
+	{
+		tb->ti_wall_sec++;
+		tb->ti_wall_usec -= 1000000;
+	}
+	tb->ti_cpu_sec += ta->ti_cpu_sec;
+	tb->ti_cpu_usec += ta->ti_cpu_usec;
+	if (tb->ti_cpu_usec > 1000000)
+	{
+		tb->ti_cpu_sec++;
+		tb->ti_cpu_usec -= 1000000;
+	}
+}
+
+static void
+subtimer(ta, tb)
+	TIMER *ta;
+	TIMER *tb;
+{
+	tb->ti_wall_sec -= ta->ti_wall_sec;
+	tb->ti_wall_usec -= ta->ti_wall_usec;
+	if (tb->ti_wall_usec < 0)
+	{
+		tb->ti_wall_sec--;
+		tb->ti_wall_usec += 1000000;
+	}
+	tb->ti_cpu_sec -= ta->ti_cpu_sec;
+	tb->ti_cpu_usec -= ta->ti_cpu_usec;
+	if (tb->ti_cpu_usec < 0)
+	{
+		tb->ti_cpu_sec--;
+		tb->ti_cpu_usec += 1000000;
+	}
+}
+
+static int
+getcurtimer(ptimer)
+	TIMER *ptimer;
+{
+	struct rusage ru;
+	struct timeval now;
+
+	if (getrusage(RUSAGE_SELF, &ru) < 0 || gettimeofday(&now, NULL) < 0)
+		return -1;
+	ptimer->ti_wall_sec = now.tv_sec;
+	ptimer->ti_wall_usec = now.tv_usec;
+	ptimer->ti_cpu_sec = ru.ru_utime.tv_sec + ru.ru_stime.tv_sec;
+	ptimer->ti_cpu_usec = ru.ru_utime.tv_usec + ru.ru_stime.tv_usec;
+	if (ptimer->ti_cpu_usec > 1000000)
+	{
+		ptimer->ti_cpu_sec++;
+		ptimer->ti_cpu_usec -= 1000000;
+	}
+	return 0;
+}
+
+static void
+getinctimer(ptimer)
+	TIMER *ptimer;
+{
+	TIMER cur;
+
+	if (getcurtimer(&cur) < 0)
+	{
+		zerotimer(ptimer);
+		return;
+	}
+	if (BaseTimer.ti_wall_sec == 0)
+	{
+		/* first call */
+		memset(ptimer, '\0', sizeof(*ptimer));
+	}
+	else
+	{
+		*ptimer = cur;
+		subtimer(&BaseTimer, ptimer);
+	}
+	BaseTimer = cur;
+}
+
+void
+flushtimers()
+{
+	NTimers = 0;
+	(void) getcurtimer(&BaseTimer);
+}
+
+void
+pushtimer(ptimer)
+	TIMER *ptimer;
+{
+	int i;
+	int save_errno = errno;
+	TIMER incr;
+
+	/* find how much time has changed since last call */
+	getinctimer(&incr);
+
+	/* add that into the old timers */
+	i = NTimers;
+	if (i > MAXTIMERSTACK)
+		i = MAXTIMERSTACK;
+	while (--i >= 0)
+	{
+		addtimer(&incr, TimerStack[i]);
+		if (TimerStack[i] == ptimer)
+		{
+			warntimer("Timer@@0x%lx already on stack, index=%d, NTimers=%d",
+				  (unsigned long) ptimer, i, NTimers);
+			errno = save_errno;
+			return;
+		}
+	}
+	errno = save_errno;
+
+	/* handle stack overflow */
+	if (NTimers >= MAXTIMERSTACK)
+		return;
+
+	/* now add the timer to the stack */
+	TimerStack[NTimers++] = ptimer;
+}
+
+void
+poptimer(ptimer)
+	TIMER *ptimer;
+{
+	int i;
+	int save_errno = errno;
+	TIMER incr;
+
+	/* find how much time has changed since last call */
+	getinctimer(&incr);
+
+	/* add that into the old timers */
+	i = NTimers;
+	if (i > MAXTIMERSTACK)
+		i = MAXTIMERSTACK;
+	while (--i >= 0)
+		addtimer(&incr, TimerStack[i]);
+
+	/* pop back to this timer */
+	for (i = 0; i < NTimers; i++)
+	{
+		if (TimerStack[i] == ptimer)
+			break;
+	}
+
+	if (i != NTimers - 1)
+		warntimer("poptimer: odd pop (timer=0x%lx, index=%d, NTimers=%d)",
+			  (unsigned long) ptimer, i, NTimers);
+	NTimers = i;
+
+	/* clean up and return */
+	errno = save_errno;
+}
+
+char *
+strtimer(ptimer)
+	TIMER *ptimer;
+{
+	static char buf[40];
+
+	(void) sm_snprintf(buf, sizeof(buf), "%ld.%06ldr/%ld.%06ldc",
+		ptimer->ti_wall_sec, ptimer->ti_wall_usec,
+		ptimer->ti_cpu_sec, ptimer->ti_cpu_usec);
+	return buf;
+}
+#endif /* _FFR_TIMERS */
+@
+
+
+1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 1999-2001 Sendmail, Inc. and its suppliers.
+d14 1
+a14 1
+SM_RCSID("@@(#)$Id: timers.c,v 8.26 2006/08/15 23:24:58 ca Exp $")
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d14 1
+a14 1
+SM_RCSID("@@(#)$Sendmail: timers.c,v 8.24 2001/09/11 04:05:17 gshapiro Exp $")
+d18 1
+a18 1
+# include <sys/time.h>
+d43 1
+a43 1
+	(void) sm_vsnprintf(buf, sizeof buf, msg, ap);
+d53 1
+a53 1
+	memset(ptimer, '\0', sizeof *ptimer);
+d133 1
+a133 1
+		memset(ptimer, '\0', sizeof *ptimer);
+d226 1
+a226 1
+	(void) sm_snprintf(buf, sizeof buf, "%ld.%06ldr/%ld.%06ldc",
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d14 1
+a14 1
+SM_RCSID("@@(#)$Id: timers.c,v 8.26 2006/08/15 23:24:58 ca Exp $")
+d18 1
+a18 1
+# include <sm/time.h>
+d43 1
+a43 1
+	(void) sm_vsnprintf(buf, sizeof(buf), msg, ap);
+d53 1
+a53 1
+	memset(ptimer, '\0', sizeof(*ptimer));
+d133 1
+a133 1
+		memset(ptimer, '\0', sizeof(*ptimer));
+d226 1
+a226 1
+	(void) sm_snprintf(buf, sizeof(buf), "%ld.%06ldr/%ld.%06ldc",
+@
+
+
+1.1.127.2
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 1999-2001 Proofpoint, Inc. and its suppliers.
+d14 1
+a14 1
+SM_RCSID("@@(#)$Id: timers.c,v 8.27 2013-11-22 20:51:57 ca Exp $")
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.1.2.1
+log
+@MFC most of the recent sendmail updates to MirOS #8-stable
+agreed bsiegert@@
+
+This also changes the LOCALBASE stuff, links libmilter not
+against LDAP, etc. but doesn't install the FreeBSD 6 confs
+nor a shared libmilter in order to pass a no-files-diff:
+
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo find / -ls | sort -k11 >~/x1
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo make install
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo make distribution
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo find / -ls | sort -k11 | diff -u ~/x1 - | less
+
+Note: files in /etc/mail/ are also changed, this affects the etc8.ngz set
+on fresh installs and cannot(!) be automatically upgraded!
+@
+text
+@d14 1
+a14 1
+SM_RCSID("@@(#)$Sendmail: timers.c,v 8.25 2005/06/14 23:07:23 ca Exp $")
+d18 1
+a18 1
+# include <sm/time.h>
+@
+
+
+1.1.1.2
+log
+@Update to Sendmail 8.13.6
+@
+text
+@d14 1
+a14 1
+SM_RCSID("@@(#)$Sendmail: timers.c,v 8.25 2005/06/14 23:07:23 ca Exp $")
+d18 1
+a18 1
+# include <sm/time.h>
+@
+
+
+1.1.1.3
+log
+@Import Sendmail 8.14.0 via OpenBSD
+@
+text
+@d14 1
+a14 1
+SM_RCSID("@@(#)$Sendmail: timers.c,v 8.26 2006/08/15 23:24:58 ca Exp $")
+d43 1
+a43 1
+	(void) sm_vsnprintf(buf, sizeof(buf), msg, ap);
+d53 1
+a53 1
+	memset(ptimer, '\0', sizeof(*ptimer));
+d133 1
+a133 1
+		memset(ptimer, '\0', sizeof(*ptimer));
+d226 1
+a226 1
+	(void) sm_snprintf(buf, sizeof(buf), "%ld.%06ldr/%ld.%06ldc",
+@
+
+
+1.1.1.3.4.1
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d14 1
+a14 1
+SM_RCSID("@@(#)$Id: timers.c,v 8.26 2006/08/15 23:24:58 ca Exp $")
+@
+
+
+1.1.1.4
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d14 1
+a14 1
+SM_RCSID("@@(#)$Id: timers.c,v 8.26 2006/08/15 23:24:58 ca Exp $")
+@
+
+

@@ -1,0 +1,433 @@
+head	1.4;
+access;
+symbols
+	tg-ntpd-sigusr1-branch:1.4.0.4
+	MIRBSD_10:1.4.0.2
+	MIRBSD_10_BASE:1.4
+	MIRBSD_9_BASE:1.1.1.3
+	MIRBSD_8:1.1.1.3.0.2
+	MIRBSD_8_BASE:1.1.1.3
+	cvs-200512032330:1.1.1.3
+	cvs-200510270930:1.1.1.3
+	cvs-200507211800:1.1.1.3
+	cvs-200504291700:1.1.1.2
+	cvs-200504141900:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2007.08.10.22.35.01;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10046BCE80C566B92F8;
+
+1.3
+date	2007.08.10.22.22.03;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10046BCE5054BBA756D;
+
+1.2
+date	2007.07.31.19.57.02;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10046AF9304601393BC;
+
+1.1
+date	2005.02.05.17.30.58;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.30.58;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.14.21.05.29;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2005.07.21.21.03.20;	author tg;	state Exp;
+branches;
+next	;
+commitid	560042e0092f571e;
+
+
+desc
+@@
+
+
+1.4
+log
+@• cast increases required alignment of target type
+both in my code and henning's code ☺
+@
+text
+@/*	$OpenBSD: config.c,v 1.18 2005/05/11 15:12:35 henning Exp $ */
+
+/*
+ * Copyright (c) 2007 Thorsten Glaser <tg@@mirbsd.de>
+ * Copyright (c) 2003, 2004 Henning Brauer <henning@@openbsd.org>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+
+#include <netinet/in.h>
+#include <arpa/nameser.h>
+
+#include <errno.h>
+#include <resolv.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "ntpd.h"
+
+__RCSID("$MirOS: src/usr.sbin/ntpd/config.c,v 1.3 2007/08/10 22:22:03 tg Exp $");
+
+struct ntp_addr	*host_v4(const char *);
+struct ntp_addr	*host_v6(const char *);
+
+static u_int32_t		 maxid = 0;
+
+int
+host(const char *s, struct ntp_addr **hn)
+{
+	struct ntp_addr	*h = NULL;
+	char *q = NULL, *cp;
+	int portno = 0;
+
+	if (!strcmp(s, "*"))
+		if ((h = calloc(1, sizeof(struct ntp_addr))) == NULL)
+			fatal(NULL);
+
+	if ((cp = strrchr(s, '*')) != NULL) {
+		const char *ep = NULL;
+
+		if ((q = strdup(s)) == NULL)
+			fatal(NULL);
+		cp = q + (cp - s);
+		*cp++ = '\0';
+		portno = strtonum(cp, 1, 65535, &ep);
+		if (ep) {
+			log_warnx("syntax error: port number for %s is %s: %s",
+			    q, ep, cp);
+			exit(1);
+		}
+	}
+
+	/* IPv4 address? */
+	if (h == NULL)
+		h = host_v4(q ? q : s);
+
+	/* IPv6 address? */
+	if (h == NULL)
+		h = host_v6(q ? q : s);
+
+	if (q)
+		free(q);
+
+	if (h == NULL)
+		return (0);
+
+	if (portno) {
+		struct sockaddr_in *sa_in;
+		struct sockaddr_in6 *sa_in6;
+
+		switch (h->ss.ss_family) {
+		case AF_INET:
+			sa_in = (struct sockaddr_in *)&h->ss;
+			sa_in->sin_port = htons(portno);
+			break;
+		case AF_INET6:
+			sa_in6 = (struct sockaddr_in6 *)&h->ss;
+			sa_in6->sin6_port = htons(portno);
+			break;
+		default:
+			fatal("wrong AF for port assignment in config::host");
+			/* NOTREACHED */
+		}
+	}
+
+	*hn = h;
+
+	return (1);
+}
+
+struct ntp_addr	*
+host_v4(const char *s)
+{
+	struct in_addr		 ina;
+	struct sockaddr_in	*sa_in;
+	struct ntp_addr		*h;
+
+	bzero(&ina, sizeof(struct in_addr));
+	if (inet_pton(AF_INET, s, &ina) != 1)
+		return (NULL);
+
+	if ((h = calloc(1, sizeof(struct ntp_addr))) == NULL)
+		fatal(NULL);
+	sa_in = (struct sockaddr_in *)&h->ss;
+	sa_in->sin_len = sizeof(struct sockaddr_in);
+	sa_in->sin_family = AF_INET;
+	sa_in->sin_addr.s_addr = ina.s_addr;
+
+	return (h);
+}
+
+struct ntp_addr	*
+host_v6(const char *s)
+{
+	struct addrinfo		 hints, *res;
+	struct sockaddr_in6	*sa_in6, sa_in6tmp;
+	struct ntp_addr		*h = NULL;
+
+	bzero(&hints, sizeof(hints));
+	hints.ai_family = AF_INET6;
+	hints.ai_socktype = SOCK_DGRAM; /*dummy*/
+	hints.ai_flags = AI_NUMERICHOST;
+	if (getaddrinfo(s, "0", &hints, &res) == 0) {
+		if ((h = calloc(1, sizeof(struct ntp_addr))) == NULL)
+			fatal(NULL);
+		sa_in6 = (struct sockaddr_in6 *)&h->ss;
+		sa_in6->sin6_len = sizeof(struct sockaddr_in6);
+		sa_in6->sin6_family = AF_INET6;
+		memcpy(&sa_in6tmp, res->ai_addr, sizeof (struct sockaddr_in6));
+		memcpy(&sa_in6->sin6_addr, &sa_in6tmp.sin6_addr,
+		    sizeof(sa_in6->sin6_addr));
+		sa_in6->sin6_scope_id = sa_in6tmp.sin6_scope_id;
+
+		freeaddrinfo(res);
+	}
+
+	return (h);
+}
+
+int
+host_dns(const char *s, struct ntp_addr **hn)
+{
+	struct addrinfo		 hints, *res0, *res;
+	int			 error, cnt = 0;
+	struct sockaddr_in	*sa_in, sa_intmp;
+	struct sockaddr_in6	*sa_in6, sa_in6tmp;
+	struct ntp_addr		*h, *hh = NULL;
+
+	bzero(&hints, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM; /* DUMMY */
+	error = getaddrinfo(s, NULL, &hints, &res0);
+	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME)
+			return (0);
+	if (error) {
+		log_warnx("could not parse \"%s\": %s", s,
+		    gai_strerror(error));
+		return (-1);
+	}
+
+	for (res = res0; res && cnt < MAX_SERVERS_DNS; res = res->ai_next) {
+		if (res->ai_family != AF_INET &&
+		    res->ai_family != AF_INET6)
+			continue;
+		if ((h = calloc(1, sizeof(struct ntp_addr))) == NULL)
+			fatal(NULL);
+		h->ss.ss_family = res->ai_family;
+		if (res->ai_family == AF_INET) {
+			sa_in = (struct sockaddr_in *)&h->ss;
+			sa_in->sin_len = sizeof(struct sockaddr_in);
+			memcpy(&sa_intmp, res->ai_addr,
+			    sizeof (struct sockaddr_in));
+			sa_in->sin_addr.s_addr = sa_intmp.sin_addr.s_addr;
+		} else {
+			sa_in6 = (struct sockaddr_in6 *)&h->ss;
+			sa_in6->sin6_len = sizeof(struct sockaddr_in6);
+			memcpy(&sa_in6tmp, res->ai_addr,
+			    sizeof (struct sockaddr_in6));
+			memcpy(&sa_in6->sin6_addr, &sa_in6tmp.sin6_addr,
+			    sizeof (struct in6_addr));
+		}
+
+		h->next = hh;
+		hh = h;
+		cnt++;
+	}
+	freeaddrinfo(res0);
+
+	*hn = hh;
+	return (cnt);
+}
+
+struct ntp_peer *
+new_peer(void)
+{
+	struct ntp_peer	*p;
+
+	if ((p = calloc(1, sizeof(struct ntp_peer))) == NULL)
+		fatal("conf_main server calloc");
+	p->id = ++maxid;
+
+	return (p);
+}
+@
+
+
+1.3
+log
+@new feature: use other UDP ports than 123 for peers or listening
+@
+text
+@d4 1
+d35 1
+a35 1
+__RCSID("$MirOS: src/usr.sbin/ntpd/config.c,v 1.2 2007/07/31 19:57:02 tg Exp $");
+d131 1
+a131 1
+	struct sockaddr_in6	*sa_in6;
+d144 2
+a145 2
+		memcpy(&sa_in6->sin6_addr,
+		    &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr,
+d147 1
+a147 2
+		sa_in6->sin6_scope_id =
+		    ((struct sockaddr_in6 *)res->ai_addr)->sin6_scope_id;
+d160 2
+a161 2
+	struct sockaddr_in	*sa_in;
+	struct sockaddr_in6	*sa_in6;
+d186 3
+a188 2
+			sa_in->sin_addr.s_addr = ((struct sockaddr_in *)
+			    res->ai_addr)->sin_addr.s_addr;
+d192 4
+a195 2
+			memcpy(&sa_in6->sin6_addr, &((struct sockaddr_in6 *)
+			    res->ai_addr)->sin6_addr, sizeof(struct in6_addr));
+@
+
+
+1.2
+log
+@introduce a most controversial feature (that's why not even documented):
+the “serverloop” keyword.
+
+What it does: act like “server” except that the stratum isn't, like nor-
+mally when the peer's stratum is taken for our reply, increased by one.
+
+What its use is: Imagine a home network of ≥2 boxen, connected to the
+outside via a shared uplink (possibly IPv4 and IPv6, or two uplinks).
+The boxen will each (this part is important!) configure at least one¹
+server from outside using “server”, as usual, and each other (i.e. them-
+selves, the boxen from the same LAN) using “serverloop” to stay syncho-
+nised if the uplink(s) go away without having the stratum go rooftop.
+¹) Using either 2 or 3 (or an even higher number) to make the total
+number of usable servers odd (i.e. not even) is highly suggested.
+
+Why people will hate me for it: it violates the (S)NTP RFCs.
+
+What you should do instead of using it: get an udcf(4) or mbg(4) device
+and do a local master using the sensors framework. Oops. Well, soonish.
+@
+text
+@d34 1
+a34 1
+__RCSID("$MirOS$");
+d45 2
+d52 15
+d69 1
+a69 1
+		h = host_v4(s);
+d73 4
+a76 1
+		h = host_v6(s);
+d81 19
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: config.c,v 1.15 2004/12/16 00:38:59 dtucker Exp $ */
+d34 2
+a57 1
+	*hn = h;
+d60 3
+a127 1
+	res_init();	/* XXX */
+d129 2
+d134 1
+a134 5
+		if (error == EAI_AGAIN || error == EAI_NODATA ||
+		    error == EAI_NONAME)
+			return (0);
+		else
+			return (-1);
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@we like OpenNTPD so much we want to have current one
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: config.c,v 1.17 2005/03/09 20:31:11 henning Exp $ */
+d124 1
+a125 2
+	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME)
+			return (0);
+d129 5
+a133 1
+		return (-1);
+@
+
+
+1.1.1.3
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: config.c,v 1.18 2005/05/11 15:12:35 henning Exp $ */
+d56 1
+a58 3
+
+	*hn = h;
+
+@
+
+

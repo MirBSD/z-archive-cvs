@@ -1,0 +1,1352 @@
+head	1.6;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.04.15.19.22.22;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.19.48.37;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520152445E05B912;
+
+1.4
+date	2008.06.12.20.54.54;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.05.13;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.25.13;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.21;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.37.20;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.59;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.23;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.21;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.04;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  t1parse.c                                                              */
+/*                                                                         */
+/*    Type 1 parser (body).                                                */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The Type 1 parser is in charge of the following:                      */
+  /*                                                                       */
+  /*  - provide an implementation of a growing sequence of objects called  */
+  /*    a `T1_Table' (used to build various tables needed by the loader).  */
+  /*                                                                       */
+  /*  - opening .pfb and .pfa files to extract their top-level and private */
+  /*    dictionaries.                                                      */
+  /*                                                                       */
+  /*  - read numbers, arrays & strings from any dictionary.                */
+  /*                                                                       */
+  /* See `t1load.c' to see how data is loaded from the font file.          */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+#include FT_INTERNAL_STREAM_H
+#include FT_INTERNAL_POSTSCRIPT_AUX_H
+
+#include "t1parse.h"
+
+#include "t1errors.h"
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_t1parse
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                   INPUT STREAM PARSER                         *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  /* see Adobe Technical Note 5040.Download_Fonts.pdf */
+
+  static FT_Error
+  read_pfb_tag( FT_Stream   stream,
+                FT_UShort  *atag,
+                FT_ULong   *asize )
+  {
+    FT_Error   error;
+    FT_UShort  tag;
+    FT_ULong   size;
+
+
+    *atag  = 0;
+    *asize = 0;
+
+    if ( !FT_READ_USHORT( tag ) )
+    {
+      if ( tag == 0x8001U || tag == 0x8002U )
+      {
+        if ( !FT_READ_ULONG_LE( size ) )
+          *asize = size;
+      }
+
+      *atag = tag;
+    }
+
+    return error;
+  }
+
+
+  static FT_Error
+  check_type1_format( FT_Stream    stream,
+                      const char*  header_string,
+                      size_t       header_length )
+  {
+    FT_Error   error;
+    FT_UShort  tag;
+    FT_ULong   dummy;
+
+
+    if ( FT_STREAM_SEEK( 0 ) )
+      goto Exit;
+
+    error = read_pfb_tag( stream, &tag, &dummy );
+    if ( error )
+      goto Exit;
+
+    /* We assume that the first segment in a PFB is always encoded as   */
+    /* text.  This might be wrong (and the specification doesn't insist */
+    /* on that), but we have never seen a counterexample.               */
+    if ( tag != 0x8001U && FT_STREAM_SEEK( 0 ) )
+      goto Exit;
+
+    if ( !FT_FRAME_ENTER( header_length ) )
+    {
+      error = FT_Err_Ok;
+
+      if ( ft_memcmp( stream->cursor, header_string, header_length ) != 0 )
+        error = FT_THROW( Unknown_File_Format );
+
+      FT_FRAME_EXIT();
+    }
+
+  Exit:
+    return error;
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  T1_New_Parser( T1_Parser      parser,
+                 FT_Stream      stream,
+                 FT_Memory      memory,
+                 PSAux_Service  psaux )
+  {
+    FT_Error   error;
+    FT_UShort  tag;
+    FT_ULong   size;
+
+
+    psaux->ps_parser_funcs->init( &parser->root, NULL, NULL, memory );
+
+    parser->stream       = stream;
+    parser->base_len     = 0;
+    parser->base_dict    = NULL;
+    parser->private_len  = 0;
+    parser->private_dict = NULL;
+    parser->in_pfb       = 0;
+    parser->in_memory    = 0;
+    parser->single_block = 0;
+
+    /* check the header format */
+    error = check_type1_format( stream, "%!PS-AdobeFont", 14 );
+    if ( error )
+    {
+      if ( FT_ERR_NEQ( error, Unknown_File_Format ) )
+        goto Exit;
+
+      error = check_type1_format( stream, "%!FontType", 10 );
+      if ( error )
+      {
+        FT_TRACE2(( "  not a Type 1 font\n" ));
+        goto Exit;
+      }
+    }
+
+    /******************************************************************/
+    /*                                                                */
+    /* Here a short summary of what is going on:                      */
+    /*                                                                */
+    /*   When creating a new Type 1 parser, we try to locate and load */
+    /*   the base dictionary if this is possible (i.e., for PFB       */
+    /*   files).  Otherwise, we load the whole font into memory.      */
+    /*                                                                */
+    /*   When `loading' the base dictionary, we only setup pointers   */
+    /*   in the case of a memory-based stream.  Otherwise, we         */
+    /*   allocate and load the base dictionary in it.                 */
+    /*                                                                */
+    /*   parser->in_pfb is set if we are in a binary (`.pfb') font.   */
+    /*   parser->in_memory is set if we have a memory stream.         */
+    /*                                                                */
+
+    /* try to compute the size of the base dictionary;     */
+    /* look for a Postscript binary file tag, i.e., 0x8001 */
+    if ( FT_STREAM_SEEK( 0L ) )
+      goto Exit;
+
+    error = read_pfb_tag( stream, &tag, &size );
+    if ( error )
+      goto Exit;
+
+    if ( tag != 0x8001U )
+    {
+      /* assume that this is a PFA file for now; an error will */
+      /* be produced later when more things are checked        */
+      if ( FT_STREAM_SEEK( 0L ) )
+        goto Exit;
+      size = stream->size;
+    }
+    else
+      parser->in_pfb = 1;
+
+    /* now, try to load `size' bytes of the `base' dictionary we */
+    /* found previously                                          */
+
+    /* if it is a memory-based resource, set up pointers */
+    if ( !stream->read )
+    {
+      parser->base_dict = (FT_Byte*)stream->base + stream->pos;
+      parser->base_len  = size;
+      parser->in_memory = 1;
+
+      /* check that the `size' field is valid */
+      if ( FT_STREAM_SKIP( size ) )
+        goto Exit;
+    }
+    else
+    {
+      /* read segment in memory -- this is clumsy, but so does the format */
+      if ( FT_ALLOC( parser->base_dict, size )       ||
+           FT_STREAM_READ( parser->base_dict, size ) )
+        goto Exit;
+      parser->base_len = size;
+    }
+
+    parser->root.base   = parser->base_dict;
+    parser->root.cursor = parser->base_dict;
+    parser->root.limit  = parser->root.cursor + parser->base_len;
+
+  Exit:
+    if ( error && !parser->in_memory )
+      FT_FREE( parser->base_dict );
+
+    return error;
+  }
+
+
+  FT_LOCAL_DEF( void )
+  T1_Finalize_Parser( T1_Parser  parser )
+  {
+    FT_Memory  memory = parser->root.memory;
+
+
+    /* always free the private dictionary */
+    FT_FREE( parser->private_dict );
+
+    /* free the base dictionary only when we have a disk stream */
+    if ( !parser->in_memory )
+      FT_FREE( parser->base_dict );
+
+    parser->root.funcs.done( &parser->root );
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  T1_Get_Private_Dict( T1_Parser      parser,
+                       PSAux_Service  psaux )
+  {
+    FT_Stream  stream = parser->stream;
+    FT_Memory  memory = parser->root.memory;
+    FT_Error   error  = FT_Err_Ok;
+    FT_ULong   size;
+
+
+    if ( parser->in_pfb )
+    {
+      /* in the case of the PFB format, the private dictionary can be  */
+      /* made of several segments.  We thus first read the number of   */
+      /* segments to compute the total size of the private dictionary  */
+      /* then re-read them into memory.                                */
+      FT_ULong   start_pos = FT_STREAM_POS();
+      FT_UShort  tag;
+
+
+      parser->private_len = 0;
+      for (;;)
+      {
+        error = read_pfb_tag( stream, &tag, &size );
+        if ( error )
+          goto Fail;
+
+        if ( tag != 0x8002U )
+          break;
+
+        parser->private_len += size;
+
+        if ( FT_STREAM_SKIP( size ) )
+          goto Fail;
+      }
+
+      /* Check that we have a private dictionary there */
+      /* and allocate private dictionary buffer        */
+      if ( parser->private_len == 0 )
+      {
+        FT_ERROR(( "T1_Get_Private_Dict:"
+                   " invalid private dictionary section\n" ));
+        error = FT_THROW( Invalid_File_Format );
+        goto Fail;
+      }
+
+      if ( FT_STREAM_SEEK( start_pos )                           ||
+           FT_ALLOC( parser->private_dict, parser->private_len ) )
+        goto Fail;
+
+      parser->private_len = 0;
+      for (;;)
+      {
+        error = read_pfb_tag( stream, &tag, &size );
+        if ( error || tag != 0x8002U )
+        {
+          error = FT_Err_Ok;
+          break;
+        }
+
+        if ( FT_STREAM_READ( parser->private_dict + parser->private_len,
+                             size ) )
+          goto Fail;
+
+        parser->private_len += size;
+      }
+    }
+    else
+    {
+      /* We have already `loaded' the whole PFA font file into memory; */
+      /* if this is a memory resource, allocate a new block to hold    */
+      /* the private dict.  Otherwise, simply overwrite into the base  */
+      /* dictionary block in the heap.                                 */
+
+      /* first of all, look at the `eexec' keyword */
+      FT_Byte*    cur   = parser->base_dict;
+      FT_Byte*    limit = cur + parser->base_len;
+      FT_Pointer  pos_lf;
+      FT_Bool     test_cr;
+
+
+    Again:
+      for (;;)
+      {
+        if ( cur[0] == 'e'   &&
+             cur + 9 < limit )      /* 9 = 5 letters for `eexec' + */
+                                    /* whitespace + 4 chars        */
+        {
+          if ( cur[1] == 'e' &&
+               cur[2] == 'x' &&
+               cur[3] == 'e' &&
+               cur[4] == 'c' )
+            break;
+        }
+        cur++;
+        if ( cur >= limit )
+        {
+          FT_ERROR(( "T1_Get_Private_Dict:"
+                     " could not find `eexec' keyword\n" ));
+          error = FT_THROW( Invalid_File_Format );
+          goto Exit;
+        }
+      }
+
+      /* check whether `eexec' was real -- it could be in a comment */
+      /* or string (as e.g. in u003043t.gsf from ghostscript)       */
+
+      parser->root.cursor = parser->base_dict;
+      /* set limit to `eexec' + whitespace + 4 characters */
+      parser->root.limit  = cur + 10;
+
+      cur   = parser->root.cursor;
+      limit = parser->root.limit;
+
+      while ( cur < limit )
+      {
+        if ( cur[0] == 'e'   &&
+             cur + 5 < limit )
+        {
+          if ( cur[1] == 'e' &&
+               cur[2] == 'x' &&
+               cur[3] == 'e' &&
+               cur[4] == 'c' )
+            goto Found;
+        }
+
+        T1_Skip_PS_Token( parser );
+        if ( parser->root.error )
+          break;
+        T1_Skip_Spaces  ( parser );
+        cur = parser->root.cursor;
+      }
+
+      /* we haven't found the correct `eexec'; go back and continue */
+      /* searching                                                  */
+
+      cur   = limit;
+      limit = parser->base_dict + parser->base_len;
+
+      if ( cur >= limit )
+      {
+        FT_ERROR(( "T1_Get_Private_Dict:"
+                   " premature end in private dictionary\n" ));
+        error = FT_THROW( Invalid_File_Format );
+        goto Exit;
+      }
+
+      goto Again;
+
+      /* now determine where to write the _encrypted_ binary private  */
+      /* dictionary.  We overwrite the base dictionary for disk-based */
+      /* resources and allocate a new block otherwise                 */
+
+    Found:
+      parser->root.limit = parser->base_dict + parser->base_len;
+
+      T1_Skip_PS_Token( parser );
+      cur   = parser->root.cursor;
+      limit = parser->root.limit;
+
+      /* According to the Type 1 spec, the first cipher byte must not be */
+      /* an ASCII whitespace character code (blank, tab, carriage return */
+      /* or line feed).  We have seen Type 1 fonts with two line feed    */
+      /* characters...  So skip now all whitespace character codes.      */
+      /*                                                                 */
+      /* On the other hand, Adobe's Type 1 parser handles fonts just     */
+      /* fine that are violating this limitation, so we add a heuristic  */
+      /* test to stop at \r only if it is not used for EOL.              */
+
+      pos_lf  = ft_memchr( cur, '\n', (size_t)( limit - cur ) );
+      test_cr = FT_BOOL( !pos_lf                                       ||
+                         pos_lf > ft_memchr( cur,
+                                             '\r',
+                                             (size_t)( limit - cur ) ) );
+
+      while ( cur < limit                    &&
+              ( *cur == ' '                ||
+                *cur == '\t'               ||
+                (test_cr && *cur == '\r' ) ||
+                *cur == '\n'               ) )
+        cur++;
+      if ( cur >= limit )
+      {
+        FT_ERROR(( "T1_Get_Private_Dict:"
+                   " `eexec' not properly terminated\n" ));
+        error = FT_THROW( Invalid_File_Format );
+        goto Exit;
+      }
+
+      size = parser->base_len - (FT_ULong)( cur - parser->base_dict );
+
+      if ( parser->in_memory )
+      {
+        /* note that we allocate one more byte to put a terminating `0' */
+        if ( FT_ALLOC( parser->private_dict, size + 1 ) )
+          goto Fail;
+        parser->private_len = size;
+      }
+      else
+      {
+        parser->single_block = 1;
+        parser->private_dict = parser->base_dict;
+        parser->private_len  = size;
+        parser->base_dict    = NULL;
+        parser->base_len     = 0;
+      }
+
+      /* now determine whether the private dictionary is encoded in binary */
+      /* or hexadecimal ASCII format -- decode it accordingly              */
+
+      /* we need to access the next 4 bytes (after the final whitespace */
+      /* following the `eexec' keyword); if they all are hexadecimal    */
+      /* digits, then we have a case of ASCII storage                   */
+
+      if ( cur + 3 < limit                                &&
+           ft_isxdigit( cur[0] ) && ft_isxdigit( cur[1] ) &&
+           ft_isxdigit( cur[2] ) && ft_isxdigit( cur[3] ) )
+      {
+        /* ASCII hexadecimal encoding */
+        FT_ULong  len;
+
+
+        parser->root.cursor = cur;
+        (void)psaux->ps_parser_funcs->to_bytes( &parser->root,
+                                                parser->private_dict,
+                                                parser->private_len,
+                                                &len,
+                                                0 );
+        parser->private_len = len;
+
+        /* put a safeguard */
+        parser->private_dict[len] = '\0';
+      }
+      else
+        /* binary encoding -- copy the private dict */
+        FT_MEM_MOVE( parser->private_dict, cur, size );
+    }
+
+    /* we now decrypt the encoded binary private dictionary */
+    psaux->t1_decrypt( parser->private_dict, parser->private_len, 55665U );
+
+    if ( parser->private_len < 4 )
+    {
+      FT_ERROR(( "T1_Get_Private_Dict:"
+                 " invalid private dictionary section\n" ));
+      error = FT_THROW( Invalid_File_Format );
+      goto Fail;
+    }
+
+    /* replace the four random bytes at the beginning with whitespace */
+    parser->private_dict[0] = ' ';
+    parser->private_dict[1] = ' ';
+    parser->private_dict[2] = ' ';
+    parser->private_dict[3] = ' ';
+
+    parser->root.base   = parser->private_dict;
+    parser->root.cursor = parser->private_dict;
+    parser->root.limit  = parser->root.cursor + parser->private_len;
+
+  Fail:
+  Exit:
+    return error;
+  }
+
+
+/* END */
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2008, 2009 by             */
+d122 1
+a122 1
+      error = T1_Err_Ok;
+d125 1
+a125 1
+        error = T1_Err_Unknown_File_Format;
+d146 1
+a146 1
+    psaux->ps_parser_funcs->init( &parser->root, 0, 0, memory );
+d150 1
+a150 1
+    parser->base_dict    = 0;
+d152 1
+a152 1
+    parser->private_dict = 0;
+d161 1
+a161 1
+      if ( error != T1_Err_Unknown_File_Format )
+d167 1
+a167 1
+        FT_TRACE2(( "[not a Type1 font]\n" ));
+d266 1
+a266 1
+    FT_Error   error  = T1_Err_Ok;
+d276 1
+a276 1
+      FT_Long    start_pos = FT_STREAM_POS();
+d302 1
+a302 1
+        error = T1_Err_Invalid_File_Format;
+d316 1
+a316 1
+          error = T1_Err_Ok;
+d335 4
+a338 3
+      FT_Byte*  cur   = parser->base_dict;
+      FT_Byte*  limit = cur + parser->base_len;
+      FT_Byte   c;
+d344 3
+a346 3
+        c = cur[0];
+        if ( c == 'e' && cur + 9 < limit )  /* 9 = 5 letters for `eexec' + */
+                                            /* newline + 4 chars           */
+d359 1
+a359 1
+          error = T1_Err_Invalid_File_Format;
+d368 2
+a369 1
+      parser->root.limit  = cur + 9;
+d376 9
+a384 2
+        if ( *cur == 'e' && ft_strncmp( (char*)cur, "eexec", 5 ) == 0 )
+          goto Found;
+d398 9
+d417 2
+a418 1
+      cur = parser->root.cursor;
+d420 1
+a420 1
+      /* according to the Type1 spec, the first cipher byte must not be  */
+d424 17
+a440 6
+      while ( cur < limit       &&
+              ( *cur == ' '  ||
+                *cur == '\t' || 
+                *cur == '\r' ||
+                *cur == '\n' ) )
+        ++cur;
+d445 1
+a445 1
+        error = T1_Err_Invalid_File_Format;
+d449 1
+a449 1
+      size = parser->base_len - ( cur - parser->base_dict );
+d463 1
+a463 1
+        parser->base_dict    = 0;
+d470 3
+a472 3
+      /* we need to access the next 4 bytes (after the final \r following */
+      /* the `eexec' keyword); if they all are hexadecimal digits, then   */
+      /* we have a case of ASCII storage                                  */
+d474 2
+a475 1
+      if ( ft_isxdigit( cur[0] ) && ft_isxdigit( cur[1] ) &&
+d479 1
+a479 1
+        FT_Long  len;
+d501 8
+@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2008 by                   */
+a37 1
+#include FT_INTERNAL_CALC_H
+d300 2
+a301 2
+        FT_ERROR(( "T1_Get_Private_Dict:" ));
+        FT_ERROR(( " invalid private dictionary section\n" ));
+d356 2
+a357 2
+          FT_ERROR(( "T1_Get_Private_Dict:" ));
+          FT_ERROR(( " could not find `eexec' keyword\n" ));
+d400 12
+a411 9
+      if ( *cur == '\r' )
+      {
+        cur++;
+        if ( *cur == '\n' )
+          cur++;
+      }
+      else if ( *cur == '\n' )
+        cur++;
+      else
+d413 2
+a414 2
+        FT_ERROR(( "T1_Get_Private_Dict:" ));
+        FT_ERROR(( " `eexec' not properly terminated\n" ));
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005 by                         */
+d68 2
+d73 1
+a73 1
+                FT_Long    *asize )
+d77 1
+a77 1
+    FT_Long    size;
+d87 1
+a87 1
+        if ( !FT_READ_LONG_LE( size ) )
+d105 1
+a105 1
+    FT_Long    size;
+d111 1
+a111 1
+    error = read_pfb_tag( stream, &tag, &size );
+d115 3
+d123 1
+a123 1
+      error = 0;
+d144 1
+a144 1
+    FT_Long    size;
+d178 1
+a178 1
+    /*   the base dictionary if this is possible (i.e. for PFB        */
+d185 1
+a185 1
+    /*   parser->in_pfb is set if we are in a binary (".pfb") font.   */
+d189 2
+a190 2
+    /* try to compute the size of the base dictionary;   */
+    /* look for a Postscript binary file tag, i.e 0x8001 */
+d225 1
+a225 1
+      /* read segment in memory - this is clumsy, but so does the format */
+d268 1
+a268 1
+    FT_Long    size;
+d307 1
+a307 1
+      if ( FT_STREAM_SEEK( start_pos )                             ||
+d417 1
+a417 1
+      size = (FT_Long)( parser->base_len - ( cur - parser->base_dict ) );
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d108 1
+a108 1
+      
+d112 1
+a112 1
+      
+d115 1
+a115 1
+      
+d119 1
+a119 1
+      
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004 by                               */
+d96 35
+d153 15
+d220 2
+a221 2
+      /* read segment in memory */
+      if ( FT_ALLOC( parser->base_dict, size )     ||
+d227 3
+a229 19
+    /* Now check font format; we must see `%!PS-AdobeFont-1' */
+    /* or `%!FontType'                                       */
+    {
+      if ( size <= 16                                       ||
+           ( ft_strncmp( (const char*)parser->base_dict,
+                         "%!PS-AdobeFont-1", 16 )        &&
+             ft_strncmp( (const char*)parser->base_dict,
+                         "%!FontType", 10 )              )  )
+      {
+        FT_TRACE2(( "[not a Type1 font]\n" ));
+        error = T1_Err_Unknown_File_Format;
+      }
+      else
+      {
+        parser->root.base   = parser->base_dict;
+        parser->root.cursor = parser->base_dict;
+        parser->root.limit  = parser->root.cursor + parser->base_len;
+      }
+    }
+d374 2
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005 by                         */
+a95 35
+  static FT_Error
+  check_type1_format( FT_Stream    stream,
+                      const char*  header_string,
+                      size_t       header_length )
+  {
+    FT_Error   error;
+    FT_UShort  tag;
+    FT_Long    size;
+
+
+    if ( FT_STREAM_SEEK( 0 ) )
+      goto Exit;
+
+    error = read_pfb_tag( stream, &tag, &size );
+    if ( error )
+      goto Exit;
+
+    if ( tag != 0x8001U && FT_STREAM_SEEK( 0 ) )
+      goto Exit;
+
+    if ( !FT_FRAME_ENTER( header_length ) )
+    {
+      error = 0;
+
+      if ( ft_memcmp( stream->cursor, header_string, header_length ) != 0 )
+        error = T1_Err_Unknown_File_Format;
+
+      FT_FRAME_EXIT();
+    }
+
+  Exit:
+    return error;
+  }
+
+
+a117 15
+    /* check the header format */
+    error = check_type1_format( stream, "%!PS-AdobeFont", 14 );
+    if ( error )
+    {
+      if ( error != T1_Err_Unknown_File_Format )
+        goto Exit;
+
+      error = check_type1_format( stream, "%!FontType", 10 );
+      if ( error )
+      {
+        FT_TRACE2(( "[not a Type1 font]\n" ));
+        goto Exit;
+      }
+    }
+
+d170 2
+a171 2
+      /* read segment in memory - this is clumsy, but so does the format */
+      if ( FT_ALLOC( parser->base_dict, size )       ||
+d177 19
+a195 3
+    parser->root.base   = parser->base_dict;
+    parser->root.cursor = parser->base_dict;
+    parser->root.limit  = parser->root.cursor + parser->base_len;
+a339 2
+        if ( parser->root.error )
+          break;
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2008 by                   */
+a67 2
+  /* see Adobe Technical Note 5040.Download_Fonts.pdf */
+
+d71 1
+a71 1
+                FT_ULong   *asize )
+d75 1
+a75 1
+    FT_ULong   size;
+d85 1
+a85 1
+        if ( !FT_READ_ULONG_LE( size ) )
+d103 1
+a103 1
+    FT_ULong   dummy;
+d109 1
+a109 1
+    error = read_pfb_tag( stream, &tag, &dummy );
+a112 3
+    /* We assume that the first segment in a PFB is always encoded as   */
+    /* text.  This might be wrong (and the specification doesn't insist */
+    /* on that), but we have never seen a counterexample.               */
+d118 1
+a118 1
+      error = T1_Err_Ok;
+d139 1
+a139 1
+    FT_ULong   size;
+d173 1
+a173 1
+    /*   the base dictionary if this is possible (i.e., for PFB       */
+d180 1
+a180 1
+    /*   parser->in_pfb is set if we are in a binary (`.pfb') font.   */
+d184 2
+a185 2
+    /* try to compute the size of the base dictionary;     */
+    /* look for a Postscript binary file tag, i.e., 0x8001 */
+d220 1
+a220 1
+      /* read segment in memory -- this is clumsy, but so does the format */
+d263 1
+a263 1
+    FT_ULong   size;
+d302 1
+a302 1
+      if ( FT_STREAM_SEEK( start_pos )                           ||
+d412 1
+a412 1
+      size = parser->base_len - ( cur - parser->base_dict );
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005 by                         */
+a95 35
+  static FT_Error
+  check_type1_format( FT_Stream    stream,
+                      const char*  header_string,
+                      size_t       header_length )
+  {
+    FT_Error   error;
+    FT_UShort  tag;
+    FT_Long    size;
+
+
+    if ( FT_STREAM_SEEK( 0 ) )
+      goto Exit;
+      
+    error = read_pfb_tag( stream, &tag, &size );
+    if ( error )
+      goto Exit;
+      
+    if ( tag != 0x8001U && FT_STREAM_SEEK( 0 ) )
+      goto Exit;
+      
+    if ( !FT_FRAME_ENTER( header_length ) )
+    {
+      error = 0;
+      
+      if ( ft_memcmp( stream->cursor, header_string, header_length ) != 0 )
+        error = T1_Err_Unknown_File_Format;
+
+      FT_FRAME_EXIT();
+    }
+
+  Exit:
+    return error;
+  }
+
+
+a117 15
+    /* check the header format */
+    error = check_type1_format( stream, "%!PS-AdobeFont", 14 );
+    if ( error )
+    {
+      if ( error != T1_Err_Unknown_File_Format )
+        goto Exit;
+
+      error = check_type1_format( stream, "%!FontType", 10 );
+      if ( error )
+      {
+        FT_TRACE2(( "[not a Type1 font]\n" ));
+        goto Exit;
+      }
+    }
+
+d170 2
+a171 2
+      /* read segment in memory - this is clumsy, but so does the format */
+      if ( FT_ALLOC( parser->base_dict, size )       ||
+d177 19
+a195 3
+    parser->root.base   = parser->base_dict;
+    parser->root.cursor = parser->base_dict;
+    parser->root.limit  = parser->root.cursor + parser->base_len;
+a339 2
+        if ( parser->root.error )
+          break;
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2008, 2009 by             */
+d38 1
+a67 2
+  /* see Adobe Technical Note 5040.Download_Fonts.pdf */
+
+d71 1
+a71 1
+                FT_ULong   *asize )
+d75 1
+a75 1
+    FT_ULong   size;
+d85 1
+a85 1
+        if ( !FT_READ_ULONG_LE( size ) )
+d103 1
+a103 1
+    FT_ULong   dummy;
+d108 2
+a109 2
+
+    error = read_pfb_tag( stream, &tag, &dummy );
+d112 1
+a112 4
+
+    /* We assume that the first segment in a PFB is always encoded as   */
+    /* text.  This might be wrong (and the specification doesn't insist */
+    /* on that), but we have never seen a counterexample.               */
+d115 1
+a115 1
+
+d118 2
+a119 2
+      error = T1_Err_Ok;
+
+d139 1
+a139 1
+    FT_ULong   size;
+d173 1
+a173 1
+    /*   the base dictionary if this is possible (i.e., for PFB       */
+d180 1
+a180 1
+    /*   parser->in_pfb is set if we are in a binary (`.pfb') font.   */
+d184 2
+a185 2
+    /* try to compute the size of the base dictionary;     */
+    /* look for a Postscript binary file tag, i.e., 0x8001 */
+d220 1
+a220 1
+      /* read segment in memory -- this is clumsy, but so does the format */
+d263 1
+a263 1
+    FT_ULong   size;
+d296 2
+a297 2
+        FT_ERROR(( "T1_Get_Private_Dict:"
+                   " invalid private dictionary section\n" ));
+d302 1
+a302 1
+      if ( FT_STREAM_SEEK( start_pos )                           ||
+d352 2
+a353 2
+          FT_ERROR(( "T1_Get_Private_Dict:"
+                     " could not find `eexec' keyword\n" ));
+d396 9
+a404 12
+
+      /* according to the Type1 spec, the first cipher byte must not be  */
+      /* an ASCII whitespace character code (blank, tab, carriage return */
+      /* or line feed).  We have seen Type 1 fonts with two line feed    */
+      /* characters...  So skip now all whitespace character codes.      */
+      while ( cur < limit       &&
+              ( *cur == ' '  ||
+                *cur == '\t' || 
+                *cur == '\r' ||
+                *cur == '\n' ) )
+        ++cur;
+      if ( cur >= limit )
+d406 2
+a407 2
+        FT_ERROR(( "T1_Get_Private_Dict:"
+                   " `eexec' not properly terminated\n" ));
+d412 1
+a412 1
+      size = parser->base_len - ( cur - parser->base_dict );
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+d122 1
+a122 1
+      error = FT_Err_Ok;
+d125 1
+a125 1
+        error = FT_THROW( Unknown_File_Format );
+d146 1
+a146 1
+    psaux->ps_parser_funcs->init( &parser->root, NULL, NULL, memory );
+d150 1
+a150 1
+    parser->base_dict    = NULL;
+d152 1
+a152 1
+    parser->private_dict = NULL;
+d161 1
+a161 1
+      if ( FT_ERR_NEQ( error, Unknown_File_Format ) )
+d167 1
+a167 1
+        FT_TRACE2(( "  not a Type 1 font\n" ));
+d266 1
+a266 1
+    FT_Error   error  = FT_Err_Ok;
+d276 1
+a276 1
+      FT_ULong   start_pos = FT_STREAM_POS();
+d302 1
+a302 1
+        error = FT_THROW( Invalid_File_Format );
+d316 1
+a316 1
+          error = FT_Err_Ok;
+d335 3
+a337 4
+      FT_Byte*    cur   = parser->base_dict;
+      FT_Byte*    limit = cur + parser->base_len;
+      FT_Pointer  pos_lf;
+      FT_Bool     test_cr;
+d343 3
+a345 3
+        if ( cur[0] == 'e'   &&
+             cur + 9 < limit )      /* 9 = 5 letters for `eexec' + */
+                                    /* whitespace + 4 chars        */
+d358 1
+a358 1
+          error = FT_THROW( Invalid_File_Format );
+d367 1
+a367 2
+      /* set limit to `eexec' + whitespace + 4 characters */
+      parser->root.limit  = cur + 10;
+d374 2
+a375 9
+        if ( cur[0] == 'e'   &&
+             cur + 5 < limit )
+        {
+          if ( cur[1] == 'e' &&
+               cur[2] == 'x' &&
+               cur[3] == 'e' &&
+               cur[4] == 'c' )
+            goto Found;
+        }
+a388 9
+
+      if ( cur >= limit )
+      {
+        FT_ERROR(( "T1_Get_Private_Dict:"
+                   " premature end in private dictionary\n" ));
+        error = FT_THROW( Invalid_File_Format );
+        goto Exit;
+      }
+
+d399 1
+a399 2
+      cur   = parser->root.cursor;
+      limit = parser->root.limit;
+d401 1
+a401 1
+      /* According to the Type 1 spec, the first cipher byte must not be */
+d405 6
+a410 17
+      /*                                                                 */
+      /* On the other hand, Adobe's Type 1 parser handles fonts just     */
+      /* fine that are violating this limitation, so we add a heuristic  */
+      /* test to stop at \r only if it is not used for EOL.              */
+
+      pos_lf  = ft_memchr( cur, '\n', (size_t)( limit - cur ) );
+      test_cr = FT_BOOL( !pos_lf                                       ||
+                         pos_lf > ft_memchr( cur,
+                                             '\r',
+                                             (size_t)( limit - cur ) ) );
+
+      while ( cur < limit                    &&
+              ( *cur == ' '                ||
+                *cur == '\t'               ||
+                (test_cr && *cur == '\r' ) ||
+                *cur == '\n'               ) )
+        cur++;
+d415 1
+a415 1
+        error = FT_THROW( Invalid_File_Format );
+d419 1
+a419 1
+      size = parser->base_len - (FT_ULong)( cur - parser->base_dict );
+d433 1
+a433 1
+        parser->base_dict    = NULL;
+d440 3
+a442 3
+      /* we need to access the next 4 bytes (after the final whitespace */
+      /* following the `eexec' keyword); if they all are hexadecimal    */
+      /* digits, then we have a case of ASCII storage                   */
+d444 1
+a444 2
+      if ( cur + 3 < limit                                &&
+           ft_isxdigit( cur[0] ) && ft_isxdigit( cur[1] ) &&
+d448 1
+a448 1
+        FT_ULong  len;
+a469 8
+    if ( parser->private_len < 4 )
+    {
+      FT_ERROR(( "T1_Get_Private_Dict:"
+                 " invalid private dictionary section\n" ));
+      error = FT_THROW( Invalid_File_Format );
+      goto Fail;
+    }
+
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

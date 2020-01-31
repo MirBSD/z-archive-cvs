@@ -1,0 +1,283 @@
+head	1.3;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.1.6.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.2
+	cvs-20101220:1.1.1.2
+	mbsd-20101220:1.1.1.1.0.6
+	cvs-201012191730:1.1.1.1
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.1
+	cvs-200805071200:1.1.1.1
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	cvs-200803022030:1.1.1.1
+	cvs-200707152000:1.1.1.1
+	cvs-200704292000:1.1.1.1
+	cvs-200702051700:1.1.1.1
+	cvs-200609121900:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200606151800:1.1.1.1
+	cvs-200603231300:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2014.06.09.15.17.34;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005395CFC65E5646F1;
+
+1.2
+date	2011.07.02.15.04.01;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E0F31C5496AB95F;
+
+1.1
+date	2005.02.05.17.24.27;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.27;	author tg;	state Exp;
+branches
+	1.1.1.1.6.1;
+next	1.1.1.2;
+
+1.1.1.2
+date	2011.07.02.15.00.21;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.1.6.1
+date	2011.07.02.15.02.44;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.127.1
+date	2010.12.19.14.45.49;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2014.06.09.14.29.21;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@/*
+ * Copyright (c) 2000-2001 Proofpoint, Inc. and its suppliers.
+ *      All rights reserved.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ */
+
+/*
+ * Copyright (c) 1997 Todd C. Miller <Todd.Miller@@courtesan.com>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND TODD C. MILLER DISCLAIMS ALL
+ * WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL TODD C. MILLER BE LIABLE
+ * FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: vasprintf.c,v 1.28 2013-11-22 20:51:44 ca Exp $")
+#include <stdlib.h>
+#include <errno.h>
+#include <sm/io.h>
+#include <sm/heap.h>
+#include "local.h"
+
+/*
+**  SM_VASPRINTF -- printf to a dynamically allocated string
+**
+**  Write 'printf' output to a dynamically allocated string
+**  buffer which is returned to the caller.
+**
+**	Parameters:
+**		str -- *str receives a pointer to the allocated string
+**		fmt -- format directives for printing
+**		ap -- variable argument list
+**
+**	Results:
+**		On failure, set *str to NULL, set errno, and return -1.
+**
+**		On success, set *str to a pointer to a nul-terminated
+**		string buffer containing printf output,	and return the
+**		length of the string (not counting the nul).
+*/
+
+#define SM_VA_BUFSIZE	128
+
+int
+sm_vasprintf(str, fmt, ap)
+	char **str;
+	const char *fmt;
+	SM_VA_LOCAL_DECL
+{
+	int ret;
+	SM_FILE_T fake;
+	unsigned char *base;
+
+	fake.sm_magic = SmFileMagic;
+	fake.f_timeout = SM_TIME_FOREVER;
+	fake.f_timeoutstate = SM_TIME_BLOCK;
+	fake.f_file = -1;
+	fake.f_flags = SMWR | SMSTR | SMALC;
+	fake.f_bf.smb_base = fake.f_p = (unsigned char *)sm_malloc(SM_VA_BUFSIZE);
+	if (fake.f_bf.smb_base == NULL)
+		goto err2;
+	fake.f_close = NULL;
+	fake.f_open = NULL;
+	fake.f_read = NULL;
+	fake.f_write = NULL;
+	fake.f_seek = NULL;
+	fake.f_setinfo = fake.f_getinfo = NULL;
+	fake.f_type = "sm_vasprintf:fake";
+	fake.f_bf.smb_size = fake.f_w = SM_VA_BUFSIZE - 1;
+	fake.f_timeout = SM_TIME_FOREVER;
+	ret = sm_io_vfprintf(&fake, SM_TIME_FOREVER, fmt, ap);
+	if (ret == -1)
+		goto err;
+	*fake.f_p = '\0';
+
+	/* use no more space than necessary */
+	base = (unsigned char *) sm_realloc(fake.f_bf.smb_base, ret + 1);
+	if (base == NULL)
+		goto err;
+	*str = (char *)base;
+	return ret;
+
+err:
+	if (fake.f_bf.smb_base != NULL)
+	{
+		sm_free(fake.f_bf.smb_base);
+		fake.f_bf.smb_base = NULL;
+	}
+err2:
+	*str = NULL;
+	errno = ENOMEM;
+	return -1;
+}
+@
+
+
+1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001 Sendmail, Inc. and its suppliers.
+d27 1
+a27 1
+SM_RCSID("@@(#)$Id: vasprintf.c,v 1.27 2003/06/03 02:14:24 ca Exp $")
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d27 1
+a27 1
+SM_RCSID("@@(#)$Sendmail: vasprintf.c,v 1.27 2003/06/03 02:14:24 ca Exp $")
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d27 1
+a27 1
+SM_RCSID("@@(#)$Id: vasprintf.c,v 1.27 2003/06/03 02:14:24 ca Exp $")
+@
+
+
+1.1.127.2
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001 Proofpoint, Inc. and its suppliers.
+d27 1
+a27 1
+SM_RCSID("@@(#)$Id: vasprintf.c,v 1.28 2013-11-22 20:51:44 ca Exp $")
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.1.6.1
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d27 1
+a27 1
+SM_RCSID("@@(#)$Id: vasprintf.c,v 1.27 2003/06/03 02:14:24 ca Exp $")
+@
+
+
+1.1.1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d27 1
+a27 1
+SM_RCSID("@@(#)$Id: vasprintf.c,v 1.27 2003/06/03 02:14:24 ca Exp $")
+@
+

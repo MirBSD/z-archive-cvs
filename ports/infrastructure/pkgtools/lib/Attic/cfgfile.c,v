@@ -1,0 +1,1049 @@
+head	1.1;
+access;
+symbols
+	bsiegert-cfgfile:1.1.0.2;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2009.12.22.22.26.51;	author bsiegert;	state dead;
+branches
+	1.1.2.1;
+next	;
+commitid	1004B31479401069986;
+
+1.1.2.1
+date	2009.12.22.22.26.51;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.2;
+commitid	1004B31479401069986;
+
+1.1.2.2
+date	2009.12.23.13.37.46;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.3;
+commitid	1004B321D2E7C9D52A6;
+
+1.1.2.3
+date	2009.12.23.13.54.14;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.4;
+commitid	1004B3221143E7A21C0;
+
+1.1.2.4
+date	2009.12.23.15.41.47;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.5;
+commitid	1004B323A2376E23055;
+
+1.1.2.5
+date	2009.12.26.22.21.15;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.6;
+commitid	1004B368BBD567705D5;
+
+1.1.2.6
+date	2009.12.28.14.33.09;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.7;
+commitid	1004B38C1680F10A8DC;
+
+1.1.2.7
+date	2009.12.29.17.09.32;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.8;
+commitid	1004B3A36D83259360D;
+
+1.1.2.8
+date	2009.12.29.22.24.55;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.9;
+commitid	1004B3A816C51B46D21;
+
+1.1.2.9
+date	2009.12.30.14.41.16;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.10;
+commitid	1004B3B66924551C251;
+
+1.1.2.10
+date	2010.02.27.11.10.27;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.11;
+commitid	1004B88FDA02F622DC3;
+
+1.1.2.11
+date	2010.02.27.16.20.18;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.12;
+commitid	1004B8945DC0802C02F;
+
+1.1.2.12
+date	2010.03.04.18.03.37;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.13;
+commitid	1004B8FF5740BB7941D;
+
+1.1.2.13
+date	2010.03.06.15.25.23;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.14;
+commitid	1004B9273E14421FD2F;
+
+1.1.2.14
+date	2010.10.19.19.41.16;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.15;
+commitid	1004CBDF4024849854E;
+
+1.1.2.15
+date	2010.10.19.19.52.25;	author bsiegert;	state Exp;
+branches;
+next	1.1.2.16;
+commitid	1004CBDF6FD3519ECE7;
+
+1.1.2.16
+date	2010.11.18.11.40.23;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004CE510AC12864BF0;
+
+
+desc
+@@
+
+
+1.1
+log
+@file cfgfile.c was initially added on branch bsiegert-cfgfile.
+@
+text
+@@
+
+
+1.1.2.1
+log
+@First (alpha quality) incarnation of configuration file routines.
+You can set and expand variables. Contains some debugging code still.
+@
+text
+@a0 260
+/* $MirOS$ */
+
+/*-
+ * Copyright (c) 2009
+ *	Benny Siegert <bsiegert@@gmx.de>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ *-
+ * Configuration file routines
+ */
+
+#include <assert.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <err.h>
+#include "queue.h"
+#include "lib.h"
+
+#ifndef SYSCONFDIR
+# define SYSCONFDIR "."
+#endif
+#define CFG_FILE SYSCONFDIR "/pkgtools/pkgtools.conf"
+
+__RCSID("$MirOS$");
+
+typedef SLIST_HEAD(cfg_varlist, cfg_var) cfg_varlist;
+struct cfg_var {
+	char *key;
+	char *val;
+	SLIST_ENTRY(cfg_var) entries;
+};
+
+static cfg_varlist Vars = SLIST_HEAD_INITIALIZER(Vars);
+
+FILE
+*cfg_open(void)
+{
+	FILE *cfgfile;
+
+	cfgfile = fopen(CFG_FILE, "r");
+	if (!cfgfile)
+		warn("Error opening configuration file");
+	return cfgfile;
+}
+
+/* Parse a line of the form "key=value", where i is the index of the '='
+ * sign and len is the length of the string. Works even when the string is
+ * not null-terminated.
+ */
+static void
+parse_var(char *line, size_t i, size_t len)
+{
+	struct cfg_var *var;
+
+	var = malloc(sizeof (struct cfg_var));
+	if (!var) {
+		warn(NULL);
+		return;
+	}
+
+	/* i is the position of the '='; everything before is the name,
+	 * the value is everything after it */
+	var->key = malloc(i + 1);
+	if (!var->key) {
+		warn(NULL);
+		return;
+	}
+	strlcpy(var->key, line, i + 1);
+
+	var->val = cfg_expand_vars(line + i + 1, len - i - 1);
+	if (!var->val) {
+		warnx("%s: Variable expansion failed", var->key);
+		return;
+	}
+	SLIST_INSERT_HEAD(&Vars, var, entries);
+}
+
+/* Parse a configuration directive. i is the index of the space separating
+ * the directive from the arguments.
+ */
+static void
+parse_command(char *line, size_t i, size_t len)
+{
+}
+
+/* Read the configuration file. Returns true if successful, false otherwise.
+ * The contents are saved in static variables, use the appropriate functions
+ * to probe for them. */
+bool
+cfg_read_config(void)
+{
+	FILE *cfgfile;
+	char *line;
+	size_t len, i;
+	bool line_end;
+
+	cfgfile = cfg_open();
+	if (!cfgfile)
+		return false;
+
+	do {
+		line = fgetln(cfgfile, &len);
+		if (!line)
+			break;
+		if (line[len - 1] == '\n')
+			line[len - 1] = '\0';
+		line_end = false;
+		for (i = 0; i < len; i++) {
+			switch (line[i]) {
+				case '\n':
+					line_end = true;
+					break;
+				case '\0':
+					line_end = true;
+					break;
+				case '#':
+					line_end = true;
+					break;
+				case '=':
+					parse_var(line, i, len);
+					line_end = true;
+					break;
+				case ' ':
+					parse_command(line, i, len);
+					line_end = true;
+					break;
+			}
+			if (line_end)
+				break;
+		}
+
+	} while (1);
+
+	if (ferror(cfgfile)) {
+		warn("Error reading configuration file");
+		fclose(cfgfile);
+		return false;
+	}
+	/* otherwise assume EOF */
+	return true;
+}
+
+/* Debug function: dump the names and values of all variables to stdout. */
+void
+cfg_dump_vars(void)
+{
+	struct cfg_var *var;
+
+	SLIST_FOREACH(var, &Vars, entries)
+		printf("%s = %s\n", var->key, var->val);
+}
+
+/* Replace all occurrences of "$$" with a single dollar sign, and all
+ * variables of the form ${FOO} or $(FOO) with their respective contents.
+ * Returns dynamically allocated storage which has to be freed by the caller.
+ */
+char
+*cfg_expand_vars(char *string, size_t len)
+{
+	char *rv, *cp, *rv_cp;
+	struct cfg_var *var;
+	size_t rv_len;
+	size_t rv_size = len + 1;
+
+	/* this is enough if there are no substitutions */
+	rv = malloc(rv_size);
+	if (!rv) {
+		warn(NULL);
+		return NULL;
+	}
+	*rv = '\0';
+
+	/* cp: position in string at which there is a '$'
+	 * len: remaining length of string
+	 * rv: return value (null-terminated)
+	 * rv_size: complete length of the rv buffer
+	 * rv_len: remaining length of the rv buffer
+	 */
+	rv_cp = rv;
+	rv_len = rv_size;
+	while ((cp = (char *)memchr(string, '$', len)) != NULL) {
+		size_t match_len;
+		char paren = '\0';
+		*cp = '\0';
+		match_len = strlen(string);
+		strlcpy(rv_cp, string, rv_len);
+		len -= match_len + 1;
+		rv_cp += match_len;
+		rv_len -= match_len;
+
+		/* '$' was the last character */
+		if (len == 0) {
+			assert(rv_len > 1);
+			strlcpy(rv_cp, "$", rv_len);
+			break;
+		}
+
+		switch (cp[1]) {
+		case '$':
+			assert(rv_len > 1);
+			strlcpy(rv_cp, "$", rv_len);
+			rv_len--;
+			rv_size--;
+			rv_cp++;
+			break;
+		case '{':
+			paren = '}';
+			/* FALLTRU */
+		case '(':
+			if (!paren)
+				paren = ')';
+			string = cp + 2;
+			len--;
+			cp = (char *)memchr(string, paren, len);
+			if (!cp) {
+				warnx("Syntax error in config file: "
+					"no closing parenthesis");
+				break;
+			}
+			*cp = '\0';
+			SLIST_FOREACH(var, &Vars, entries)
+				if (!strcmp(string, var->key)) {
+					size_t n;
+				       	n = strlen(var->val)-strlen(string);
+					rv_size += n;
+					if (!(rv = reallocf(rv, rv_size))) {
+						warn(NULL);
+						return NULL;
+					}
+					strlcat(rv, var->val, rv_size);
+					rv_cp = rv + strlen(rv);
+					rv_len += n;
+					len -= strlen(string) - 1;
+				}
+		}
+		string = cp + 1;	
+	}	
+
+	/* no '$', just copy the rest */
+	memcpy(rv_cp, string, len);
+	rv_cp[len] = '\0';
+	return rv;
+}
+
+@
+
+
+1.1.2.2
+log
+@Fix several off-by-ones, string lengths should be ok now
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.1 2009/12/22 22:26:51 bsiegert Exp $ */
+d40 1
+a40 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.1 2009/12/22 22:26:51 bsiegert Exp $");
+d122 1
+a122 1
+			line[--len] = '\0';
+d248 2
+a249 1
+					len -= strlen(string) + 1;
+@
+
+
+1.1.2.3
+log
+@One more
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.2 2009/12/23 13:37:46 bsiegert Exp $ */
+d40 1
+a40 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.2 2009/12/23 13:37:46 bsiegert Exp $");
+a210 1
+			rv_cp++;
+a220 2
+			cp++;
+			len--;
+@
+
+
+1.1.2.4
+log
+@Implement the first useful configuration directive:
+
+	Pager /path/to/pager
+
+for specifying the pager to use in pkg_add.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.3 2009/12/23 13:54:14 bsiegert Exp $ */
+d40 1
+a40 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.3 2009/12/23 13:54:14 bsiegert Exp $");
+a49 1
+static char *Pager = NULL;
+a93 1
+
+a99 6
+	if (i == 5 && !strncasecmp(line, "Pager", i)) {
+		if (Pager)
+			free(Pager);
+		Pager = cfg_expand_vars(line + i + 1, len - i - 1);
+	} else
+		warnx("Unrecognized command: %s", line);
+a262 5
+const char
+*cfg_get_pager(void)
+{
+	return Pager ? (const char *)Pager : "/bin/cat";
+}
+@
+
+
+1.1.2.5
+log
+@- remove cfg_open() function, folded into cfg_read_config()
+- cfg_read_config now accepts a file name for a config file for use instead
+  of the default /etc/pkgtools/pkgtools.conf
+- fix a lot of memory leaks in case of error (out-of-memory)
+- simplify logic in variable handling; allow variables to be overwritten
+- introduce
+	Source 1 ${PORTSDIR}/Packages
+  source lines (not used yet)
+
+hacked on the train to 26C3, yay!
+This commit sponsored by the 26C3 hackcenter, I still haven't got a ticket …
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.4 2009/12/23 15:41:47 bsiegert Exp $ */
+d32 1
+a32 1
+#include <sys/queue.h>
+d36 1
+a36 1
+# define SYSCONFDIR "/etc"
+d40 1
+a40 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.4 2009/12/23 15:41:47 bsiegert Exp $");
+d42 1
+a42 1
+SLIST_HEAD(cfg_varlist, cfg_var);
+d49 1
+a49 1
+static struct cfg_varlist Vars = SLIST_HEAD_INITIALIZER(Vars);
+d52 4
+a55 7
+LIST_HEAD(cfg_sourcelist, cfg_source);
+struct cfg_source {
+	unsigned long priority;
+	bool remote;
+	char *source;
+	LIST_ENTRY(cfg_source) entries;
+};
+d57 5
+a61 2
+static struct cfg_sourcelist Sources = LIST_HEAD_INITIALIZER(Sources);
+	
+a70 25
+	char *key, *val;
+
+	assert(i < len);
+
+	/* i is the position of the '='; everything before is the name,
+	 * the value is everything after it */
+	key = cfg_expand_vars(line, i);
+	if (!key)
+		return;
+	val = cfg_expand_vars(line + i + 1, len - i - 1);
+	if (!val) {
+		warnx("%s: Variable expansion failed", var->key);
+		free(key);
+		return;
+	}
+
+	/* overwrite existing variable */
+	SLIST_FOREACH(var, &Vars, entries) {
+		if (!strcmp(key, var->key)) {
+			free(var->val);
+			var->val = val;
+			free(key);
+			return;
+		}
+	}
+a74 2
+		free(key);
+		free(val);
+d78 4
+a81 18
+	var->key = key;
+	var->val = val;
+	SLIST_INSERT_HEAD(&Vars, var, entries);
+}
+
+/* Parse a configuration directive of the form
+ * 	Source 1 /usr/ports/Packages
+ * where the first number is a priority (unsigned) and the rest is the
+ * path---either local or remote, ftp and http.
+ */
+static void
+parse_source(char *string, size_t len)
+{
+	char *arg, *sep;
+	struct cfg_source *source, *sp;
+
+	source = malloc(sizeof (struct cfg_source));
+	if (!source) {
+d85 1
+d87 3
+a89 3
+	arg = cfg_expand_vars(string, len);
+	if (!arg) {
+		free(source);
+d92 2
+a93 17
+	
+	source->priority = (unsigned long)strtol(arg, &sep, 0);
+	if (!sep || *sep == '\0') {
+		warnx("Syntax error in Source line '%s'", arg);
+		free(arg);
+		free(source);
+	}
+	while (*sep && isspace(*sep))
+		sep++;
+	source->source = strdup(sep);
+	free(arg);
+	if (!source->source) {
+		warn(NULL);
+		free(source);
+		return;
+	}
+	source->remote = isURL(source->source);
+a94 18
+	if (Verbose)
+		printf("Got package source '%s'%s, priority %lu\n",
+				source->source,
+				source->remote ? " (remote)" : "",
+				source->priority);
+
+	if (LIST_EMPTY(&Sources) ||
+			LIST_FIRST(&Sources)->priority >= source->priority)
+		LIST_INSERT_HEAD(&Sources, source, entries);
+	else {
+		LIST_FOREACH(sp, &Sources, entries) {
+			if (sp->priority >= source->priority) {
+				LIST_INSERT_BEFORE(sp, source, entries);
+				break;
+			}
+		}
+	}
+}
+a105 2
+	} else if (i == 6 && !strncasecmp(line, "Source", i)) {
+		parse_source(line + i + 1, len - i - 1);
+d112 1
+a112 4
+ * to probe for them.
+ * The argument is the filename for the configuration file, or NULL to use
+ * the default.
+ */
+d114 1
+a114 1
+cfg_read_config(const char *filename)
+d121 2
+a122 3
+	cfgfile = fopen(filename ? filename : CFG_FILE, "r");
+	if (!cfgfile) {
+		warn("Error opening configuration file");
+a123 1
+	}
+@
+
+
+1.1.2.6
+log
+@Implement cfg_dump_sources() for debugging, and cfg_add_source() as the two
+first functions that do something sensible with the sources list. Add a
+missing codepath (insertion at the end) to cfg_add_source(), oops … Greatly
+simplify the logic in parse_source() while here, the function is now separated
+in two.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.5 2009/12/26 22:21:15 bsiegert Exp $ */
+d32 1
+d38 1
+a38 1
+#define DEFAULT_CFGFILE SYSCONFDIR "/pkgtools/pkgtools.conf"
+d40 1
+a40 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.5 2009/12/26 22:21:15 bsiegert Exp $");
+d50 10
+d61 1
+a61 1
+static char *Pager = NULL;
+d119 7
+a125 1
+	unsigned long priority;
+d128 2
+a129 1
+	if (!arg)
+d131 1
+d133 1
+a133 1
+	priority = (unsigned long)strtol(arg, &sep, 0);
+d137 1
+a137 1
+		return;
+d141 14
+a154 2
+	
+	cfg_add_source(priority, isURL(sep), sep);
+d156 11
+a166 1
+	free(arg);
+d199 1
+a199 1
+	cfgfile = fopen(filename ? filename : DEFAULT_CFGFILE, "r");
+a350 1
+/* Get the name of the pager for showing "DISPLAY" files */
+a355 75
+
+/* Debug function; dumps the list of sources to stdout */
+void
+cfg_dump_sources(void)
+{
+	struct cfg_source *sp;
+
+	if (LIST_EMPTY(&Sources)) {
+		printf("Source list empty!\n");
+		return;
+	}
+
+	LIST_FOREACH(sp, &Sources, entries)
+		printf("Source %lu\t%s%s\n", sp->priority, sp->source,
+				sp->remote ? " (remote)" : "");
+}
+
+/* Adds a package source to the list */
+void
+cfg_add_source(unsigned long priority, bool remote, const char *source)
+{
+	struct cfg_source *sp, *sp_temp, *newsp;
+
+	/* Check for duplicates */
+	LIST_FOREACH_SAFE(sp, &Sources, entries, sp_temp) {
+		if (!strcmp(sp->source, source)) {
+			if (sp->remote == remote && sp->priority == priority)
+				return; /* entry already exists */
+			else {
+				/* entry exists but with different prio */
+				LIST_REMOVE(sp, entries);
+				free(sp->source);
+				free(sp);
+			}
+		}
+	}
+
+	newsp = malloc(sizeof (struct cfg_source));
+	if (!newsp) {
+		warn(NULL);
+		return;
+	}
+
+	newsp->source = strdup(source);
+	if (!newsp->source) {
+		warn(NULL);
+		free(newsp);
+		return;
+	}
+	newsp->remote = remote;
+	newsp->priority = priority;
+
+	if (Verbose)
+		printf("Got package source '%s'%s, priority %lu\n",
+				newsp->source,
+				newsp->remote ? " (remote)" : "",
+				newsp->priority);
+
+	if (LIST_EMPTY(&Sources) ||
+			LIST_FIRST(&Sources)->priority >= newsp->priority)
+		LIST_INSERT_HEAD(&Sources, newsp, entries);
+	else {
+		LIST_FOREACH(sp, &Sources, entries) {
+			if (sp->priority >= newsp->priority) {
+				LIST_INSERT_BEFORE(sp, newsp, entries);
+				return;
+			}
+			/* if not, insert at the end */
+			if (!LIST_NEXT(sp, entries)) {
+				LIST_INSERT_AFTER(sp, newsp, entries);
+				return;
+			}
+		}
+	}
+}
+@
+
+
+1.1.2.7
+log
+@Experimental support for the config file in pkg_info and pkg_add. Packages
+given as command-line arguments are found in the paths specified in "Source"
+lines. Tested in pkg_info:
+
+% pkg_info tiff-cxx-3.7.4-1
+
+finds the uninstalled package in /usr/ports/Packages.
+
+Oh, and PKG_PATH support is dropped for now.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.6 2009/12/28 14:33:09 bsiegert Exp $ */
+d39 1
+a39 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.6 2009/12/28 14:33:09 bsiegert Exp $");
+a390 35
+
+/* delete a source from the list by giving its name. Returns true if the
+ * source was in the list, false otherwise.
+ */
+bool
+cfg_remove_source(const char *source)
+{
+	struct cfg_source *sp, *sp_temp;
+
+	if (!source)
+		return NULL;
+
+	LIST_FOREACH_SAFE(sp, &Sources, entries, sp_temp) {
+		if (!strcmp(source, sp->source)) {
+			LIST_REMOVE(sp, entries);
+			free(sp->source);
+			free(sp);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/* Returns a static pointer to the existing source list */
+const struct cfg_sourcelist *
+cfg_get_sourcelist(void)
+{
+	if (LIST_EMPTY(&Sources)) {
+		/* fill in a minimal default */
+		cfg_add_source(0L, false, ".");
+	}
+
+	return &Sources;
+}
+@
+
+
+1.1.2.8
+log
+@Rework handling of '#' characters, they are seen anywhere in the line. While
+here, accept '\t' instead of ' ', and trim whitespace at the beginning and at
+the end of the line.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.7 2009/12/29 17:09:32 bsiegert Exp $ */
+d39 1
+a39 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.7 2009/12/29 17:09:32 bsiegert Exp $");
+a156 1
+	char *hashmark;
+d168 1
+a168 6
+		hashmark = (char *)memchr(line, '#', len);
+		if (hashmark) {
+			*hashmark = '\0';
+			len = strlen(line) + 1;
+		}
+		if ((len > 1) && line[len - 1] == '\n')
+a169 5
+		while ((len > 1) && isspace(line[len - 2]))
+			line[--len - 1] = '\0';
+		while (isspace(*line)) {
+			line++; len--;
+		}
+d174 2
+d179 3
+a185 1
+				case '\t':
+a202 1
+	fclose(cfgfile);
+@
+
+
+1.1.2.9
+log
+@More off-by-ones, trim more leading whitespace
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.8 2009/12/29 22:24:55 bsiegert Exp $ */
+d39 1
+a39 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.8 2009/12/29 22:24:55 bsiegert Exp $");
+d172 1
+a172 1
+			len = strlen(line);
+d174 1
+a174 3
+		if ((len > 0) && line[len - 1] == '\n')
+			line[--len] = '\0';
+		while ((len > 0) && isspace(line[len - 1]))
+d176 2
+a242 4
+	
+	while (isspace(*string)) {
+		string++; len--;
+	}	
+@
+
+
+1.1.2.10
+log
+@Change the behavior of the dump functions to match what is expected by
+the tests.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.9 2009/12/30 14:41:16 bsiegert Exp $ */
+d37 1
+a37 2
+#define CFGDIR SYSCONFDIR "/pkgtools/"
+#define DEFAULT_CFGFILE CFGDIR "pkgtools.conf"
+d39 1
+a39 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.9 2009/12/30 14:41:16 bsiegert Exp $");
+a223 16
+/* Dump name and value of _one_ variable to stdout. Used in regression tests.
+ */
+void
+cfg_dump_var(const char *varname)
+{
+	struct cfg_var *var;
+	
+	SLIST_FOREACH(var, &Vars, entries) {
+		if (!strcmp(varname, var->key)) {
+			printf("%s = %s\n", var->key, var->val);
+			return;
+		}
+	}
+	printf("%s is undefined\n", varname);
+}
+
+d335 2
+a336 1
+	if (LIST_EMPTY(&Sources))
+d338 1
+a437 2
+
+
+@
+
+
+1.1.2.11
+log
+@Implement a function to cache the "index.txt" file for remote sources. Also
+move some defines to lib.h.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.10 2010/02/27 11:10:27 bsiegert Exp $ */
+d34 7
+a40 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.10 2010/02/27 11:10:27 bsiegert Exp $");
+d453 2
+@
+
+
+1.1.2.12
+log
+@Continue on the cfgfile branch:
+Introduce a new function findmatchingname_file(), which searches in the cached
+index files for a package.
+Introduce a function findmatchingname_srcs(), which iterates over all the
+sources and returns a list of _all_ matches, minus those sorted out by a
+helper function.
+
+Builds fine, but the code is still untested.
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d4 1
+a4 1
+ * Copyright (c) 2009, 2010
+d34 1
+a34 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.11 2010/02/27 16:20:18 bsiegert Exp $");
+@
+
+
+1.1.2.13
+log
+@MirOS does not have reallocf(3) and the *_FOREACH_SAFE macros in queue.h.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.12 2010/03/04 18:03:37 bsiegert Exp $ */
+d34 1
+a34 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.12 2010/03/04 18:03:37 bsiegert Exp $");
+d315 1
+a315 1
+					if (!(rv = realloc(rv, rv_size))) {
+d358 1
+a358 1
+	struct cfg_source *sp, *newsp;
+d361 1
+a361 1
+	LIST_FOREACH(sp, &Sources, entries) {
+a369 1
+				break;
+d419 1
+a419 1
+	struct cfg_source *sp;
+d424 1
+a424 1
+	LIST_FOREACH(sp, &Sources, entries) {
+@
+
+
+1.1.2.14
+log
+@Fix annoying, senseless warning of gcc in MirOS when compiling this
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.13 2010/03/06 15:25:23 bsiegert Exp $ */
+d34 1
+a34 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.13 2010/03/06 15:25:23 bsiegert Exp $");
+d54 1
+a54 1
+	struct cfg_var *var = NULL;
+@
+
+
+1.1.2.15
+log
+@Actually fix the bug, thanks tg�@@
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.14 2010/10/19 19:41:16 bsiegert Exp $ */
+d34 1
+a34 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.14 2010/10/19 19:41:16 bsiegert Exp $");
+d54 1
+a54 1
+	struct cfg_var *var;
+d66 1
+a66 1
+		warnx("%s: Variable expansion failed", key);
+@
+
+
+1.1.2.16
+log
+@Quell the warning if pkgtools.conf does not exist
+@
+text
+@d1 1
+a1 1
+/* $MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.15 2010/10/19 19:52:25 bsiegert Exp $ */
+d34 1
+a34 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/lib/cfgfile.c,v 1.1.2.15 2010/10/19 19:52:25 bsiegert Exp $");
+d156 1
+a156 2
+		if (errno != ENOENT)
+			warn("Error opening configuration file");
+@
+
+

@@ -1,0 +1,258 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2011.08.04.20.39.03;	author tg;	state dead;
+branches;
+next	1.4;
+commitid	1004E3B037D69451D90;
+
+1.4
+date	2011.08.04.19.26.52;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004E3AF29347DB2B8A;
+
+1.3
+date	2011.08.04.19.18.58;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004E3AF0BA2649B155;
+
+1.2
+date	2011.08.04.18.34.31;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E3AE64F5328E9F3;
+
+1.1
+date	2011.08.04.18.28.51;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E3AE4FB697CACF8;
+
+
+desc
+@@
+
+
+1.5
+log
+@we must do it with a package, due to the lenny+hardy version being broken, how very annoying
+@
+text
+@#!/bin/mksh
+# $MirOS: contrib/hosted/tg/arngc,v 1.4 2011/08/04 19:26:52 tg Exp $
+#-
+# Copyright © 2011
+#	Thorsten Glaser <tg@@mirbsd.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un‐
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person’s immediate fault when using the work as intended.
+
+me=$(realpath "$0")
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+[[ $1 = setup ]] || if [[ ! -x /usr/sbin/rngd ]]; then
+	print -u2 Error: rngd not installed, run
+	print -ru2 "mksh $me setup"
+	exit 1
+fi
+
+if (( USER_ID )); then
+	if [[ -n $arngc_FOO && $arngc_FOO = $arngc_BAR ]]; then
+		print -u2 Error: need root
+		exit 1
+	fi
+	arngc_FOO=$RANDOM$me$RANDOM
+	arngc_BAR=$arngc_FOO
+	export arngc_FOO arngc_BAR
+	exec sudo mksh "$me" "$@@"
+	print -u2 NOTREACHED
+	exit 255
+fi
+
+case $1 {
+(setup)
+	rv1=0 rv2=0
+	apt-get --purge install rng-tools stunnel || rv1=$?
+	update-rc.d -f rng-tools remove || rv2=$?
+	exit $((rv1 ? rv1 : rv2))
+	;;
+(status)
+	if ! pkill -USR1 rngd; then
+		print -u2 no process running?
+	else
+		print -u2 watch syslog for status
+	fi
+	exit 0
+	;;
+(stop)
+	print -nu2 killing all rngd processes...
+	if pkill rngd; then
+		print -u2 done
+	else
+		print -u2 none found
+	fi
+	exit 0
+	;;
+(start)
+	;;
+(*)
+	print -ru2 "syntax: $me (setup|start|stop|status)"
+	exit 1
+	;;
+}
+
+if opid=$(pgrep rngd); then
+	print -ru2 Error: rngd already running on pid $opid
+	exit 1
+fi
+
+if [[ ! -e /proc/self/fd/0 ]]; then
+	print -u2 no stdin: /proc/self/fd/0
+	exit 1
+fi
+
+echo 3072 >/proc/sys/kernel/random/write_wakeup_threshold
+mksh -T- -c 'stunnel -c -r 81.169.181.30:42658 </dev/null 2>/dev/null | \
+    rngd -f -r /proc/self/fd/0 -H 0.99 -B 2 -s 32 -W 3072 -t 300 -T 60 2>&1 | \
+    logger -t arngc'
+sleep 0.25
+print -u2 It may take up to one minute to decide whether rngd works.
+print -u2 Get statistics into syslog with: sudo pkill -USR1 rngd
+exit 0
+
+# server setup: get stunnel-3.26-3 from MirPorts
+# concatenate .key .cer + chain into 0440 root:_stunnel /etc/ssl/stunnel.pem
+# 42658		stream	tcp	nowait	_stunnel	/usr/mpkg/sbin/stunnel stunnel -N arngd -O l:TCP_NODELAY=1 -p /etc/ssl/stunnel.pem -F /dev/arandom
+# configure packet filter to drop all to the chosen port except allowed IPs
+# to prevent DoSing
+@
+
+
+1.4
+log
+@safety
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/arngc,v 1.3 2011/08/04 19:18:58 tg Exp $
+@
+
+
+1.3
+log
+@gnutls-cli #FAIL, openssl busyloops, but stunnel (and debian’s stunnel binary in stunnel4 package) works
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/arngc,v 1.2 2011/08/04 18:34:31 tg Exp $
+d81 5
+@
+
+
+1.2
+log
+@reliability
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/arngc,v 1.1 2011/08/04 18:28:51 tg Exp $
+d27 1
+a27 1
+	print -ru2 -- "$me setup"
+d47 1
+a47 1
+	apt-get --purge install openssl rng-tools || rv1=$?
+d52 1
+a52 9
+	if [[ ! -s /var/run/rngd.pid ]]; then
+		print -ru2 pidfile nonexistent; pids: $(pgrep rngd)
+		c='pkill -USR1 rngd'
+	else
+		c=$(</var/run/rngd.pid)
+		print -ru2 pidfile says we have: $c
+		c="kill -USR1 $c"
+	fi
+	if ! $c; then
+d60 3
+a62 7
+	if [[ ! -s /var/run/rngd.pid ]]; then
+		print -u2 killing all rngd processes...
+		if pkill rngd; then
+			print -u2 done
+		else
+			print -u2 none found
+		fi
+d64 1
+a64 2
+		print -ru2 killing rngd pid $(</var/run/rngd.pid)
+		kill $(</var/run/rngd.pid)
+a80 5
+mkdir -p /var/run
+rm -f /var/run/rngd.pid /var/run/rngd.fifo
+/bin/mknod /var/run/rngd.fifo p
+(openssl s_client -CApath /etc/ssl/certs -quiet -connect 81.169.181.30:42658 \
+    >/var/run/rngd.fifo </dev/null 2>/dev/null &)
+d82 3
+a84 2
+rngd -b -r /var/run/rngd.fifo -H 0.99 -B 2 -s 32 -W 3072 -t 300 -T 60 \
+    -p /var/run/rngd.pid
+d86 1
+a86 2
+print -ru2 rngd started as pid $(</var/run/rngd.pid)
+print -u2 It may take up to one minute to decide whether it works.
+@
+
+
+1.1
+log
+@entropy distribution MirBSD → 1:n ⇒ Debian etch and up
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $
+d26 2
+a27 1
+	print -u2 Error: rngd not installed
+d53 1
+a53 1
+		print -u2 pidfile nonexistent; pids: $(pgrep rngd)
+d57 1
+a57 1
+		print -u2 pidfile says we have: $c
+d76 1
+a76 1
+		print -u2 killing rngd pid $(</var/run/rngd.pid)
+d84 1
+a84 1
+	print -u2 "syntax: $me (setup|start|stop|status)"
+d90 1
+a90 1
+	print -u2 Error: rngd already running on pid $opid
+d103 1
+a103 1
+print -u2 rngd started as pid $(</var/run/rngd.pid)
+@
+

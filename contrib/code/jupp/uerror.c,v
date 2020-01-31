@@ -1,0 +1,871 @@
+head	1.11;
+access;
+symbols
+	joe-3_1jupp38:1.11
+	joe-3_1jupp37:1.11
+	joe-3_1jupp36:1.11
+	joe-3_1jupp35:1.11
+	joe-3_1jupp34:1.11
+	joe-3_1jupp33:1.11
+	joe-3_1jupp32:1.11
+	joe-2_8jupp3:1.1.21.1
+	joe-3_1jupp31:1.4
+	joe-3_1jupp30:1.3
+	joe-3_1jupp29:1.3
+	joe-3_1jupp28:1.3
+	joe-3_1jupp27:1.3
+	joe-3_1jupp26:1.3
+	joe-3_1jupp25:1.3
+	joe-3_1jupp24:1.3
+	joe-3_1jupp23:1.3
+	joe-3_1jupp22:1.3
+	joe-3_1jupp21:1.3
+	joe-3_1jupp20:1.3
+	joe-3_1jupp19:1.3
+	joe-3_1jupp18:1.3
+	joe-3_1jupp17:1.3
+	joe-2_8jupp2:1.1.21.1
+	joe-3_1jupp16:1.3
+	joe-3_1jupp15:1.3
+	joe-3_1jupp14:1.3
+	joe-3_1jupp12:1.3
+	joe-3_1jupp11:1.3
+	joe-2_8jupp1:1.1.21.1
+	joe-3_1jupp10:1.3
+	joe-3_1jupp9:1.3
+	joe-3_1jupp8:1.2
+	joe-3_1jupp7:1.2
+	joe-3_1jupp6:1.2
+	joe-3_1jupp5:1.2
+	joe-3_1jupp4:1.2
+	joe-2_8-msdos:1.1.21.1.0.2
+	joe-2_8:1.1.21.1
+	joe28:1.1.21
+	joe-3_1:1.1.201.1
+	tg:1.1.201;
+locks; strict;
+comment	@ * @;
+
+
+1.11
+date	2017.12.07.02.10.18;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1005A28A3145E1FF911;
+
+1.10
+date	2017.12.06.23.02.07;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1005A2876FC4FFE7EF5;
+
+1.9
+date	2017.12.06.21.41.04;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1005A28640547F64250;
+
+1.8
+date	2017.12.04.21.53.34;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1005A25C3E151C5344D;
+
+1.7
+date	2017.12.03.02.36.03;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1005A2363204B0C4612;
+
+1.6
+date	2017.12.02.18.50.03;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1005A22F5E2328F5222;
+
+1.5
+date	2017.12.02.02.07.34;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005A220AD65C90E687;
+
+1.4
+date	2017.08.09.00.46.02;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100598A5B577446A109;
+
+1.3
+date	2008.05.13.13.08.27;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100482992BC01EE89A1;
+
+1.2
+date	2005.02.05.02.42.21;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.00.37.25;	author tg;	state Exp;
+branches
+	1.1.21.1
+	1.1.201.1;
+next	;
+
+1.1.21.1
+date	2005.02.12.15.40.24;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.201.1
+date	2005.02.05.00.37.25;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.11
+log
+@feeble first attempt at using a union to break up the UB in the polymorphism
+@
+text
+@/*
+ *	Compiler error handler
+ *	Copyright
+ *		(C) 1992 Joseph H. Allen
+ *
+ *	This file is part of JOE (Joe's Own Editor)
+ */
+#include "config.h"
+#include "types.h"
+
+__RCSID("$MirOS: contrib/code/jupp/uerror.c,v 1.10 2017/12/06 23:02:07 tg Exp $");
+
+#include "b.h"
+#include "bw.h"
+#include "main.h"
+#include "queue.h"
+#include "tw.h"
+#include "uerror.h"
+#include "ufile.h"
+#include "utils.h"
+#include "vs.h"
+#include "charmap.h"
+#include "w.h"
+
+/* Error database */
+
+typedef struct error ERROR;
+
+struct error {
+	LINK(ERROR) link;	/* Linked list of errors */
+	long line;		/* Target line number */
+	long org;		/* Original target line number */
+	unsigned char *file;		/* Target file name */
+	long src;		/* Error-file line number */
+	unsigned char *msg;		/* The message */
+} errors = { { &errors, &errors}, 0, 0, NULL, 0, NULL };
+ERROR *errptr = &errors;	/* Current error row */
+
+B *errbuf = NULL;		/* Buffer with error messages */
+
+/* Insert and delete notices */
+
+void inserr(unsigned char *name, long int where, long int n, int bol)
+{
+	ERROR *e;
+
+	if (name) {
+		for (e = errors.link.next; e != &errors; e = e->link.next) {
+			if (!strcmp(e->file, name)) {
+				if (e->line > where)
+					e->line += n;
+				else if (e->line == where && bol)
+					e->line += n;
+			}
+		}
+	}
+}
+
+void delerr(unsigned char *name, long int where, long int n)
+{
+	ERROR *e;
+
+	if (name) {
+		for (e = errors.link.next; e != &errors; e = e->link.next) {
+			if (!strcmp(e->file, name)) {
+				if (e->line > where + n)
+					e->line -= n;
+				else if (e->line > where)
+					e->line = where;
+			}
+		}
+	}
+}
+
+/* Abort notice */
+
+void abrerr(unsigned char *name)
+{
+	ERROR *e;
+
+	if (name)
+		for (e = errors.link.next; e != &errors; e = e->link.next)
+			if (!strcmp(e->file, name))
+				e->line = e->org;
+}
+
+/* Save notice */
+
+void saverr(unsigned char *name)
+{
+	ERROR *e;
+
+	if (name)
+		for (e = errors.link.next; e != &errors; e = e->link.next)
+			if (!strcmp(e->file, name))
+				e->org = e->line;
+}
+
+/* Pool of free error nodes */
+ERROR errnodes = { {&errnodes, &errnodes}, 0, 0, NULL, 0, NULL };
+
+/* Free an error node */
+
+static void freeerr(ERROR *n)
+{
+	vsrm(n->file);
+	vsrm(n->msg);
+	enquef(ERROR, link, &errnodes, n);
+}
+
+/* Free all errors */
+
+static void freeall(void)
+{
+	while (!qempty(ERROR, link, &errors))
+		freeerr(deque_f(ERROR, link, errors.link.next));
+	errptr = &errors;
+}
+
+/* Parse error messages into database */
+
+/* From joe's joe 2.9 */
+
+/* First word on line with a '.' in it.  This is the file name.  The next number after that is the line number. */
+
+static int parseit(struct charmap *map,unsigned char *s, long int row)
+{
+	int x, y, flg;
+	unsigned char *name = NULL;
+	long line = -1;
+	ERROR *err;
+
+	y=0;
+	flg=0;
+
+	do {
+		/* Skip to first word */
+		for (x = y; s[x] && !(joe_isalnux(map, s[x]) || s[x] == '.' || s[x] == '/'); ++x)
+			/* nothing */;
+
+		/* Skip to end of first word */
+		for (y = x; joe_isalnux(map, s[y]) || s[y] == '.' || s[y] == '/'; ++y)
+			if (s[y] == '.')
+				flg = 1;
+	} while (!flg && x!=y);
+
+	/* Save file name */
+	if (x != y)
+		name = vsncpy(NULL, 0, s + x, y - x);
+
+	/* Skip to first number */
+	for (x = y; s[x] && (s[x] < '0' || s[x] > '9'); ++x) ;
+
+	/* Skip to end of first number */
+	for (y = x; s[y] >= '0' && s[y] <= '9'; ++y) ;
+
+	/* Save line number */
+	if (x != y) {
+		void *vp;
+
+		line = ustol(s + x, &vp, USTOL_DEC);
+		if (!vp)
+			line = -1;
+		else
+			--line;
+	}
+
+	/* Look for ':' */
+	flg = 0;
+	while (s[y]) {
+		if (s[y]==':') {
+			flg = 1;
+			break;
+		}
+		++y;
+	}
+
+	if (name) {
+		if (line != -1 && flg) {
+			/* We have an error */
+			err = (ERROR *) alitem(&errnodes, sizeof(ERROR));
+			err->file = name;
+			err->org = err->line = line;
+			err->src = row;
+			err->msg = vsncpy(NULL, 0, sc("\\i"));
+			err->msg = vsncpy(sv(err->msg), sv(s));
+			enqueb(ERROR, link, &errors, err);
+			return 1;
+		} else
+			vsrm(name);
+	}
+	return 0;
+}
+
+/* Parse the error output contained in a buffer */
+
+static long parserr(B *b)
+{
+	P *p = pdup(b->bof);
+	P *q = pdup(p);
+	long nerrs = 0;
+
+	freeall();
+	do {
+		unsigned char *s;
+
+		pset(q, p);
+		p_goto_eol(p);
+		s = brvs(q, (int) (p->byte - q->byte));
+		if (s) {
+			nerrs += parseit(b->o.charmap, s, q->line);
+			vsrm(s);
+		}
+	} while (pgetc(p) != NO_MORE_DATA);
+	prm(p);
+	prm(q);
+	return nerrs;
+}
+
+static BW *
+find_a_good_bw(B *b)
+{
+	W *w;
+	BW *bw = 0;
+	/* Find lowest window with buffer */
+	if ((w = maint->topwin) != NULL) {
+		do {
+			if ((w->watom->what & TYPETW) &&
+			    w->object.bw->b == b && w->y >= 0)
+				bw = w->object.bw;
+			w = w->link.next;
+		} while (w != maint->topwin);
+	}
+	if (bw)
+		return bw;
+	/* Otherwise just find lowest window */
+	if ((w = maint->topwin) != NULL) {
+		do {
+			if ((w->watom->what&TYPETW) && w->y>=0)
+				bw = w->object.bw;
+			w = w->link.next;
+		} while (w != maint->topwin);
+	}
+	return bw;
+}
+
+int parserrb(B *b)
+{
+	BW *bw;
+	long n;
+	errbuf = b;
+	freeall();
+	n = parserr(b);
+	bw = find_a_good_bw(b);
+	if (n)
+		joe_snprintf_1((char *)msgbuf, JOE_MSGBUFSIZE, "%ld messages found", n);
+	else
+		joe_snprintf_0((char *)msgbuf, JOE_MSGBUFSIZE, "No messages found");
+	msgnw(bw->parent, msgbuf);
+	return 0;
+}
+
+int uparserr(BW *bw)
+{
+	long n;
+	errbuf = bw->b;
+	freeall();
+	n = parserr(bw->b);
+	if (n)
+		joe_snprintf_1((char *)msgbuf, JOE_MSGBUFSIZE, "%ld messages found", n);
+	else
+		joe_snprintf_0((char *)msgbuf, JOE_MSGBUFSIZE, "No messages found");
+	msgnw(bw->parent, msgbuf);
+	return 0;
+}
+
+int unxterr(BW *bw)
+{
+	int omid;
+
+	if (errptr->link.next == &errors) {
+		msgnw(bw->parent, UC "No more errors");
+		return -1;
+	}
+	errptr = errptr->link.next;
+	if (!bw->b->name || strcmp(errptr->file, bw->b->name)) {
+		if (doswitch(bw, vsdup(errptr->file), NULL, NULL))
+			return -1;
+		bw = maint->curwin->object.bw;
+	}
+	omid = mid;
+	mid = 1;
+	pline(bw->cursor, errptr->line);
+	setline(errbuf, errptr->src);
+	dofollows();
+	mid = omid;
+	bw->cursor->xcol = piscol(bw->cursor);
+	msgnw(bw->parent, errptr->msg);
+	return 0;
+}
+
+int uprverr(BW *bw)
+{
+	int omid;
+
+	if (errptr->link.prev == &errors) {
+		msgnw(bw->parent, UC "No more errors");
+		return -1;
+	}
+	errptr = errptr->link.prev;
+	if (!bw->b->name || strcmp(errptr->file, bw->b->name)) {
+		if (doswitch(bw, vsdup(errptr->file), NULL, NULL))
+			return -1;
+		bw = maint->curwin->object.bw;
+	}
+	omid = mid;
+	mid = 1;
+	pline(bw->cursor, errptr->line);
+	setline(errbuf, errptr->src);
+	dofollows();
+	mid = omid;
+	bw->cursor->xcol = piscol(bw->cursor);
+	msgnw(bw->parent, errptr->msg);
+	return 0;
+}
+@
+
+
+1.10
+log
+@lots of fixes related to prototyping
+@
+text
+@d11 1
+a11 1
+__RCSID("$MirOS: contrib/code/jupp/uerror.c,v 1.9 2017/12/06 21:41:04 tg Exp $");
+d228 3
+a230 2
+			if ((w->watom->what&TYPETW) && ((BW *)w->object)->b==b && w->y>=0)
+				bw = (BW *)w->object;
+d240 1
+a240 1
+				bw = (BW *)w->object;
+d289 1
+a289 1
+		bw = (BW *) maint->curwin->object;
+d314 1
+a314 1
+		bw = (BW *) maint->curwin->object;
+@
+
+
+1.9
+log
+@const cleanup
+@
+text
+@d11 1
+a11 1
+__RCSID("$MirOS: contrib/code/jupp/uerror.c,v 1.7 2017/12/03 02:36:03 tg Exp $");
+d18 1
+d220 2
+a221 1
+BW *find_a_good_bw(B *b)
+@
+
+
+1.8
+log
+@rename alpha_ to alphx and alnum_ to alnux
+
+• matches mksh
+• stuff with trailing underscore may not be allowed in C99
+@
+text
+@d137 2
+a138 1
+		for (x = y; s[x] && !(joe_isalnux(map,s[x]) || s[x] == '.' || s[x] == '/'); ++x) ;
+d141 1
+a141 1
+		for (y = x; joe_isalnux(map,s[y]) || s[y] == '.' || s[y] == '/'; ++y)
+d279 1
+a279 1
+		msgnw(bw->parent, US "No more errors");
+d304 1
+a304 1
+		msgnw(bw->parent, US "No more errors");
+@
+
+
+1.7
+log
+@first cut at getting rid of stdio: scanf half
+@
+text
+@d11 1
+a11 1
+__RCSID("$MirOS: contrib/code/jupp/uerror.c,v 1.5 2017/12/02 02:07:34 tg Exp $");
+d137 1
+a137 1
+		for (x = y; s[x] && !(joe_isalnum_(map,s[x]) || s[x] == '.' || s[x] == '/'); ++x) ;
+d140 1
+a140 1
+		for (y = x; joe_isalnum_(map,s[y]) || s[y] == '.' || s[y] == '/'; ++y)
+@
+
+
+1.6
+log
+@get rid of -Wmissing-field-initialisers, as Cygwin GCC forces my hand
+@
+text
+@d156 9
+a164 4
+	if (x != y)
+		sscanf((char *)(s + x), "%ld", &line);
+	if (line != -1)
+		--line;
+@
+
+
+1.5
+log
+@overhaul the way includes work; give jupp proper RCS IDs
+
+(after all, empty source files are UB; win32.c is likely)
+@
+text
+@d11 1
+a11 1
+__RCSID("$MirOS$");
+d35 1
+a35 1
+} errors = { { &errors, &errors} };
+d99 1
+a99 1
+ERROR errnodes = { {&errnodes, &errnodes} };
+@
+
+
+1.4
+log
+@doedit → doswitch, to avoid segfaults; from joe-3.2
+@
+text
+@a0 1
+/* $MirOS: contrib/code/jupp/uerror.c,v 1.3 2008/05/13 13:08:27 tg Exp $ */
+d11 1
+a11 1
+#include <stdio.h>
+@
+
+
+1.3
+log
+@prepare for joe-3.1jupp9:
+* sync NEWS
+* bump vsn in configure.ac
+* tag all files with RCS ID
+* sync licence template
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d279 1
+a279 1
+		if (doedit(bw, vsdup(errptr->file), NULL, NULL))
+d304 1
+a304 1
+		if (doedit(bw, vsdup(errptr->file), NULL, NULL))
+@
+
+
+1.2
+log
+@Update the non-generated files to joe-3.1jupp2
+@
+text
+@d1 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d241 1
+a241 1
+	int n;
+d256 1
+a256 1
+	int n;
+@
+
+
+1.1.21.1
+log
+@Import joe-2.8 sources into vendor branch so it doesn't get lost
+@
+text
+@d1 9
+a9 1
+/* Compiler error handler */
+d11 5
+d17 1
+a17 2
+#include "b.h"
+#include "vs.h" 
+d19 3
+a22 5
+#include "bw.h"
+#include "zstr.h"
+#include "ufile.h"
+#include "main.h"
+#include "uerror.h"
+d28 9
+a36 10
+struct error
+ {
+ LINK(ERROR) link;	/* Linked list of errors */
+ long line;			/* Target line number */
+ long org;			/* Original target line number */
+ char *file;			/* Target file name */
+ long src;			/* Error-file line number */
+ char *msg;			/* The message */
+ } errors={{&errors,&errors}};
+ERROR *errptr= &errors;	/* Current error row */
+d38 1
+a38 1
+B *errbuf=0;		/* Buffer with error messages */
+d42 31
+a72 25
+void inserr(name,where,n,bol)
+char *name;
+long where;
+long n;
+ {
+ ERROR *e;
+ if(name)
+  for(e=errors.link.next;e!=&errors;e=e->link.next)
+   if(!zcmp(e->file,name))
+    if(e->line>where) e->line+=n;
+    else if(e->line==where && bol) e->line+=n;
+ }
+
+void delerr(name,where,n)
+char *name;
+long where;
+long n;
+ {
+ ERROR *e;
+ if(name)
+  for(e=errors.link.next;e!=&errors;e=e->link.next)
+   if(!zcmp(e->file,name))
+    if(e->line>where+n) e->line-=n;
+    else if(e->line>where) e->line=where;
+ }
+d76 9
+a84 8
+void abrerr(name)
+char *name;
+ {
+ ERROR *e;
+ if(name)
+  for(e=errors.link.next;e!=&errors;e=e->link.next)
+   if(!zcmp(e->file,name)) e->line=e->org;
+ }
+d88 9
+a96 8
+void saverr(name)
+char *name;
+ {
+ ERROR *e;
+ if(name)
+  for(e=errors.link.next;e!=&errors;e=e->link.next)
+   if(!zcmp(e->file,name)) e->org=e->line;
+ }
+d99 1
+a99 1
+ERROR errnodes={{&errnodes,&errnodes}};
+d103 6
+a108 7
+void freeerr(n)
+ERROR *n;
+ {
+ vsrm(n->file);
+ vsrm(n->msg);
+ enquef(ERROR,link,&errnodes,n);
+ }
+d112 6
+a117 6
+void freeall()
+ {
+ while(!qempty(ERROR,link,&errors))
+  freeerr(deque(ERROR,link,errors.link.next));
+ errptr= &errors;
+ }
+d121 66
+a186 43
+int parseit(s,row)
+char *s;
+long row;
+ {
+ int x, y;
+ char *name=0;
+ long line= -1;
+ ERROR *err;
+
+ /* Skip to first word */
+ for(x=0;s[x] && !(crest(s[x]) || s[x]=='.' || s[x]=='/');++x);
+ /* Skip to end of first word */
+ for(y=x;crest(s[y]) || s[y]=='.' || s[y]=='/';++y);
+
+ /* Save file name */ 
+ if(x!=y) name=vsncpy(NULL,0,s+x,y-x);
+ 
+ /* Skip to first number */
+ for(x=y;s[x] && (s[x]<'0' || s[x]>'9');++x);
+
+ /* Skip to end of first number */
+ for(y=x;s[y]>='0' && s[y]<='9';++y);
+ 
+ /* Save line number */
+ if(x!=y) sscanf(s+x,"%ld",&line);
+ if(line!= -1) --line;
+
+ if(name)
+  if(line!= -1)
+   {
+   /* We have an error */
+   err=(ERROR *)alitem(&errnodes,sizeof(ERROR));
+   err->file=name;
+   err->org=err->line=line;
+   err->src=row;
+   err->msg=vsncpy(NULL,0,sc("\\i"));
+   err->msg=vsncpy(sv(err->msg),sv(s));
+   enqueb(ERROR,link,&errors,err);
+   return 1;
+   }
+  else vsrm(name);
+ return 0;
+ }
+d190 127
+a316 81
+long parserr(b)
+B *b;
+ {
+ P *p=pdup(b->bof);
+ P *q=pdup(p);
+ long nerrs=0;
+ freeall();
+ do
+  {
+  char *s;
+  pset(q,p); peol(p);
+  s=brvs(q,(int)(p->byte-q->byte));
+  if(s)
+   {
+   nerrs+=parseit(s,q->line);
+   vsrm(s);
+   }
+  } while(pgetc(p)!= MAXINT);
+ prm(p); prm(q);
+ return nerrs;
+ }
+
+int uparserr(bw)
+BW *bw;
+ {
+ errbuf=bw->b;
+ freeall();
+ sprintf(msgbuf,"Parsed %ld lines",parserr(bw->b));
+ msgnw(bw,msgbuf);
+ return 0;
+ }
+
+int unxterr(bw)
+BW *bw;
+ {
+ int omid;
+ if(errptr->link.next==&errors)
+  {
+  msgnw(bw,"No more errors");
+  return -1;
+  }
+ errptr=errptr->link.next;
+ if(!bw->b->name || zcmp(errptr->file,bw->b->name))
+  {
+  if(doedit(bw,vsdup(errptr->file),NULL,NULL)) return -1;
+  bw=(BW *)maint->curwin->object;
+  }
+ omid=mid; mid=1;
+ pline(bw->cursor,errptr->line);
+ setline(errbuf,errptr->src);
+ dofollows();
+ mid=omid;
+ bw->cursor->xcol=piscol(bw->cursor);
+ msgnw(bw,errptr->msg);
+ return 0;
+ }
+
+int uprverr(bw)
+BW *bw;
+ {
+ int omid;
+ if(errptr->link.prev==&errors)
+  {
+  msgnw(bw,"No more errors");
+  return -1;
+  }
+ errptr=errptr->link.prev;
+ if(!bw->b->name || zcmp(errptr->file,bw->b->name))
+  {
+  if(doedit(bw,vsdup(errptr->file),NULL,NULL)) return -1;
+  bw=(BW *)maint->curwin->object;
+  }
+ omid=mid; mid=1;
+ pline(bw->cursor,errptr->line);
+ setline(errbuf,errptr->src);
+ dofollows();
+ mid=omid;
+ bw->cursor->xcol=piscol(bw->cursor);
+ msgnw(bw,errptr->msg);
+ return 0;
+ }
+@
+
+
+1.1.201.1
+log
+@JOE's Own Editor 3.1
+@
+text
+@@

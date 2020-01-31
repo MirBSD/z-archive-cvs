@@ -1,0 +1,469 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2017.04.15.19.19.59;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2008.06.12.20.53.48;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.04.19;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.09;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.42.56;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.42;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.39.30;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.42.56;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.34.03;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.38.03;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.12;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.41.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@#
+# FreeType 2 host platform detection rules
+#
+
+
+# Copyright 1996-2016 by
+# David Turner, Robert Wilhelm, and Werner Lemberg.
+#
+# This file is part of the FreeType project, and may only be used, modified,
+# and distributed under the terms of the FreeType project license,
+# LICENSE.TXT.  By continuing to use, modify, or distribute this file you
+# indicate that you have read the license and understand and accept it
+# fully.
+
+
+# This sub-Makefile is in charge of detecting the current platform.  It sets
+# the following variables:
+#
+#   BUILD_DIR    The configuration and system-specific directory.  Usually
+#                `builds/$(PLATFORM)' but can be different for custom builds
+#                of the library.
+#
+# The following variables must be defined in system specific `detect.mk'
+# files:
+#
+#   PLATFORM     The detected platform.  This will default to `ansi' if
+#                auto-detection fails.
+#   CONFIG_FILE  The configuration sub-makefile to use.  This usually depends
+#                on the compiler defined in the `CC' environment variable.
+#   DELETE       The shell command used to remove a given file.
+#   COPY         The shell command used to copy one file.
+#   SEP          The platform-specific directory separator.
+#   COMPILER_SEP The separator used in arguments of the compilation tools.
+#   CC           The compiler to use.
+#
+# You need to set the following variable(s) before calling it:
+#
+#   TOP_DIR      The top-most directory in the FreeType library source
+#                hierarchy.  If not defined, it will default to `.'.
+
+# Set auto-detection default to `ansi' resp. UNIX-like operating systems.
+#
+PLATFORM     := ansi
+DELETE       := $(RM)
+COPY         := cp
+CAT          := cat
+SEP          := /
+
+BUILD_CONFIG := $(TOP_DIR)/builds
+
+# These two assignments must be delayed.
+BUILD_DIR    = $(BUILD_CONFIG)/$(PLATFORM)
+CONFIG_RULES = $(BUILD_DIR)/$(CONFIG_FILE)
+
+# We define the BACKSLASH variable to hold a single back-slash character.
+# This is needed because a line like
+#
+#   SEP := \
+#
+# does not work with GNU Make (the backslash is interpreted as a line
+# continuation).  While a line like
+#
+#   SEP := \\
+#
+# really defines $(SEP) as `\' on Unix, and `\\' on Dos and Windows!
+#
+BACKSLASH := $(strip \ )
+
+# Find all auto-detectable platforms.
+#
+PLATFORMS := $(notdir $(subst /detect.mk,,$(wildcard $(BUILD_CONFIG)/*/detect.mk)))
+.PHONY: $(PLATFORMS) ansi
+
+# Filter out platform specified as setup target.
+#
+PLATFORM := $(firstword $(filter $(MAKECMDGOALS),$(PLATFORMS)))
+
+# If no setup target platform was specified, enable auto-detection/
+# default platform.
+#
+ifeq ($(PLATFORM),)
+  PLATFORM := ansi
+endif
+
+# If the user has explicitly asked for `ansi' on the command line,
+# disable auto-detection.
+#
+ifeq ($(findstring ansi,$(MAKECMDGOALS)),)
+  # Now, include all detection rule files found in the `builds/<system>'
+  # directories.  Note that the calling order of the various `detect.mk'
+  # files isn't predictable.
+  #
+  include $(wildcard $(BUILD_CONFIG)/*/detect.mk)
+endif
+
+# In case no detection rule file was successful, use the default.
+#
+ifndef CONFIG_FILE
+  CONFIG_FILE := ansi.mk
+  setup: std_setup
+  .PHONY: setup
+endif
+
+# The following targets are equivalent, with the exception that they use
+# a slightly different syntax for the `echo' command.
+#
+# std_setup: defined for most (i.e. Unix-like) platforms
+# dos_setup: defined for Dos-ish platforms like Dos, Windows & OS/2
+#
+.PHONY: std_setup dos_setup
+
+std_setup:
+	@@echo ""
+	@@echo "$(PROJECT_TITLE) build system -- automatic system detection"
+	@@echo ""
+	@@echo "The following settings are used:"
+	@@echo ""
+	@@echo "  platform                    $(PLATFORM)"
+	@@echo "  compiler                    $(CC)"
+	@@echo "  configuration directory     $(BUILD_DIR)"
+	@@echo "  configuration rules         $(CONFIG_RULES)"
+	@@echo ""
+	@@echo "If this does not correspond to your system or settings please remove the file"
+	@@echo "\`$(CONFIG_MK)' from this directory then read the INSTALL file for help."
+	@@echo ""
+	@@echo "Otherwise, simply type \`$(MAKE)' again to build the library,"
+	@@echo "or \`$(MAKE) refdoc' to build the API reference (this needs python >= 2.6)."
+	@@echo ""
+	@@$(COPY) $(CONFIG_RULES) $(CONFIG_MK)
+
+
+# Special case for Dos, Windows, OS/2, where echo "" doesn't work correctly!
+#
+dos_setup:
+	@@type builds$(SEP)newline
+	@@echo $(PROJECT_TITLE) build system -- automatic system detection
+	@@type builds$(SEP)newline
+	@@echo The following settings are used:
+	@@type builds$(SEP)newline
+	@@echo   platformÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ$(PLATFORM)
+	@@echo   compilerÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ$(CC)
+	@@echo   configuration directoryÿÿÿÿÿÿ$(subst /,$(SEP),$(BUILD_DIR))
+	@@echo   configuration rulesÿÿÿÿÿÿÿÿÿÿ$(subst /,$(SEP),$(CONFIG_RULES))
+	@@type builds$(SEP)newline
+	@@echo If this does not correspond to your system or settings please remove the file
+	@@echo '$(CONFIG_MK)' from this directory then read the INSTALL file for help.
+	@@type builds$(SEP)newline
+	@@echo Otherwise, simply type 'make' again to build the library.
+	@@echo or 'make refdoc' to build the API reference (this needs python >= 2.6).
+	@@type builds$(SEP)newline
+	@@$(COPY) $(subst /,$(SEP),$(CONFIG_RULES) $(CONFIG_MK)) > nul
+
+
+# EOF
+@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2002, 2003, 2006, 2008 by
+d20 2
+a21 2
+#                `freetype/builds/$(PLATFORM)' but can be different for
+#                custom builds of the library.
+d127 1
+a127 1
+	@@echo "or \`$(MAKE) refdoc' to build the API reference (the latter needs python)."
+d149 1
+a149 1
+	@@echo or 'make refdoc' to build the API reference (the latter needs python).
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2002, 2003, 2006 by
+d135 1
+a135 1
+	@@type builds\newline
+d137 1
+a137 1
+	@@type builds\newline
+d139 1
+a139 1
+	@@type builds\newline
+d142 3
+a144 3
+	@@echo   configuration directoryÿÿÿÿÿÿ$(subst /,\,$(BUILD_DIR))
+	@@echo   configuration rulesÿÿÿÿÿÿÿÿÿÿ$(subst /,\,$(CONFIG_RULES))
+	@@type builds\newline
+d147 1
+a147 1
+	@@type builds\newline
+d150 2
+a151 2
+	@@type builds\newline
+	@@$(COPY) $(subst /,\,$(CONFIG_RULES) $(CONFIG_MK)) > nul
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2002, 2003 by
+d46 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@a40 6
+# If TOP_DIR is not defined, default it to `.'
+#
+ifndef TOP_DIR
+  TOP_DIR := .
+endif
+
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2002, 2003, 2006 by
+d41 6
+a51 1
+CAT          := cat
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2002, 2003, 2006, 2008 by
+d135 1
+a135 1
+	@@type builds$(SEP)newline
+d137 1
+a137 1
+	@@type builds$(SEP)newline
+d139 1
+a139 1
+	@@type builds$(SEP)newline
+d142 3
+a144 3
+	@@echo   configuration directoryÿÿÿÿÿÿ$(subst /,$(SEP),$(BUILD_DIR))
+	@@echo   configuration rulesÿÿÿÿÿÿÿÿÿÿ$(subst /,$(SEP),$(CONFIG_RULES))
+	@@type builds$(SEP)newline
+d147 1
+a147 1
+	@@type builds$(SEP)newline
+d150 2
+a151 2
+	@@type builds$(SEP)newline
+	@@$(COPY) $(subst /,$(SEP),$(CONFIG_RULES) $(CONFIG_MK)) > nul
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d41 6
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2000, 2001, 2002, 2003, 2006, 2008 by
+a45 1
+CAT          := cat
+d134 1
+a134 1
+	@@type builds$(SEP)newline
+d136 1
+a136 1
+	@@type builds$(SEP)newline
+d138 1
+a138 1
+	@@type builds$(SEP)newline
+d141 3
+a143 3
+	@@echo   configuration directoryÿÿÿÿÿÿ$(subst /,$(SEP),$(BUILD_DIR))
+	@@echo   configuration rulesÿÿÿÿÿÿÿÿÿÿ$(subst /,$(SEP),$(CONFIG_RULES))
+	@@type builds$(SEP)newline
+d146 1
+a146 1
+	@@type builds$(SEP)newline
+d149 2
+a150 2
+	@@type builds$(SEP)newline
+	@@$(COPY) $(subst /,$(SEP),$(CONFIG_RULES) $(CONFIG_MK)) > nul
+@
+
+
+1.1.115.4
+log
+@letâ€™s see whether we canâ€™t update freetype2 as wellâ€¦
+@
+text
+@d6 1
+a6 1
+# Copyright 1996-2016 by
+d20 2
+a21 2
+#                `builds/$(PLATFORM)' but can be different for custom builds
+#                of the library.
+d127 1
+a127 1
+	@@echo "or \`$(MAKE) refdoc' to build the API reference (this needs python >= 2.6)."
+d149 1
+a149 1
+	@@echo or 'make refdoc' to build the API reference (this needs python >= 2.6).
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

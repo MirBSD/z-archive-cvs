@@ -1,0 +1,520 @@
+head	1.3;
+access;
+symbols
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2008.10.16.18.15.56;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10048F784E61741C06F;
+
+1.2
+date	2006.06.30.20.58.57;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A590916A489828;
+
+1.1
+date	2005.02.05.17.25.17;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.17;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.54.03;	author tg;	state Exp;
+branches;
+next	;
+commitid	560042e0092f571e;
+
+
+desc
+@@
+
+
+1.3
+log
+@C99 is more strict… fix build: missing protos
+@
+text
+@/**	$MirOS: src/lib/libkvm/kvm_sparc.c,v 1.2 2006/06/30 20:58:57 tg Exp $ */
+/*	$OpenBSD: kvm_sparc.c,v 1.10 2004/06/15 03:52:59 deraadt Exp $ */
+/*	$NetBSD: kvm_sparc.c,v 1.9 1996/04/01 19:23:03 cgd Exp $	*/
+
+/*-
+ * Copyright (c) 1992, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software developed by the Computer Systems
+ * Engineering group at Lawrence Berkeley Laboratory under DARPA contract
+ * BG 91-66 and contributed to Berkeley.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+/*
+ * Sparc machine dependent routines for kvm.  Hopefully, the forthcoming
+ * vm code will one day obsolete this module.
+ */
+
+#include <sys/param.h>
+#include <sys/user.h>
+#include <sys/proc.h>
+#include <sys/stat.h>
+#include <sys/core.h>
+#include <sys/kcore.h>
+#include <unistd.h>
+#include <nlist.h>
+#include <kvm.h>
+
+#include <uvm/uvm_extern.h>
+#include <machine/vmparam.h>
+#include <machine/pmap.h>
+#include <machine/autoconf.h>
+#include <machine/kcore.h>
+
+#include <limits.h>
+#include <db.h>
+
+#include "kvm_private.h"
+
+__SCCSID("@@(#)kvm_sparc.c	8.1 (Berkeley) 6/4/93");
+__RCSID("$MirOS: src/lib/libkvm/kvm_sparc.c,v 1.2 2006/06/30 20:58:57 tg Exp $");
+
+static int cputyp = -1;
+static int pgshift;
+static int nptesg;	/* [sun4/sun4c] only */
+
+#define VA_VPG(va)	((cputyp == CPU_SUN4C || cputyp == CPU_SUN4M) \
+				? VA_SUN4C_VPG(va) \
+				: VA_SUN4_VPG(va))
+
+#define VA_OFF(va) (va & (kd->nbpg - 1))
+
+int _kvm_kvatop4m(kvm_t *, u_long, u_long *);
+int _kvm_kvatop44c(kvm_t *, u_long, u_long *);
+
+void
+_kvm_freevtop(kvm_t *kd)
+{
+	if (kd->vmst != NULL) {
+		_kvm_err(kd, kd->program, "_kvm_freevtop: internal error");
+		kd->vmst = NULL;
+	}
+}
+
+/*
+ * Prepare for translation of kernel virtual addresses into offsets
+ * into crash dump files. We use the MMU specific goop written at the
+ * front of the crash dump by pmap_dumpmmu().
+ */
+int
+_kvm_initvtop(kvm_t *kd)
+{
+	cpu_kcore_hdr_t *cpup = kd->cpu_data;
+
+	switch (cputyp = cpup->cputype) {
+	case CPU_SUN4:
+		kd->nbpg = 8196;
+		pgshift = 13;
+		break;
+	case CPU_SUN4C:
+	case CPU_SUN4M:
+		kd->nbpg = 4096;
+		pgshift = 12;
+		break;
+	default:
+		_kvm_err(kd, kd->program, "Unsupported CPU type");
+		return (-1);
+	}
+	nptesg = NBPSG / kd->nbpg;
+	return (0);
+}
+
+/*
+ * Translate a kernel virtual address to a physical address using the
+ * mapping information in kd->vm.  Returns the result in pa, and returns
+ * the number of bytes that are contiguously available from this
+ * physical address.  This routine is used only for crashdumps.
+ */
+int
+_kvm_kvatop(kvm_t *kd, u_long va, u_long *pa)
+{
+	if (cputyp == -1)
+		if (_kvm_initvtop(kd) != 0)
+			return (-1);
+
+	return ((cputyp == CPU_SUN4M) ? _kvm_kvatop4m(kd, va, pa) :
+	    _kvm_kvatop44c(kd, va, pa));
+}
+
+/*
+ * (note: sun4 3-level MMU not yet supported)
+ */
+int
+_kvm_kvatop44c(kvm_t *kd, u_long va, u_long *pa)
+{
+	cpu_kcore_hdr_t *cpup = kd->cpu_data;
+	int vr, vs, pte, *ptes;
+	struct regmap *rp;
+	struct segmap *sp;
+
+	if (va < KERNBASE)
+		goto err;
+
+	/*
+	 * Layout of CPU segment:
+	 *	cpu_kcore_hdr_t;
+	 *	[alignment]
+	 *	phys_ram_seg_t[cpup->nmemseg];
+	 *	ptes[cpup->npmegs];
+	 */
+	ptes = (int *)((int)kd->cpu_data + cpup->pmegoffset);
+
+	vr = VA_VREG(va);
+	vs = VA_VSEG(va);
+
+	sp = &cpup->segmap_store[(vr-NUREG)*NSEGRG + vs];
+	if (sp->sg_npte == 0)
+		goto err;
+	if (sp->sg_pmeg == cpup->npmeg - 1) /* =seginval */
+		goto err;
+	pte = ptes[sp->sg_pmeg * nptesg + VA_VPG(va)];
+	if ((pte & PG_V) != 0) {
+		long p, off = VA_OFF(va);
+
+		p = (pte & PG_PFNUM) << pgshift;
+		*pa = p + off;
+		return (kd->nbpg - off);
+	}
+err:
+	_kvm_err(kd, 0, "invalid address (%lx)", va);
+	return (0);
+}
+
+int
+_kvm_kvatop4m(kvm_t *kd, u_long va, u_long *pa)
+{
+	cpu_kcore_hdr_t *cpup = kd->cpu_data;
+	struct regmap *rp;
+	struct segmap *sp;
+	int vr, vs, pte;
+	off_t foff;
+
+	if (va < KERNBASE)
+		goto err;
+
+	/*
+	 * Layout of CPU segment:
+	 *	cpu_kcore_hdr_t;
+	 *	[alignment]
+	 *	phys_ram_seg_t[cpup->nmemseg];
+	 */
+	vr = VA_VREG(va);
+	vs = VA_VSEG(va);
+
+	sp = &cpup->segmap_store[(vr-NUREG)*NSEGRG + vs];
+	if (sp->sg_npte == 0)
+		goto err;
+
+	/* XXX - assume page tables in initial kernel DATA or BSS. */
+	foff = _kvm_pa2off(kd, (u_long)&sp->sg_pte[VA_VPG(va)] - KERNBASE);
+	if (foff == (off_t)-1)
+		return (0);
+
+	if (_kvm_pread(kd, kd->pmfd, (void *)&pte, sizeof(pte), foff) < 0) {
+		_kvm_err(kd, kd->program, "cannot read pte for %lx", va);
+		return (0);
+	}
+
+	if ((pte & SRMMU_TETYPE) == SRMMU_TEPTE) {
+		long p, off = VA_OFF(va);
+
+		p = (pte & SRMMU_PPNMASK) << SRMMU_PPNPASHIFT;
+		*pa = p + off;
+		return (kd->nbpg - off);
+	}
+err:
+	_kvm_err(kd, 0, "invalid address (%lx)", va);
+	return (0);
+}
+
+/*
+ * Translate a physical address to a file-offset in the crash-dump.
+ */
+off_t
+_kvm_pa2off(kvm_t *kd, u_long pa)
+{
+	cpu_kcore_hdr_t *cpup = kd->cpu_data;
+	phys_ram_seg_t *mp;
+	off_t off;
+	int nmem;
+
+	/*
+	 * Layout of CPU segment:
+	 *	cpu_kcore_hdr_t;
+	 *	[alignment]
+	 *	phys_ram_seg_t[cpup->nmemseg];
+	 */
+	mp = (phys_ram_seg_t *)((int)kd->cpu_data + cpup->memsegoffset);
+	off = 0;
+
+	/* Translate (sparse) pfnum to (packed) dump offset */
+	for (nmem = cpup->nmemseg; --nmem >= 0; mp++) {
+		if (mp->start <= pa && pa < mp->start + mp->size)
+			break;
+		off += mp->size;
+	}
+	if (nmem < 0) {
+		_kvm_err(kd, 0, "invalid address (%lx)", pa);
+		return (-1);
+	}
+
+	return (kd->dump_off + off + pa - mp->start);
+}
+@
+
+
+1.2
+log
+@build this on sparc w/o EXPERIMENTAL=yes (untested)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+a37 8
+#if defined(LIBC_SCCS) && !defined(lint)
+#if 0
+static char sccsid[] = "@@(#)kvm_sparc.c	8.1 (Berkeley) 6/4/93";
+#else
+static char *rcsid = "$OpenBSD: kvm_sparc.c,v 1.10 2004/06/15 03:52:59 deraadt Exp $";
+#endif
+#endif /* LIBC_SCCS and not lint */
+
+d64 2
+a65 1
+__RCSID("$MirOS$");
+d77 2
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+a2 1
+/*	$OpenBSD: kvm_sparc.c,v 1.9 2003/06/02 20:18:41 millert Exp $ */
+d42 1
+a42 1
+static char *rcsid = "$OpenBSD: kvm_sparc.c,v 1.9 2003/06/02 20:18:41 millert Exp $";
+d47 1
+a47 1
+ * Sparc machine dependent routines for kvm.  Hopefully, the forthcoming 
+d72 1
+d86 1
+a86 2
+_kvm_freevtop(kd)
+	kvm_t *kd;
+d88 1
+a88 1
+	if (kd->vmst != 0) {
+d90 1
+a90 1
+		kd->vmst = 0;
+d100 1
+a100 2
+_kvm_initvtop(kd)
+	kvm_t *kd;
+d125 1
+a125 1
+ * the number of bytes that are contiguously available from this 
+d129 1
+a129 4
+_kvm_kvatop(kd, va, pa)
+	kvm_t *kd;
+	u_long va;
+	u_long *pa;
+d133 1
+a133 1
+		return (-1);
+d135 2
+a136 3
+	return ((cputyp == CPU_SUN4M)
+		? _kvm_kvatop4m(kd, va, pa)
+		: _kvm_kvatop44c(kd, va, pa));
+d143 1
+a143 4
+_kvm_kvatop44c(kd, va, pa)
+	kvm_t *kd;
+	u_long va;
+	u_long *pa;
+a144 1
+	register int vr, vs, pte;
+d146 1
+a148 1
+	int *ptes;
+d172 1
+a172 1
+		register long p, off = VA_OFF(va);
+d179 1
+a179 1
+	_kvm_err(kd, 0, "invalid address (%x)", va);
+d184 1
+a184 4
+_kvm_kvatop4m(kd, va, pa)
+	kvm_t *kd;
+	u_long va;
+	u_long *pa;
+a186 3
+	register int vr, vs;
+	int pte;
+	off_t foff;
+d189 2
+a200 1
+
+d214 1
+a214 1
+		_kvm_err(kd, kd->program, "cannot read pte for %x", va);
+d219 1
+a219 1
+		register long p, off = VA_OFF(va);
+d226 1
+a226 1
+	_kvm_err(kd, 0, "invalid address (%x)", va);
+d230 1
+a230 1
+/*       
+d232 1
+a232 1
+ */     
+d234 1
+a234 3
+_kvm_pa2off(kd, pa)
+	kvm_t   *kd;
+	u_long  pa;
+d257 1
+a257 1
+		_kvm_err(kd, 0, "invalid address (%x)", pa);
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: kvm_sparc.c,v 1.10 2004/06/15 03:52:59 deraadt Exp $ */
+d41 1
+a41 1
+static char *rcsid = "$OpenBSD: kvm_sparc.c,v 1.10 2004/06/15 03:52:59 deraadt Exp $";
+d46 1
+a46 1
+ * Sparc machine dependent routines for kvm.  Hopefully, the forthcoming
+d84 2
+a85 1
+_kvm_freevtop(kvm_t *kd)
+d87 1
+a87 1
+	if (kd->vmst != NULL) {
+d89 1
+a89 1
+		kd->vmst = NULL;
+d99 2
+a100 1
+_kvm_initvtop(kvm_t *kd)
+d125 1
+a125 1
+ * the number of bytes that are contiguously available from this
+d129 4
+a132 1
+_kvm_kvatop(kvm_t *kd, u_long va, u_long *pa)
+d136 1
+a136 1
+			return (-1);
+d138 3
+a140 2
+	return ((cputyp == CPU_SUN4M) ? _kvm_kvatop4m(kd, va, pa) :
+	    _kvm_kvatop44c(kd, va, pa));
+d147 4
+a150 1
+_kvm_kvatop44c(kvm_t *kd, u_long va, u_long *pa)
+d152 1
+a153 1
+	int vr, vs, pte, *ptes;
+d156 1
+d180 1
+a180 1
+		long p, off = VA_OFF(va);
+d192 4
+a195 1
+_kvm_kvatop4m(kvm_t *kd, u_long va, u_long *pa)
+d198 3
+a202 2
+	int vr, vs, pte;
+	off_t foff;
+d213 1
+d232 1
+a232 1
+		long p, off = VA_OFF(va);
+d243 1
+a243 1
+/*
+d245 1
+a245 1
+ */
+d247 3
+a249 1
+_kvm_pa2off(kvm_t *kd, u_long pa)
+@
+

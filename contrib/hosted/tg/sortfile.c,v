@@ -1,0 +1,337 @@
+head	1.7;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.7
+date	2010.09.09.20.05.08;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004C893DF75CDF4F6F;
+
+1.6
+date	2010.09.09.19.44.44;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004C89393C2D284204;
+
+1.5
+date	2010.09.09.19.42.39;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004C8938C33718D678;
+
+1.4
+date	2010.09.09.19.41.06;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004C893865217FC41F;
+
+1.3
+date	2010.09.09.19.11.36;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C89317B039C5477;
+
+1.2
+date	2010.09.09.19.09.12;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004C8930E366E1D43A;
+
+1.1
+date	2010.09.09.18.41.54;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004C892A832690280E;
+
+
+desc
+@@
+
+
+1.7
+log
+@something about data types in C and inherent stupidness of some idioms,
+as well as something about array sizes…
+@
+text
+@/*-
+ * Copyright (c) 2010
+ *      Thorsten Glaser <tg@@mirbsd.org>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ */
+
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <err.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+static const char rcsid[] =
+    "$MirOS: contrib/hosted/tg/sortfile.c,v 1.6 2010/09/09 19:44:44 tg Exp $";
+
+struct ptrsize {
+	const char *ptr;
+	size_t size;
+};
+
+static void *xrecalloc(void *, size_t, size_t);
+static int cmpfn(const void *, const void *);
+
+#define MUL_NO_OVERFLOW	(1UL << (sizeof (size_t) * 8 / 2))
+
+#ifndef SIZE_MAX
+#ifdef SIZE_T_MAX
+#define SIZE_MAX	SIZE_T_MAX
+#else
+#define SIZE_MAX	((size_t)-1)
+#endif
+#endif
+
+#if !defined(MAP_FAILED)
+/* XXX imake style */
+#  if defined(__linux)
+#define MAP_FAILED	((void *)-1)
+#  elif defined(__bsdi__) || defined(__osf__) || defined(__ultrix)
+#define MAP_FAILED	((caddr_t)-1)
+#  endif
+#endif
+
+static void *
+xrecalloc(void *ptr, size_t nmemb, size_t size)
+{
+	void *rv;
+
+	if ((nmemb >= MUL_NO_OVERFLOW || size >= MUL_NO_OVERFLOW) &&
+	    nmemb > 0 && SIZE_MAX / nmemb < size)
+		errx(1, "attempted integer overflow: %zu * %zu", nmemb, size);
+	size *= nmemb;
+	if ((rv = realloc(ptr, size)) == NULL)
+		err(1, "cannot allocate %zu bytes", size);
+	return (rv);
+}
+
+int
+main(int argc, char *argv[])
+{
+	int fd;
+	size_t fsz, asz, anents;
+	char *cp, *thefile, *endfile;
+	struct ptrsize *thearray;
+
+	if (argc != 2)
+		errx(1, "syntax error\n%s", rcsid);
+
+	if ((fd = open(argv[1], O_RDONLY)) < 0)
+		err(1, "open: %s", argv[1]);
+	else {
+		struct stat sb;
+
+		/* reasonable maximum size: 3/4 of SIZE_MAX */
+		fsz = (SIZE_MAX / 2) + (SIZE_MAX / 4);
+
+		if (fstat(fd, &sb))
+			err(1, "stat: %s", argv[1]);
+		if (sb.st_size > fsz)
+			errx(1, "file %s too big, %llu > %zu", argv[1],
+			    (unsigned long long)sb.st_size, fsz);
+		fsz = (size_t)sb.st_size;
+	}
+
+	if ((thefile = mmap(NULL, fsz, PROT_READ, MAP_FILE | MAP_PRIVATE,
+	    fd, (off_t)0)) == MAP_FAILED)
+		err(1, "mmap %zu bytes from %s", fsz, argv[1]);
+	/* last valid byte in the file, must be newline anyway */
+	endfile = thefile + fsz - 1;
+
+	thearray = xrecalloc(NULL, (asz = 8), sizeof(thearray[0]));
+	thearray[(anents = 0)].ptr = cp = thefile;
+
+	while ((cp = memchr(cp, '\n', endfile - cp)) != NULL) {
+		/* byte after the \n */
+		if (++cp > endfile)
+			/* end of file */
+			break;
+		thearray[anents].size = cp - thearray[anents].ptr;
+		if (++anents == asz)
+			/* resize array */
+			thearray = xrecalloc(thearray, (asz <<= 1),
+			    sizeof(thearray[0]));
+		thearray[anents].ptr = cp;
+	}
+	thearray[anents].size = endfile - thearray[anents].ptr + 1;
+
+	qsort(thearray, ++anents, sizeof(thearray[0]), cmpfn);
+
+	for (asz = 0; asz < anents; ++asz)
+		if ((size_t)write(STDOUT_FILENO, thearray[asz].ptr,
+		    thearray[asz].size) != thearray[asz].size)
+			err(1, "write %zu bytes", thearray[asz].size);
+
+	free(thearray);
+	if (munmap(thefile, fsz))
+		warn("munmap");
+	close(fd);
+
+	return (0);
+}
+
+static int
+cmpfn(const void *p1, const void *p2)
+{
+	int rv;
+	const struct ptrsize *a1 = (const struct ptrsize *)p1;
+	const struct ptrsize *a2 = (const struct ptrsize *)p2;
+
+	if ((rv = memcmp(a1->ptr, a2->ptr, (a1->size > a2->size ?
+	    a2->size : a1->size) - /* '\n' */ 1)) != 0)
+		/* unequal in the common part */
+		return (rv);
+
+	/* shorter string is smaller */
+	return (a1->size > a2->size ? 1 : a1->size == a2->size ? 0 : -1);
+}
+@
+
+
+1.6
+log
+@add forgotten call to close()
+@
+text
+@d32 1
+a32 1
+    "$MirOS: contrib/hosted/tg/sortfile.c,v 1.5 2010/09/09 19:42:39 tg Exp $";
+d108 1
+a108 1
+	thearray = xrecalloc(NULL, (asz = 8), sizeof(char *));
+d116 2
+a117 1
+		if (anents == asz)
+d120 2
+a121 3
+			    sizeof(char *));
+		thearray[anents].size = cp - thearray[anents].ptr;
+		thearray[++anents].ptr = cp;
+d125 1
+a125 1
+	qsort(thearray, ++anents, sizeof(struct ptrsize), cmpfn);
+@
+
+
+1.5
+log
+@eglibc sucks major arse!
+@
+text
+@d32 1
+a32 1
+    "$MirOS: contrib/hosted/tg/sortfile.c,v 1.4 2010/09/09 19:41:06 tg Exp $";
+d135 1
+@
+
+
+1.4
+log
+@fix mmap and portability
+@
+text
+@d32 1
+a32 1
+    "$MirOS: contrib/hosted/tg/sortfile.c,v 1.3 2010/09/09 19:11:36 tg Exp $";
+d102 2
+a103 2
+	thefile = mmap(NULL, fsz, PROT_READ, MAP_FILE, fd, (off_t)0);
+	if (thefile == MAP_FAILED)
+@
+
+
+1.3
+log
+@help the compiler's CSE
+@
+text
+@d32 1
+a32 1
+    "$MirOS: contrib/hosted/tg/sortfile.c,v 1.2 2010/09/09 19:09:12 tg Exp $";
+d42 18
+a59 1
+#define MUL_NO_OVERFLOW (1UL << (sizeof (size_t) * 8 / 2))
+d103 1
+a103 1
+	if (thefile == NULL)
+@
+
+
+1.2
+log
+@make helper functions static and use memcmp for greater efficiency
+@
+text
+@d32 1
+a32 1
+    "$MirOS: contrib/hosted/tg/sortfile.c,v 1.1 2010/09/09 18:41:54 tg Exp $";
+d129 2
+a130 2
+	if ((rv = memcmp(a1->ptr, a2->ptr, (a1->size < a2->size ?
+	    a1->size : a2->size) - /* '\n' */ 1)) != 0)
+@
+
+
+1.1
+log
+@wrote this for wbx@@
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2008, 2010
+d32 1
+a32 1
+    "$MirOS$";
+d39 2
+a40 2
+void *xrecalloc(void *, size_t, size_t);
+int cmpfn(const void *, const void *);
+d44 1
+a44 1
+void *
+d122 1
+a122 2
+/* derived from MirBSD libkern strcmp */
+int
+d125 1
+a125 1
+	const unsigned char *s1, *s2;
+d129 7
+a135 7
+	s1 = (const unsigned char *)a1->ptr;
+	s2 = (const unsigned char *)a2->ptr;
+	while (*s1 == *s2++)
+		if (*s1++ == '\n')
+			/* equal, newline reached */
+			return (0);
+	return (*s1 - *--s2);
+@
+

@@ -1,0 +1,668 @@
+head	1.4;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2016.03.26.17.29.21;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10056F6C535787D61F0;
+
+1.3
+date	2009.05.30.21.40.28;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004A21A7D6044C01D7;
+
+1.2
+date	2005.12.14.23.28.32;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043A0AA0E5A220A51;
+
+1.1
+date	2005.05.14.23.21.03;	author tg;	state Exp;
+branches
+	1.1.201.1;
+next	;
+commitid	1e94428687d39445;
+
+1.1.201.1
+date	2005.05.14.23.21.03;	author tg;	state Exp;
+branches;
+next	;
+commitid	1e94428687d39445;
+
+
+desc
+@@
+
+
+1.4
+log
+@complete overhaul of djbdns port:
+
+• merge t4/t6 flavours back into one binary
+  ‣ greatly simplify IPv6 handling, too; drop code for v6-less OSes
+• merge v4/v6 dnsroots back into one, update all of them
+• improve documentation a bit
+• apply two patches from http://www.your.org/dnscache/ (SECURITY):
+  ‣ merge identical outgoing requests
+  ‣ allow caching SOA responses
+• update to Fefe’s djbdns-1.05-test27.diff.bz2
+  ‣ fixes recursively resolving hosts behind IPv6-only nameservers;
+    spotted by Natureshadow (for Teckids’ Lunatics network) and via
+    http://serverfault.com/q/627912/189656 (which I’ll answer RSN)
+  ⚠ fix with “one second” CDB validity patch
+  ⚠ adapt for OpenBSD-style IPv6
+• drop ip6.int. reverse v6 DNS for good
+• improve dealing with mixing v4/v6 transport
+  ⇒ TODO add IP4SEND/IP6SEND support; currently; if IPSEND is v6
+    but we send to a v4 server, we use INADDR_ANY for outgoing,
+    as automatic fallback address
+@
+text
+@$MirOS: ports/net/djbdns/patches/patch-src_dnscache_c,v 1.3 2009/05/30 21:40:28 tg Exp $
+--- src/dnscache.c.orig	Sun Feb 11 21:11:23 2001
++++ src/dnscache.c	Sat Mar 26 16:17:11 2016
+@@@@ -5,6 +5,8 @@@@
+ #include "strerr.h"
+ #include "error.h"
+ #include "ip4.h"
++#include "ip6.h"
++#include <stdint.h>
+ #include "uint16.h"
+ #include "uint64.h"
+ #include "socket.h"
+@@@@ -22,7 +24,13 @@@@
+ #include "log.h"
+ #include "okclient.h"
+ #include "droproot.h"
++#include "maxclient.h"
++#include "openreadclose.h"
+ 
++long interface;
++
++stralloc ignoreip = {0};
++
+ static int packetquery(char *buf,unsigned int len,char **q,char qtype[2],char qclass[2],char id[2])
+ {
+   unsigned int pos;
+@@@@ -46,23 +54,24 @@@@ static int packetquery(char *buf,unsigne
+ }
+ 
+ 
+-static char myipoutgoing[4];
+-static char myipincoming[4];
++static char myipoutgoing[16];
++static char myipincoming[16];
++uint8_t udp53t;
+ static char buf[1024];
+ uint64 numqueries = 0;
+ 
+ 
+ static int udp53;
+ 
+-#define MAXUDP 200
+ static struct udpclient {
+   struct query q;
+   struct taia start;
+   uint64 active; /* query number, if active; otherwise 0 */
+   iopause_fd *io;
+-  char ip[4];
++  char ip[16];
+   uint16 port;
+   char id[2];
++  uint32 scope_id;
+ } u[MAXUDP];
+ int uactive = 0;
+ 
+@@@@ -78,7 +87,10 @@@@ void u_respond(int j)
+   if (!u[j].active) return;
+   response_id(u[j].id);
+   if (response_len > 512) response_tc();
+-  socket_send4(udp53,response,response_len,u[j].ip,u[j].port);
++  if (udp53t)
++    socket_send4(udp53,response,response_len,u[j].ip+12,u[j].port);
++  else
++    socket_send6(udp53,response,response_len,u[j].ip,u[j].port,u[j].scope_id);
+   log_querydone(&u[j].active,response_len);
+   u[j].active = 0; --uactive;
+ }
+@@@@ -109,7 +121,11 @@@@ void u_new(void)
+   x = u + j;
+   taia_now(&x->start);
+ 
+-  len = socket_recv4(udp53,buf,sizeof buf,x->ip,&x->port);
++  if (udp53t) {
++    byte_copy(x->ip,12,(char *)V4mappedprefix);
++    len = socket_recv4(udp53,buf,sizeof buf,x->ip+12,&x->port);
++  } else
++    len = socket_recv6(udp53,buf,sizeof buf,x->ip,&x->port,&x->scope_id);
+   if (len == -1) return;
+   if (len >= sizeof buf) return;
+   if (x->port < 1024) if (x->port != 53) return;
+@@@@ -119,7 +135,7 @@@@ void u_new(void)
+ 
+   x->active = ++numqueries; ++uactive;
+   log_query(&x->active,x->ip,x->port,x->id,q,qtype);
+-  switch(query_start(&x->q,q,qtype,qclass,myipoutgoing)) {
++  switch(query_start(&x->q,q,qtype,qclass,myipoutgoing,interface)) {
+     case -1:
+       u_drop(j);
+       return;
+@@@@ -131,14 +147,13 @@@@ void u_new(void)
+ 
+ static int tcp53;
+ 
+-#define MAXTCP 20
+ struct tcpclient {
+   struct query q;
+   struct taia start;
+   struct taia timeout;
+   uint64 active; /* query number or 1, if active; otherwise 0 */
+   iopause_fd *io;
+-  char ip[4]; /* send response to this address */
++  char ip[16]; /* send response to this address */
+   uint16 port; /* send response to this port */
+   char id[2];
+   int tcp; /* open TCP socket, if active */
+@@@@ -146,6 +161,7 @@@@ struct tcpclient {
+   char *buf; /* 0, or dynamically allocated of length len */
+   unsigned int len;
+   unsigned int pos;
++  uint32 scope_id;
+ } t[MAXTCP];
+ int tactive = 0;
+ 
+@@@@ -254,7 +270,7 @@@@ void t_rw(int j)
+ 
+   x->active = ++numqueries;
+   log_query(&x->active,x->ip,x->port,x->id,q,qtype);
+-  switch(query_start(&x->q,q,qtype,qclass,myipoutgoing)) {
++  switch(query_start(&x->q,q,qtype,qclass,myipoutgoing,interface)) {
+     case -1:
+       t_drop(j);
+       return;
+@@@@ -291,7 +307,10 @@@@ void t_new(void)
+   x = t + j;
+   taia_now(&x->start);
+ 
+-  x->tcp = socket_accept4(tcp53,x->ip,&x->port);
++  if (udp53t)
++    x->tcp = socket_accept4(tcp53,x->ip+12,&x->port);
++  else
++    x->tcp = socket_accept6(tcp53,x->ip,&x->port,&x->scope_id);
+   if (x->tcp == -1) return;
+   if (x->port < 1024) if (x->port != 53) { close(x->tcp); return; }
+   if (!okclient(x->ip)) { close(x->tcp); return; }
+@@@@ -389,24 +408,34 @@@@ char seed[128];
+ int main()
+ {
+   char *x;
++  unsigned int i, j, k;
+   unsigned long cachesize;
++  static stralloc sa = {0};
+ 
++  x = env_get("INTERFACE");
++  if (x) scan_ulong(x,&interface);
++
+   x = env_get("IP");
+   if (!x)
+     strerr_die2x(111,FATAL,"$IP not set");
+-  if (!ip4_scan(x,myipincoming))
++  if (!ip6_scan(x,myipincoming))
+     strerr_die3x(111,FATAL,"unable to parse IP address ",x);
+ 
+-  udp53 = socket_udp();
++  udp53t = ip6_isv4mapped(myipincoming);
++  udp53 = udp53t ? socket_udp() : socket_udp6();
+   if (udp53 == -1)
+     strerr_die2sys(111,FATAL,"unable to create UDP socket: ");
+-  if (socket_bind4_reuse(udp53,myipincoming,53) == -1)
++  if ((udp53t ?
++   socket_bind4_reuse(udp53,myipincoming+12,53) :
++   socket_bind6_reuse(udp53,myipincoming,53,interface)) == -1)
+     strerr_die2sys(111,FATAL,"unable to bind UDP socket: ");
+ 
+-  tcp53 = socket_tcp();
++  tcp53 = udp53t ? socket_tcp() : socket_tcp6();
+   if (tcp53 == -1)
+     strerr_die2sys(111,FATAL,"unable to create TCP socket: ");
+-  if (socket_bind4_reuse(tcp53,myipincoming,53) == -1)
++  if ((udp53t ?
++   socket_bind4_reuse(tcp53,myipincoming+12,53) :
++   socket_bind6_reuse(tcp53,myipincoming,53,interface)) == -1)
+     strerr_die2sys(111,FATAL,"unable to bind TCP socket: ");
+ 
+   droproot(FATAL);
+@@@@ -421,7 +450,7 @@@@ int main()
+   x = env_get("IPSEND");
+   if (!x)
+     strerr_die2x(111,FATAL,"$IPSEND not set");
+-  if (!ip4_scan(x,myipoutgoing))
++  if (!ip6_scan(x,myipoutgoing))
+     strerr_die3x(111,FATAL,"unable to parse IP address ",x);
+ 
+   x = env_get("CACHESIZE");
+@@@@ -430,6 +459,20 @@@@ int main()
+   scan_ulong(x,&cachesize);
+   if (!cache_init(cachesize))
+     strerr_die3x(111,FATAL,"not enough memory for cache of size ",x);
++
++  if (openreadclose("ignoreip",&sa,64) < 0) 
++    strerr_die2x(111,FATAL,"trouble reading ignoreip");
++  for(j = k = i = 0; i < sa.len; i++)
++    if (sa.s[i] == '\n')  {
++      sa.s[i] = '\0';
++      if (!stralloc_readyplus(&ignoreip,16))
++	strerr_die2x(111,FATAL,"out of memory parsing ignoreip");
++      if (!ip6_scan(sa.s+k,ignoreip.s+j))
++        strerr_die3x(111,FATAL,"unable to parse address in ignoreip ",ignoreip.s+k);
++      j += 16;
++      k = i + 1;
++    }
++  ignoreip.len = j;
+ 
+   if (env_get("HIDETTL"))
+     response_hidettl();
+@
+
+
+1.3
+log
+@The ability for dnscachet6 to listen on IPv4 addresses.
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_dnscache_c,v 1.2 2005/12/14 23:28:32 tg Exp $
+d3 2
+a4 2
++++ src/dnscache.c	Sat May 30 21:14:48 2009
+@@@@ -5,6 +5,10 @@@@
+a7 1
++#ifdef DJB_V6ONLY
+d9 1
+a9 2
++#include <stdbool.h>
++#endif /* DJB_V6ONLY */
+d13 1
+a13 1
+@@@@ -22,7 +26,14 @@@@
+d17 1
+a19 1
++#ifdef DJB_V6ONLY
+a20 1
++#endif /* DJB_V6ONLY */
+d27 1
+a27 1
+@@@@ -46,8 +57,14 @@@@ static int packetquery(char *buf,unsigne
+d31 2
+a32 4
++#ifndef DJB_V6ONLY
+ static char myipoutgoing[4];
+ static char myipincoming[4];
++#else
+d35 1
+a35 2
++bool udp53t;
++#endif /* DJB_V6ONLY */
+d39 6
+a44 1
+@@@@ -60,9 +77,16 @@@@ static struct udpclient {
+d48 1
+a48 3
++#ifndef DJB_V6ONLY
+   char ip[4];
++#else
+a49 1
++#endif /* DJB_V6ONLY */
+a51 1
++#ifdef DJB_V6ONLY
+a52 1
++#endif /* DJB_V6ONLY */
+d56 1
+a56 1
+@@@@ -78,7 +102,14 @@@@ void u_respond(int j)
+d60 1
+a60 3
++#ifndef DJB_V6ONLY
+   socket_send4(udp53,response,response_len,u[j].ip,u[j].port);
++#else
+a64 1
++#endif /* DJB_V6ONLY */
+d68 1
+a68 1
+@@@@ -109,7 +140,15 @@@@ void u_new(void)
+d72 1
+a72 3
++#ifndef DJB_V6ONLY
+   len = socket_recv4(udp53,buf,sizeof buf,x->ip,&x->port);
++#else
+a77 1
++#endif /* DJB_V6ONLY */
+d81 1
+a81 1
+@@@@ -119,7 +158,11 @@@@ void u_new(void)
+d85 1
+a85 3
++#ifndef DJB_V6ONLY
+   switch(query_start(&x->q,q,qtype,qclass,myipoutgoing)) {
++#else
+a86 1
++#endif /* DJB_V6ONLY */
+d90 8
+a97 1
+@@@@ -138,7 +181,11 @@@@ struct tcpclient {
+d101 1
+a101 3
++#ifndef DJB_V6ONLY
+   char ip[4]; /* send response to this address */
++#else
+a102 1
++#endif /* DJB_V6ONLY */
+d106 1
+a106 1
+@@@@ -146,6 +193,9 @@@@ struct tcpclient {
+a109 1
++#ifdef DJB_V6ONLY
+a110 1
++#endif /* DJB_V6ONLY */
+d114 1
+a114 1
+@@@@ -254,7 +304,11 @@@@ void t_rw(int j)
+d118 1
+a118 3
++#ifndef DJB_V6ONLY
+   switch(query_start(&x->q,q,qtype,qclass,myipoutgoing)) {
++#else
+a119 1
++#endif /* DJB_V6ONLY */
+d123 1
+a123 1
+@@@@ -291,7 +345,14 @@@@ void t_new(void)
+d127 1
+a127 3
++#ifndef DJB_V6ONLY
+   x->tcp = socket_accept4(tcp53,x->ip,&x->port);
++#else
+a131 1
++#endif /* DJB_V6ONLY */
+d135 1
+a135 1
+@@@@ -389,24 +450,63 @@@@ char seed[128];
+a142 1
++#ifdef DJB_V6ONLY
+a144 1
++#endif /* DJB_V6ONLY */
+d149 1
+a149 3
++#ifndef DJB_V6ONLY
+   if (!ip4_scan(x,myipincoming))
++#else
+a150 1
++#endif /* DJB_V6ONLY */
+d153 1
+a153 10
++#ifndef DJB_V6ONLY
+   udp53 = socket_udp();
++#else
++#if 0
++  /* if if IP is a mapped-IPv4 address, disable IPv6 functionality */
++  /* this is actually a bad idea */
++  if (ip6_isv4mapped(myipincoming))
++    noipv6 = 1;
++#endif
++
+a155 1
++#endif /* DJB_V6ONLY */
+d158 1
+a158 3
++#ifndef DJB_V6ONLY
+   if (socket_bind4_reuse(udp53,myipincoming,53) == -1)
++#else
+a161 1
++#endif /* DJB_V6ONLY */
+d164 1
+a164 3
++#ifndef DJB_V6ONLY
+   tcp53 = socket_tcp();
++#else
+a165 1
++#endif /* DJB_V6ONLY */
+d168 1
+a168 3
++#ifndef DJB_V6ONLY
+   if (socket_bind4_reuse(tcp53,myipincoming,53) == -1)
++#else
+a171 1
++#endif /* DJB_V6ONLY */
+d175 1
+a175 1
+@@@@ -421,7 +521,11 @@@@ int main()
+d179 1
+a179 3
++#ifndef DJB_V6ONLY
+   if (!ip4_scan(x,myipoutgoing))
++#else
+a180 1
++#endif /* DJB_V6ONLY */
+d184 1
+a184 1
+@@@@ -430,6 +534,32 @@@@ int main()
+a193 1
++#ifdef DJB_V6ONLY
+a194 3
++#else
++      if (!stralloc_readyplus(&ignoreip,4))
++#endif /* DJB_V6ONLY */
+a195 1
++#ifdef DJB_V6ONLY
+a196 3
++#else
++      if (!ip4_scan(sa.s+k,ignoreip.s+j))
++#endif /* DJB_V6ONLY */
+a197 1
++#ifdef DJB_V6ONLY
+a198 3
++#else
++      j += 4;
++#endif /* DJB_V6ONLY */
+@
+
+
+1.2
+log
+@* update to fefe's djbdns-1.05-test23.diff
+  with djbdns-1.05-ixfr.diff
+* slightly change naming of v6-transport binaries
+* consolidate all added source files in a central directory
+  so it can be reused by the v6-transport stuff
+* integrate the v6 transport binaries
+* fix spacing
+* sync descriptive texts with reality
+* sync European ORSN (v4 and v6) to their root.hint
+* sync OpenNIC too
+* Open-RSC seeminly ceased to exist recently
+* Apply compiler-temporary-filename.patch
+  from http://homepages.tesco.net/~J.deBoynePollard/FGA/djbdns-problems.html
+* apply dnscache-cname-handling.patch
+* apply dnscache-strict-forwardonly.patch w/ IPv6 tweak
+* apply dnscacheip-space-separator.patch
+* apply tinydns-alias-chain-truncation.patch
+* apply tinydns-data-semantic-error.patch
+  appropriately for 6 and 3, too
+* fix shell code and path to includes
+* fix relative paths
+* fix names of library and programmes; NOMAN=yes here (t6)
+* Add support for the IPv6 transport module to communicate,
+  as a client, with IPv4 transport name servers as well.
+
+  WFM
+* build it with -Wall -Werror
+* honour ${SYSCONFDIR} throughout the port
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_dnscache_c,v 1.1.201.1 2005/05/14 23:21:03 tg Exp $
+d3 2
+a4 2
++++ src/dnscache.c	Tue Dec 13 23:44:54 2005
+@@@@ -5,6 +5,9 @@@@
+d10 1
+d15 1
+a15 1
+@@@@ -22,7 +25,14 @@@@
+d30 1
+a30 1
+@@@@ -46,8 +56,13 @@@@ static int packetquery(char *buf,unsigne
+d40 1
+d45 1
+a45 1
+@@@@ -60,9 +75,16 @@@@ static struct udpclient {
+d62 1
+a62 1
+@@@@ -78,7 +100,11 @@@@ void u_respond(int j)
+d69 4
+a72 1
++  socket_send6(udp53,response,response_len,u[j].ip,u[j].port,u[j].scope_id);
+d77 1
+a77 1
+@@@@ -109,7 +135,11 @@@@ void u_new(void)
+d84 5
+a88 1
++  len = socket_recv6(udp53,buf,sizeof buf,x->ip,&x->port,&x->scope_id);
+d93 1
+a93 1
+@@@@ -119,7 +149,11 @@@@ void u_new(void)
+d105 1
+a105 1
+@@@@ -138,7 +172,11 @@@@ struct tcpclient {
+d117 1
+a117 1
+@@@@ -146,6 +184,9 @@@@ struct tcpclient {
+d127 1
+a127 1
+@@@@ -254,7 +295,11 @@@@ void t_rw(int j)
+d139 1
+a139 1
+@@@@ -291,7 +336,11 @@@@ void t_new(void)
+d146 4
+a149 1
++  x->tcp = socket_accept6(tcp53,x->ip,&x->port,&x->scope_id);
+d154 1
+a154 1
+@@@@ -389,24 +438,58 @@@@ char seed[128];
+d187 2
+a188 1
++  udp53 = socket_udp6();
+d195 3
+a197 1
++  if (socket_bind6_reuse(udp53,myipincoming,53,interface) == -1)
+d204 1
+a204 1
++  tcp53 = socket_tcp6();
+d211 3
+a213 1
++  if (socket_bind6_reuse(tcp53,myipincoming,53,interface) == -1)
+d218 1
+a218 1
+@@@@ -421,7 +504,11 @@@@ int main()
+d230 1
+a230 1
+@@@@ -430,6 +517,32 @@@@ int main()
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 1
+a3 1
++++ src/dnscache.c	Sat May 14 22:27:17 2005
+d14 2
+a15 1
+@@@@ -23,6 +26,12 @@@@
+d18 1
+a19 2
++stralloc ignoreip = {0};
++
+d24 2
+d29 1
+a29 1
+@@@@ -46,8 +55,13 @@@@ static int packetquery(char *buf,unsigne
+d43 1
+a43 1
+@@@@ -60,9 +74,16 @@@@ static struct udpclient {
+d60 1
+a60 1
+@@@@ -78,7 +99,11 @@@@ void u_respond(int j)
+d72 1
+a72 1
+@@@@ -109,7 +134,11 @@@@ void u_new(void)
+d84 1
+a84 1
+@@@@ -119,7 +148,11 @@@@ void u_new(void)
+d96 1
+a96 1
+@@@@ -138,7 +171,11 @@@@ struct tcpclient {
+d108 1
+a108 1
+@@@@ -146,6 +183,9 @@@@ struct tcpclient {
+d118 1
+a118 1
+@@@@ -254,7 +294,11 @@@@ void t_rw(int j)
+d130 1
+a130 1
+@@@@ -291,7 +335,11 @@@@ void t_new(void)
+d142 1
+a142 1
+@@@@ -389,24 +437,57 @@@@ char seed[128];
+d148 1
+d168 1
+a168 1
++# if 0
+d173 2
+a174 1
++# endif
+a176 1
++
+d201 1
+a201 1
+@@@@ -421,7 +502,11 @@@@ int main()
+d213 1
+a213 1
+@@@@ -430,6 +515,20 @@@@ int main()
+d218 20
+a237 9
++  if (openreadclose("ignoreip", &ignoreip, 64) < 0)
++    strerr_die2x(111, FATAL, "trouble reading ignoreip");
++  for (j = k = i = 0; i < ignoreip.len; i++)
++    if (ignoreip.s[i] == '\n') {
++      ignoreip.s[i] = '\0';
++      if (j + 4 > i)
++        strerr_die3x(111, FATAL, "badly malformed ip4 address ", ignoreip.s+k);
++      if (!ip4_scan(ignoreip.s + k, ignoreip.s + j))
++        strerr_die3x(111, FATAL, "unable to parse address in ignoreip ", ignoreip.s + k);
+d239 1
+@
+
+
+1.1.201.1
+log
+@New djbdns port, #ifdef'd, "original" and "no_ipv6" flavours removed
+"no_ipv4" non-functional at the moment, will follow later after
+redesign using crunchgen(1) and crunchide(1)
+@
+text
+@@

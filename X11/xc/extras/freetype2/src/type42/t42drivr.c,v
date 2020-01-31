@@ -1,0 +1,799 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.22.23;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.48.38;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.02.26.20.05.14;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.25.14;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.14;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.36.01;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.39;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.25;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.41.58;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  t42drivr.c                                                             */
+/*                                                                         */
+/*    High-level Type 42 driver interface (body).                          */
+/*                                                                         */
+/*  Copyright 2002-2016 by                                                 */
+/*  Roberto Alameda.                                                       */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* This driver implements Type42 fonts as described in the               */
+  /* Technical Note #5012 from Adobe, with these limitations:              */
+  /*                                                                       */
+  /* 1) CID Fonts are not currently supported.                             */
+  /* 2) Incremental fonts making use of the GlyphDirectory keyword         */
+  /*    will be loaded, but the rendering will be using the TrueType       */
+  /*    tables.                                                            */
+  /* 3) As for Type1 fonts, CDevProc is not supported.                     */
+  /* 4) The Metrics dictionary is not supported.                           */
+  /* 5) AFM metrics are not supported.                                     */
+  /*                                                                       */
+  /* In other words, this driver supports Type42 fonts derived from        */
+  /* TrueType fonts in a non-CID manner, as done by usual conversion       */
+  /* programs.                                                             */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+#include "t42drivr.h"
+#include "t42objs.h"
+#include "t42error.h"
+#include FT_INTERNAL_DEBUG_H
+
+#include FT_SERVICE_FONT_FORMAT_H
+#include FT_SERVICE_GLYPH_DICT_H
+#include FT_SERVICE_POSTSCRIPT_NAME_H
+#include FT_SERVICE_POSTSCRIPT_INFO_H
+
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_t42
+
+
+  /*
+   *
+   *  GLYPH DICT SERVICE
+   *
+   */
+
+  static FT_Error
+  t42_get_glyph_name( T42_Face    face,
+                      FT_UInt     glyph_index,
+                      FT_Pointer  buffer,
+                      FT_UInt     buffer_max )
+  {
+    FT_STRCPYN( buffer, face->type1.glyph_names[glyph_index], buffer_max );
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_UInt
+  t42_get_name_index( T42_Face    face,
+                      FT_String*  glyph_name )
+  {
+    FT_Int  i;
+
+
+    for ( i = 0; i < face->type1.num_glyphs; i++ )
+    {
+      FT_String*  gname = face->type1.glyph_names[i];
+
+
+      if ( glyph_name[0] == gname[0] && !ft_strcmp( glyph_name, gname ) )
+        return (FT_UInt)ft_strtol( (const char *)face->type1.charstrings[i],
+                                   NULL, 10 );
+    }
+
+    return 0;
+  }
+
+
+  static const FT_Service_GlyphDictRec  t42_service_glyph_dict =
+  {
+    (FT_GlyphDict_GetNameFunc)  t42_get_glyph_name,    /* get_name   */
+    (FT_GlyphDict_NameIndexFunc)t42_get_name_index     /* name_index */
+  };
+
+
+  /*
+   *
+   *  POSTSCRIPT NAME SERVICE
+   *
+   */
+
+  static const char*
+  t42_get_ps_font_name( T42_Face  face )
+  {
+    return (const char*)face->type1.font_name;
+  }
+
+
+  static const FT_Service_PsFontNameRec  t42_service_ps_font_name =
+  {
+    (FT_PsName_GetFunc)t42_get_ps_font_name   /* get_ps_font_name */
+  };
+
+
+  /*
+   *
+   *  POSTSCRIPT INFO SERVICE
+   *
+   */
+
+  static FT_Error
+  t42_ps_get_font_info( FT_Face          face,
+                        PS_FontInfoRec*  afont_info )
+  {
+    *afont_info = ((T42_Face)face)->type1.font_info;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Error
+  t42_ps_get_font_extra( FT_Face           face,
+                         PS_FontExtraRec*  afont_extra )
+  {
+    *afont_extra = ((T42_Face)face)->type1.font_extra;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Int
+  t42_ps_has_glyph_names( FT_Face  face )
+  {
+    FT_UNUSED( face );
+
+    return 1;
+  }
+
+
+  static FT_Error
+  t42_ps_get_font_private( FT_Face         face,
+                           PS_PrivateRec*  afont_private )
+  {
+    *afont_private = ((T42_Face)face)->type1.private_dict;
+
+    return FT_Err_Ok;
+  }
+
+
+  static const FT_Service_PsInfoRec  t42_service_ps_info =
+  {
+    (PS_GetFontInfoFunc)   t42_ps_get_font_info,    /* ps_get_font_info    */
+    (PS_GetFontExtraFunc)  t42_ps_get_font_extra,   /* ps_get_font_extra   */
+    (PS_HasGlyphNamesFunc) t42_ps_has_glyph_names,  /* ps_has_glyph_names  */
+    (PS_GetFontPrivateFunc)t42_ps_get_font_private, /* ps_get_font_private */
+    /* not implemented */
+    (PS_GetFontValueFunc)  NULL                     /* ps_get_font_value   */
+  };
+
+
+  /*
+   *
+   *  SERVICE LIST
+   *
+   */
+
+  static const FT_ServiceDescRec  t42_services[] =
+  {
+    { FT_SERVICE_ID_GLYPH_DICT,           &t42_service_glyph_dict },
+    { FT_SERVICE_ID_POSTSCRIPT_FONT_NAME, &t42_service_ps_font_name },
+    { FT_SERVICE_ID_POSTSCRIPT_INFO,      &t42_service_ps_info },
+    { FT_SERVICE_ID_FONT_FORMAT,          FT_FONT_FORMAT_TYPE_42 },
+    { NULL, NULL }
+  };
+
+
+  FT_CALLBACK_DEF( FT_Module_Interface )
+  T42_Get_Interface( FT_Module         module,
+                     const FT_String*  t42_interface )
+  {
+    FT_UNUSED( module );
+
+    return ft_service_list_lookup( t42_services, t42_interface );
+  }
+
+
+  const FT_Driver_ClassRec  t42_driver_class =
+  {
+    {
+      FT_MODULE_FONT_DRIVER       |
+      FT_MODULE_DRIVER_SCALABLE   |
+#ifdef TT_USE_BYTECODE_INTERPRETER
+      FT_MODULE_DRIVER_HAS_HINTER,
+#else
+      0,
+#endif
+
+      sizeof ( T42_DriverRec ),
+
+      "type42",
+      0x10000L,
+      0x20000L,
+
+      NULL,    /* module-specific interface */
+
+      T42_Driver_Init,          /* FT_Module_Constructor  module_init   */
+      T42_Driver_Done,          /* FT_Module_Destructor   module_done   */
+      T42_Get_Interface,        /* FT_Module_Requester    get_interface */
+    },
+
+    sizeof ( T42_FaceRec ),
+    sizeof ( T42_SizeRec ),
+    sizeof ( T42_GlyphSlotRec ),
+
+    T42_Face_Init,              /* FT_Face_InitFunc  init_face */
+    T42_Face_Done,              /* FT_Face_DoneFunc  done_face */
+    T42_Size_Init,              /* FT_Size_InitFunc  init_size */
+    T42_Size_Done,              /* FT_Size_DoneFunc  done_size */
+    T42_GlyphSlot_Init,         /* FT_Slot_InitFunc  init_slot */
+    T42_GlyphSlot_Done,         /* FT_Slot_DoneFunc  done_slot */
+
+    T42_GlyphSlot_Load,         /* FT_Slot_LoadFunc  load_glyph */
+
+    NULL,                       /* FT_Face_GetKerningFunc   get_kerning  */
+    NULL,                       /* FT_Face_AttachFunc       attach_file  */
+    NULL,                       /* FT_Face_GetAdvancesFunc  get_advances */
+
+    T42_Size_Request,           /* FT_Size_RequestFunc  request_size */
+    T42_Size_Select             /* FT_Size_SelectFunc   select_size  */
+  };
+
+
+/* END */
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d7 2
+a8 1
+/*  Copyright 2002, 2003, 2004, 2006, 2007, 2009 by Roberto Alameda.       */
+d44 1
+a44 1
+#include FT_SERVICE_XFREE86_NAME_H
+d67 1
+a67 1
+    return T42_Err_Ok;
+d75 1
+a75 2
+    FT_Int      i;
+    FT_String*  gname;
+d80 2
+a81 1
+      gname = face->type1.glyph_names[i];
+d84 2
+a85 1
+        return (FT_UInt)ft_atol( (const char *)face->type1.charstrings[i] );
+d94 2
+a95 2
+    (FT_GlyphDict_GetNameFunc)  t42_get_glyph_name,
+    (FT_GlyphDict_NameIndexFunc)t42_get_name_index
+d114 1
+a114 1
+    (FT_PsName_GetFunc)t42_get_ps_font_name
+d130 1
+a130 1
+    return T42_Err_Ok;
+d140 1
+a140 1
+    return T42_Err_Ok;
+d159 1
+a159 1
+    return T42_Err_Ok;
+d165 6
+a170 4
+    (PS_GetFontInfoFunc)   t42_ps_get_font_info,
+    (PS_GetFontExtraFunc)   t42_ps_get_font_extra,
+    (PS_HasGlyphNamesFunc) t42_ps_has_glyph_names,
+    (PS_GetFontPrivateFunc)t42_ps_get_font_private
+d185 1
+a185 1
+    { FT_SERVICE_ID_XF86_NAME,            FT_XF86_FORMAT_TYPE_42 },
+d190 2
+a191 2
+  static FT_Module_Interface
+  T42_Get_Interface( FT_Driver         driver,
+d194 1
+a194 1
+    FT_UNUSED( driver );
+d217 1
+a217 1
+      0,    /* format interface */
+d219 3
+a221 3
+      (FT_Module_Constructor)T42_Driver_Init,
+      (FT_Module_Destructor) T42_Driver_Done,
+      (FT_Module_Requester)  T42_Get_Interface,
+d228 12
+a239 15
+    (FT_Face_InitFunc)        T42_Face_Init,
+    (FT_Face_DoneFunc)        T42_Face_Done,
+    (FT_Size_InitFunc)        T42_Size_Init,
+    (FT_Size_DoneFunc)        T42_Size_Done,
+    (FT_Slot_InitFunc)        T42_GlyphSlot_Init,
+    (FT_Slot_DoneFunc)        T42_GlyphSlot_Done,
+
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+    ft_stub_set_char_sizes,
+    ft_stub_set_pixel_sizes,
+#endif
+    (FT_Slot_LoadFunc)        T42_GlyphSlot_Load,
+
+    (FT_Face_GetKerningFunc)  0,
+    (FT_Face_AttachFunc)      0,
+d241 2
+a242 3
+    (FT_Face_GetAdvancesFunc) 0,
+    (FT_Size_RequestFunc)     T42_Size_Request,
+    (FT_Size_SelectFunc)      T42_Size_Select
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2004, 2006, 2007 by Roberto Alameda.             */
+d52 5
+a56 5
+ /*
+  *
+  *  GLYPH DICT SERVICE
+  *
+  */
+d97 5
+a101 5
+ /*
+  *
+  *  POSTSCRIPT NAME SERVICE
+  *
+  */
+d116 5
+a120 5
+ /*
+  *
+  *  POSTSCRIPT INFO SERVICE
+  *
+  */
+d127 11
+d146 1
+d156 1
+d164 1
+d170 5
+a174 5
+ /*
+  *
+  *  SERVICE LIST
+  *
+  */
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2004, 2006 by Roberto Alameda.                   */
+d64 1
+a64 16
+    FT_String*  gname;
+
+
+    gname = face->type1.glyph_names[glyph_index];
+
+    if ( buffer_max > 0 )
+    {
+      FT_UInt  len = (FT_UInt)( ft_strlen( gname ) );
+
+
+      if ( len >= buffer_max )
+        len = buffer_max - 1;
+
+      FT_MEM_COPY( buffer, gname, len );
+      ((FT_Byte*)buffer)[len] = 0;
+    }
+d82 1
+a82 1
+      if ( !ft_strcmp( glyph_name, gname ) )
+d187 1
+a187 1
+#ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2004 by Roberto Alameda.                         */
+d142 1
+a142 1
+    return 0;
+d154 9
+d165 3
+a167 2
+    (PS_GetFontInfoFunc)  t42_ps_get_font_info,
+    (PS_HasGlyphNamesFunc)t42_ps_has_glyph_names
+d232 4
+a235 2
+    (FT_Size_ResetPointsFunc) T42_Size_SetChars,
+    (FT_Size_ResetPixelsFunc) T42_Size_SetPixels,
+d241 3
+a243 1
+    (FT_Face_GetAdvancesFunc) 0
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2004, 2006, 2007 by Roberto Alameda.             */
+d64 16
+a79 1
+    FT_STRCPYN( buffer, face->type1.glyph_names[glyph_index], buffer_max );
+d97 1
+a97 1
+      if ( glyph_name[0] == gname[0] && !ft_strcmp( glyph_name, gname ) )
+d142 1
+a142 1
+    return T42_Err_Ok;
+a153 9
+  static FT_Error
+  t42_ps_get_font_private( FT_Face         face,
+                           PS_PrivateRec*  afont_private )
+  {
+    *afont_private = ((T42_Face)face)->type1.private_dict;
+    return T42_Err_Ok;
+  }
+
+
+d156 2
+a157 3
+    (PS_GetFontInfoFunc)   t42_ps_get_font_info,
+    (PS_HasGlyphNamesFunc) t42_ps_has_glyph_names,
+    (PS_GetFontPrivateFunc)t42_ps_get_font_private
+d192 1
+a192 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+d222 2
+a223 4
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+    ft_stub_set_char_sizes,
+    ft_stub_set_pixel_sizes,
+#endif
+d229 1
+a229 3
+    (FT_Face_GetAdvancesFunc) 0,
+    (FT_Size_RequestFunc)     T42_Size_Request,
+    (FT_Size_SelectFunc)      T42_Size_Select
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2004, 2006 by Roberto Alameda.                   */
+d142 1
+a142 1
+    return T42_Err_Ok;
+a153 9
+  static FT_Error
+  t42_ps_get_font_private( FT_Face         face,
+                           PS_PrivateRec*  afont_private )
+  {
+    *afont_private = ((T42_Face)face)->type1.private_dict;
+    return T42_Err_Ok;
+  }
+
+
+d156 2
+a157 3
+    (PS_GetFontInfoFunc)   t42_ps_get_font_info,
+    (PS_HasGlyphNamesFunc) t42_ps_has_glyph_names,
+    (PS_GetFontPrivateFunc)t42_ps_get_font_private
+d222 2
+a223 4
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+    ft_stub_set_char_sizes,
+    ft_stub_set_pixel_sizes,
+#endif
+d229 1
+a229 3
+    (FT_Face_GetAdvancesFunc) 0,
+    (FT_Size_RequestFunc)     T42_Size_Request,
+    (FT_Size_SelectFunc)      T42_Size_Select
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2004, 2006, 2007, 2009 by Roberto Alameda.       */
+d52 5
+a56 5
+  /*
+   *
+   *  GLYPH DICT SERVICE
+   *
+   */
+d64 16
+a79 1
+    FT_STRCPYN( buffer, face->type1.glyph_names[glyph_index], buffer_max );
+d97 1
+a97 1
+      if ( glyph_name[0] == gname[0] && !ft_strcmp( glyph_name, gname ) )
+d112 5
+a116 5
+  /*
+   *
+   *  POSTSCRIPT NAME SERVICE
+   *
+   */
+d131 5
+a135 5
+  /*
+   *
+   *  POSTSCRIPT INFO SERVICE
+   *
+   */
+a141 11
+
+    return T42_Err_Ok;
+  }
+
+
+  static FT_Error
+  t42_ps_get_font_extra( FT_Face           face,
+                         PS_FontExtraRec*  afont_extra )
+  {
+    *afont_extra = ((T42_Face)face)->type1.font_extra;
+
+a149 1
+
+a158 1
+
+a165 1
+    (PS_GetFontExtraFunc)   t42_ps_get_font_extra,
+d171 5
+a175 5
+  /*
+   *
+   *  SERVICE LIST
+   *
+   */
+d202 1
+a202 1
+#ifdef TT_USE_BYTECODE_INTERPRETER
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 2
+/*  Copyright 2002-2016 by                                                 */
+/*  Roberto Alameda.                                                       */
+d43 1
+a43 1
+#include FT_SERVICE_FONT_FORMAT_H
+d66 1
+a66 1
+    return FT_Err_Ok;
+d74 2
+a75 1
+    FT_Int  i;
+d80 1
+a80 2
+      FT_String*  gname = face->type1.glyph_names[i];
+
+d83 1
+a83 2
+        return (FT_UInt)ft_strtol( (const char *)face->type1.charstrings[i],
+                                   NULL, 10 );
+d92 2
+a93 2
+    (FT_GlyphDict_GetNameFunc)  t42_get_glyph_name,    /* get_name   */
+    (FT_GlyphDict_NameIndexFunc)t42_get_name_index     /* name_index */
+d112 1
+a112 1
+    (FT_PsName_GetFunc)t42_get_ps_font_name   /* get_ps_font_name */
+d128 1
+a128 1
+    return FT_Err_Ok;
+d138 1
+a138 1
+    return FT_Err_Ok;
+d157 1
+a157 1
+    return FT_Err_Ok;
+d163 4
+a166 6
+    (PS_GetFontInfoFunc)   t42_ps_get_font_info,    /* ps_get_font_info    */
+    (PS_GetFontExtraFunc)  t42_ps_get_font_extra,   /* ps_get_font_extra   */
+    (PS_HasGlyphNamesFunc) t42_ps_has_glyph_names,  /* ps_has_glyph_names  */
+    (PS_GetFontPrivateFunc)t42_ps_get_font_private, /* ps_get_font_private */
+    /* not implemented */
+    (PS_GetFontValueFunc)  NULL                     /* ps_get_font_value   */
+d181 1
+a181 1
+    { FT_SERVICE_ID_FONT_FORMAT,          FT_FONT_FORMAT_TYPE_42 },
+d186 2
+a187 2
+  FT_CALLBACK_DEF( FT_Module_Interface )
+  T42_Get_Interface( FT_Module         module,
+d190 1
+a190 1
+    FT_UNUSED( module );
+d213 1
+a213 1
+      NULL,    /* module-specific interface */
+d215 3
+a217 3
+      T42_Driver_Init,          /* FT_Module_Constructor  module_init   */
+      T42_Driver_Done,          /* FT_Module_Destructor   module_done   */
+      T42_Get_Interface,        /* FT_Module_Requester    get_interface */
+d224 15
+a238 12
+    T42_Face_Init,              /* FT_Face_InitFunc  init_face */
+    T42_Face_Done,              /* FT_Face_DoneFunc  done_face */
+    T42_Size_Init,              /* FT_Size_InitFunc  init_size */
+    T42_Size_Done,              /* FT_Size_DoneFunc  done_size */
+    T42_GlyphSlot_Init,         /* FT_Slot_InitFunc  init_slot */
+    T42_GlyphSlot_Done,         /* FT_Slot_DoneFunc  done_slot */
+
+    T42_GlyphSlot_Load,         /* FT_Slot_LoadFunc  load_glyph */
+
+    NULL,                       /* FT_Face_GetKerningFunc   get_kerning  */
+    NULL,                       /* FT_Face_AttachFunc       attach_file  */
+    NULL,                       /* FT_Face_GetAdvancesFunc  get_advances */
+d240 3
+a242 2
+    T42_Size_Request,           /* FT_Size_RequestFunc  request_size */
+    T42_Size_Select             /* FT_Size_SelectFunc   select_size  */
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

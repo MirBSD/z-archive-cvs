@@ -1,0 +1,272 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2014.02.09.22.35.51;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10052F802DB25EB293D;
+
+1.4
+date	2013.09.02.19.24.52;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005224E613008E0D66;
+
+1.3
+date	2009.07.03.18.19.06;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004A4E4AD759B5482B;
+
+1.2
+date	2008.08.02.00.10.01;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004893A57820DC0236;
+
+1.1
+date	2008.08.01.23.24.01;	author tg;	state Exp;
+branches;
+next	;
+commitid	10048939B085B2C5840;
+
+
+desc
+@@
+
+
+1.5
+log
+@nuke the restrict qualifiers; C99 says this makes no externally visible difference and is only a compiler hint and a limitation to the interface implementor
+@
+text
+@/*-
+ * Copyright (c) 2008, 2009, 2013
+ *	Thorsten Glaser <tg@@mirbsd.org>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ *
+ * The author reserves the right to steward the OPTU encoding forms.
+ */
+
+#include <libckern.h>
+
+__RCSID("$MirOS: src/kern/c/optu8to16.c,v 1.4 2013/09/02 19:24:52 tg Exp $");
+
+size_t
+optu8to16(wchar_t *pwc, const char *src, size_t n, mbstate_t *ps)
+{
+	static mbstate_t istate = { 0, 0 };
+	const unsigned char *s = (const unsigned char *)src;
+	wint_t wc;
+	unsigned int c;
+	uint8_t count;
+
+	if (__predict_false(ps == NULL))
+		ps = &istate;
+
+	if (__predict_false((count = ps->count) == 3)) {
+		if (pwc != NULL && (n == 0 || s != NULL))
+			*pwc = 0xEF80 | (ps->value & 0x3F);
+		ps->count = 0;
+		return (0);
+	}
+
+	if (__predict_false(n == 0)) {
+		if (__predict_true(count == 0))
+			return ((size_t)(-2));
+		wc = ps->value << 6;
+		goto dismiss;
+	}
+
+	if (__predict_false(s == NULL)) {
+		ps->count = 0;
+		return (0);
+	}
+
+	if (__predict_false(count)) {
+		wc = ps->value << 6;
+		goto conv_state;
+	}
+
+	--n;
+	wc = *s++;
+	if (__predict_true(wc < 0x80)) {
+		/* count == 0 already */
+		;
+	} else if (__predict_false(wc < 0xC2 || wc >= 0xF0)) {
+		/* count == 0 already */
+		wc |= 0xEF00;
+	} else if (wc < 0xE0) {
+		count = 1; /* one byte follows */
+		wc = (wc & 0x1F) << 6;
+	} else /* (wc < 0xF0) */ {
+		count = 2; /* two bytes follow */
+		wc = (wc & 0x0F) << 12;
+	}
+
+ conv_state:
+	while (__predict_false(count)) {
+		/* if there are no more bytes to inspect, make state */
+		if (__predict_false(n-- == 0)) {
+			ps->count = count;
+			ps->value = wc >> 6;
+			return ((size_t)(-2));
+		}
+
+		/*
+		 * check for invalid CESU-8 encoding: not a trail byte (ASCII,
+		 * lead byte, or outside BMP lead), non-minimalistic encoding,
+		 * reserved OPTU encoding range (XXX shouldnt EINVAL mbrtowc),
+		 * or value larger than WCHAR_MAX (U+FFFD = EF BF BD)
+		 */
+		if (__predict_false(((c = *s++ ^ 0x80) > 0x3F) ||
+		    (count == 2 && wc == 0 && c < 0x20) ||
+		    (count == 2 && wc == 0xE000 && c > 0x3D) ||
+		    (count == 1 && wc == 0xFFC0 && c > 0x3D))) {
+			/* reject current octet, dismiss former octet */
+			s--;
+ dismiss:
+			if (count == 2) {
+				count = 0;
+				wc = (wc >> 12) | 0xEFE0;
+			} else if (wc < 0x0800) {
+				count = 0;
+				wc = (wc >> 6) | 0xEFC0;
+			} else {
+				ps->value = (wc >> 6) /* & 0x3F */;
+				count = 3;
+				wc = (wc >> 12) | 0xEFE0;
+			}
+			break;
+		}
+		wc |= c << (6 * --count);
+	}
+	ps->count = count;
+	if (pwc != NULL)
+		*pwc = wc;
+	return ((size_t)((const char *)s - src));
+}
+@
+
+
+1.4
+log
+@(untested) optimisation I found while writing the same code for gherkin
+@
+text
+@d25 1
+a25 1
+__RCSID("$MirOS: src/kern/c/optu8to16.c,v 1.3 2009/07/03 18:19:06 tg Exp $");
+d28 1
+a28 2
+optu8to16(wchar_t * restrict pwc, const char * restrict src, size_t n,
+    mbstate_t * restrict ps)
+@
+
+
+1.3
+log
+@For total 8-bit transparency, there MUST NOT be any multibyte sequence
+matching (in CESU-8 encoding) U+EF80..U+EFFF in the multibyte stream
+converted as if it were CESU-8. Instead, treat these sequences, ranging
+from EE.BE.80..BF to EE.BF.80..BF, as raw octets and convert them to 3
+(three) instead of 1 (one) wide character (OPTU-16). To make it simple,
+there is no Unicode/PUA character whose OPTU-8 encoding begins with EEh
+followed by BEh or BFh.
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2008, 2009
+d25 1
+a25 1
+__RCSID("$MirOS: src/kern/c/optu8to16.c,v 1.2 2008/08/02 00:10:01 tg Exp $");
+d33 2
+a34 1
+	wint_t c, wc;
+d95 4
+a98 4
+		if (__predict_false((((c = *s++) & 0xC0) != 0x80) ||
+		    (count == 2 && wc == 0 && c < 0xA0) ||
+		    (count == 2 && wc == 0xE000 && c > 0xBD) ||
+		    (count == 1 && wc == 0xFFC0 && c > 0xBD))) {
+d115 1
+a115 1
+		wc |= (c & 0x3F) << (6 * --count);
+@
+
+
+1.2
+log
+@While the regression test from my initial mail¹ works:
+① Message-ID: <Pine.BSM.4.64L.0803151907450.19979@@odem.66h.42h.de>
+
+tg@@odem:~ $ printf 'Stra\337e' | hd
+00000000  53 74 72 61 DF 65       -                          |Stra.e|
+tg@@odem:~ $ printf 'Stra\337e' | tr-before x u | hd
+00000000  53 74 72 61 00 65       -                          |Stra.e|
+tg@@odem:~ $ printf 'Stra\337e' | tr-after x u | hd
+00000000  53 74 72 61 DF 65       -                          |Stra.e|
+
+This fixes another one: dealing with epsilon reads (i.e. EOI)
+
+tg@@odem:~ $ printf 'Stra\337' | hd
+00000000  53 74 72 61 DF          -                          |Stra.|
+tg@@odem:~ $ printf 'Stra\337' | tr-before x u | hd
+00000000  53 74 72 61             -                          |Stra|
+tg@@odem:~ $ printf 'Stra\337' | tr-after x u | hd
+00000000  53 74 72 61 DF          -                          |Stra.|
+
+Yay!
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2008
+d25 1
+a25 1
+__RCSID("$MirOS: src/kern/c/optu8to16.c,v 1.1 2008/08/01 23:24:01 tg Exp $");
+d91 1
+d96 1
+@
+
+
+1.1
+log
+@• OPTU-8 ⇐⇒ OPTU-16 conversion routines (libc, kernel, !bootloader)
+• optu16to8(3) replaces wcrtomb(3) in libc
+@
+text
+@d25 1
+a25 1
+__RCSID("$MirOS$");
+d39 2
+a40 2
+	if ((count = ps->count) == 3) {
+		if (pwc != NULL && s != NULL)
+d46 6
+a51 2
+	if (__predict_false(n == 0))
+		return ((size_t)(-2));
+d98 1
+@
+

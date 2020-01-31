@@ -1,0 +1,294 @@
+head	1.4;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.1
+	MIRBSD_10:1.3.0.2
+	MIRBSD_10_BASE:1.3
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2013.10.31.20.06.50;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005272B7081B0E5655;
+
+1.3
+date	2006.10.18.00.52.26;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10045357AA111671715;
+
+1.2
+date	2006.10.17.23.29.48;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004535671816F5C7C3;
+
+1.1
+date	2005.02.05.17.27.47;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.27.47;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@adapt most __attribute__((…)) occurrences to new KNF style(9)
+@
+text
+@/**	$MirOS: src/sys/ddb/db_usrreq.c,v 1.3 2006/10/18 00:52:26 tg Exp $ */
+/*	$OpenBSD: db_usrreq.c,v 1.9 2004/02/06 22:19:21 tedu Exp $	*/
+
+/*
+ * Copyright © 2006, 2013
+ *	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+ * Copyright (c) 1996 Michael Shalayeff.  All rights reserved.
+ * Copyright (c) 1986, 1988, 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ * (c) UNIX System Laboratories, Inc.
+ * All or some portions of this file are derived from material licensed
+ * to the University of California by American Telephone and Telegraph
+ * Co. or Unix System Laboratories, Inc. and are reproduced herein with
+ * the permission of UNIX System Laboratories, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/kernel.h>
+#include <sys/proc.h>
+#include <uvm/uvm_extern.h>
+#include <sys/sysctl.h>
+
+#include <ddb/db_output.h>
+#include <ddb/db_var.h>
+
+static void paniK(const char *, ...)
+    __attribute__((__format__(__kprintf__, 1, 2)));
+
+int	db_log = 1;
+int	db_allowcrash = 0;
+
+int
+ddb_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
+	int	*name;
+	u_int	namelen;
+	void	*oldp;
+	size_t	*oldlenp;
+	void	*newp;
+	size_t	newlen;
+	struct proc *p;
+{
+	int error, ctlval;
+
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+
+	case DBCTL_RADIX:
+		return sysctl_int(oldp, oldlenp, newp, newlen, &db_radix);
+	case DBCTL_MAXWIDTH:
+		return sysctl_int(oldp, oldlenp, newp, newlen, &db_max_width);
+	case DBCTL_TABSTOP:
+		return sysctl_int(oldp, oldlenp, newp, newlen, &db_tab_stop_width);
+	case DBCTL_MAXLINE:
+		return sysctl_int(oldp, oldlenp, newp, newlen, &db_max_line);
+	case DBCTL_PANIC:
+		ctlval = db_panic;
+		if ((error = sysctl_int(oldp, oldlenp, newp, newlen, &ctlval)) ||
+		    newp == NULL)
+			return (error);
+		if (ctlval != 1 && ctlval != 0)
+			return (EINVAL);
+		if (ctlval > db_panic && securelevel > 1)
+			return (EPERM);
+		db_panic = ctlval;
+		return (0);
+	case DBCTL_CONSOLE:
+		ctlval = db_console;
+		if ((error = sysctl_int(oldp, oldlenp, newp, newlen, &ctlval)) ||
+		    newp == NULL)
+			return (error);
+		if (ctlval != 1 && ctlval != 0)
+			return (EINVAL);
+		if (ctlval > db_console && securelevel > 1)
+			return (EPERM);
+		db_console = ctlval;
+		return (0);
+	case DBCTL_LOG:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &db_log));
+	case DBCTL_CRASH:
+		ctlval = db_allowcrash;
+		if ((error = sysctl_int(oldp, oldlenp, newp, newlen, &ctlval)) ||
+		    newp == NULL)
+			return (error);
+		switch (ctlval) {
+		case 0:
+			db_allowcrash = 0;
+			break;
+		case 1:
+			if (securelevel > 0)
+				return (EPERM);
+			db_allowcrash = 1;
+			break;
+		default:
+			if (!db_allowcrash)
+				return (EPERM);
+			paniK("ddb user requested panic: sysctl ddb.crash=%d",
+			    ctlval);
+			printf("db_usrreq.c: recovering sysop after panik\n");
+		}
+		return (0);
+	default:
+		return (EOPNOTSUPP);
+	}
+	/* NOTREACHED */
+}
+
+/* this comes from panic() in kern/subr_prf.c - keep it in sync */
+static void
+paniK(const char *fmt, ...)
+{
+	va_list ap;
+	void (*tmp_panic_hook)(void) = panic_hook;
+
+	if (panic_hook) {
+		panic_hook = NULL;
+		tmp_panic_hook();
+	}
+
+	printf("panic: ");
+	va_start(ap, fmt);
+	vprintf(fmt, ap);
+	printf("\n");
+	va_end(ap);
+
+#ifdef KGDB
+	kgdb_panic();
+#endif
+#ifdef KADB
+	if (boothowto & RB_KDB)
+		kdbpanic();
+#endif
+#ifdef DDB
+	if (db_panic)
+		Debugger();
+	else
+		db_stack_dump();
+#endif
+
+	panic_hook = tmp_panic_hook;
+}
+@
+
+
+1.3
+log
+@* it worked, but make the kernel continuable after the user-induced
+  panic, changing it to some kind of "pseudo-panic"
+* document and comment better
+* remove obsolete reference to <sys/gmon.h> (EEXIST) in sysctl(8)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/ddb/db_usrreq.c,v 1.2 2006/10/17 23:29:48 tg Exp $ */
+d5 2
+a6 1
+ * Copyright (c) 2006 Thorsten Glaser <tg@@mirbsd.de>
+d51 1
+a51 1
+    __attribute__((__format__(__kprintf__,1,2)));
+@
+
+
+1.2
+log
+@introduce another new sysctl: ddb.crash (DBCTL_CRASH)
+* default value: 0
+* can be set to any other value (CTLTYPE_INT) by the superuser
+* setting to value 1 only possible in securelevel 0 and insecure mode
+* setting to a value >1 only possible if it was 1 before
+
+this can be used to manually crash the kernel (should be
+continuable), but only if enabled before raising securelevel
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d5 1
+d7 7
+d23 3
+d46 1
+d49 3
+d53 1
+a53 2
+
+static int db_allowcrash = 0;
+d122 1
+a122 1
+			panic("ddb user requested panic: sysctl ddb.crash=%d",
+d124 1
+a124 1
+			printf("db_usrreq.c: recovering sysop after panic\n");
+d132 35
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d39 2
+d91 22
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

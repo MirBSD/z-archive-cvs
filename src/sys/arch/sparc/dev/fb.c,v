@@ -1,0 +1,1080 @@
+head	1.2;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.2
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2007.08.24.14.16.22;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10046CEE83505F5C95E;
+
+1.1
+date	2005.02.05.17.27.36;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.27.36;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2007.02.06.21.26.27;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045C8F294099026C8;
+
+
+desc
+@@
+
+
+1.2
+log
+@(hopefully) switch the entire sparc port from SunOS black on white
+to MirOS white (lightgrey) on black, untested
+@
+text
+@/*	$OpenBSD: fb.c,v 1.43 2006/12/03 22:10:30 miod Exp $	*/
+/*	$NetBSD: fb.c,v 1.23 1997/07/07 23:30:22 pk Exp $ */
+
+/*
+ * Copyright (c) 2002, 2004  Miodrag Vallat.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ *
+ * Copyright (c) 1992, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This software was developed by the Computer Systems Engineering group
+ * at Lawrence Berkeley Laboratory under DARPA contract BG 91-66 and
+ * contributed to Berkeley.
+ *
+ * All advertising materials mentioning features or use of this software
+ * must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Lawrence Berkeley Laboratory.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@@(#)fb.c	8.1 (Berkeley) 6/11/93
+ */
+
+/*
+ * Common wsdisplay framebuffer drivers helpers.
+ */
+
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/device.h>
+#include <sys/proc.h>
+#include <sys/conf.h>
+
+#include <machine/autoconf.h>
+#include <machine/conf.h>
+#if defined(SUN4)
+#include <machine/eeprom.h>
+#include <sparc/dev/pfourreg.h>
+#endif
+
+#include <dev/wscons/wsdisplayvar.h>
+#include <dev/rasops/rasops.h>
+#include <machine/fbvar.h>
+
+#include "wsdisplay.h"
+
+/*
+ * emergency unblank code
+ * XXX should be somewhat moved to wscons MI code
+ */
+
+void (*fb_burner)(void *, u_int, u_int);
+void *fb_cookie;
+
+void
+fb_unblank()
+{
+	if (fb_burner != NULL)
+		(*fb_burner)(fb_cookie, 1, 0);
+}
+
+#if NWSDISPLAY > 0
+
+#if defined(SUN4C) || defined(SUN4M)
+static int a2int(char *, int);
+#endif
+static void fb_initwsd(struct sunfb *);
+static void fb_updatecursor(struct rasops_info *);
+int	fb_alloc_screen(void *, const struct wsscreen_descr *, void **,
+	    int *, int *, long *);
+void	fb_free_screen(void *, void *);
+int	fb_show_screen(void *, void *, int, void (*)(void *, int, int),
+	    void *);
+
+void
+fb_setsize(struct sunfb *sf, int def_depth, int def_width, int def_height,
+    int node, int bustype)
+{
+	int def_linebytes;
+
+	switch (bustype) {
+	case BUS_VME16:
+	case BUS_VME32:
+	case BUS_OBIO:
+#if defined(SUN4M)
+		/* 4m may have SBus-like framebuffer on obio */
+		if (CPU_ISSUN4M) {
+			goto obpsize;
+		}
+#endif
+		/* Set up some defaults. */
+		sf->sf_width = def_width;
+		sf->sf_height = def_height;
+		sf->sf_depth = def_depth;
+
+#if defined(SUN4)
+		/*
+		 * This is not particularly useful on Sun 4 VME framebuffers.
+		 * The EEPROM only contains info about the built-in.
+		 */
+		if (CPU_ISSUN4 && bustype == BUS_OBIO) {
+			struct eeprom *eep = (struct eeprom *)eeprom_va;
+
+			if (ISSET(sf->sf_flags, FB_PFOUR)) {
+				volatile u_int32_t pfour;
+				u_int size;
+
+				pfour = *sf->sf_pfour;
+
+				/*
+				 * Use the pfour register to determine
+				 * the size.  Note that the cgsix and
+				 * cgeight don't use this size encoding.
+				 * In this case, we have to settle
+				 * for the defaults we were provided
+				 * with.
+				 */
+				if ((PFOUR_ID(pfour) == PFOUR_ID_COLOR24) ||
+				    (PFOUR_ID(pfour) == PFOUR_ID_FASTCOLOR))
+					size = 0x00; /* invalid */
+				else
+					size = PFOUR_SIZE(pfour);
+
+				switch (size) {
+				case PFOUR_SIZE_1152X900:
+					sf->sf_width = 1152;
+					sf->sf_height = 900;
+					break;
+				case PFOUR_SIZE_1024X1024:
+					sf->sf_width = 1024;
+					sf->sf_height = 1024;
+					break;
+				case PFOUR_SIZE_1280X1024:
+					sf->sf_width = 1280;
+					sf->sf_height = 1024;
+					break;
+				case PFOUR_SIZE_1600X1280:
+					sf->sf_width = 1600;
+					sf->sf_height = 1280;
+					break;
+				case PFOUR_SIZE_1440X1440:
+					sf->sf_width = 1440;
+					sf->sf_height = 1440;
+					break;
+				case PFOUR_SIZE_640X480:
+					sf->sf_width = 640;
+					sf->sf_height = 480;
+					break;
+				}
+			} else if (eep != NULL) {
+				switch (eep->eeScreenSize) {
+				case EE_SCR_1152X900:
+					sf->sf_width = 1152;
+					sf->sf_height = 900;
+					break;
+				case EE_SCR_1024X1024:
+					sf->sf_width = 1024;
+					sf->sf_height = 1024;
+					break;
+				case EE_SCR_1600X1280:
+					sf->sf_width = 1600;
+					sf->sf_height = 1280;
+					break;
+				case EE_SCR_1440X1440:
+					sf->sf_width = 1440;
+					sf->sf_height = 1440;
+					break;
+				}
+			}
+		}
+#endif /* SUN4 */
+#if defined(SUN4M)
+		if (CPU_ISSUN4M) {
+			/* XXX: need code to find 4/600 vme screen size */
+		}
+#endif /* SUN4M */
+
+		sf->sf_linebytes = (sf->sf_width * sf->sf_depth) / 8;
+		break;
+
+	case BUS_SBUS:
+#if defined(SUN4M)
+obpsize:
+#endif
+		sf->sf_depth = getpropint(node, "depth", def_depth);
+		sf->sf_width = getpropint(node, "width", def_width);
+		sf->sf_height = getpropint(node, "height", def_height);
+
+		def_linebytes =
+		    roundup(sf->sf_width, sf->sf_depth) * sf->sf_depth / 8;
+		sf->sf_linebytes = getpropint(node, "linebytes", def_linebytes);
+
+		/*
+		 * XXX If we are configuring a board in a wider depth level
+		 * than the mode it is currently operating in, the PROM will
+		 * return a linebytes property tied to the current depth value,
+		 * which is NOT what we are relying upon!
+		 */
+		if (sf->sf_linebytes < (sf->sf_width * sf->sf_depth) / 8)
+			sf->sf_linebytes = def_linebytes;
+
+		break;
+	}
+
+	sf->sf_fbsize = sf->sf_height * sf->sf_linebytes;
+}
+
+#if defined(SUN4C) || defined(SUN4M)
+static int
+a2int(char *cp, int deflt)
+{
+	int i = 0;
+
+	if (*cp == '\0')
+		return (deflt);
+	while (*cp != '\0')
+		i = i * 10 + *cp++ - '0';
+	return (i);
+}
+#endif
+
+/* setup the embedded wsscreen_descr structure from rasops settings */
+static void
+fb_initwsd(struct sunfb *sf)
+{
+	strlcpy(sf->sf_wsd.name, "std", sizeof(sf->sf_wsd.name));
+	sf->sf_wsd.capabilities = sf->sf_ro.ri_caps;
+	sf->sf_wsd.nrows = sf->sf_ro.ri_rows;
+	sf->sf_wsd.ncols = sf->sf_ro.ri_cols;
+	sf->sf_wsd.textops = &sf->sf_ro.ri_ops;
+}
+
+static void
+fb_updatecursor(struct rasops_info *ri)
+{
+	struct sunfb *sf = (struct sunfb *)ri->ri_hw;
+
+	if (sf->sf_crowp != NULL)
+		*sf->sf_crowp = ri->ri_crow;
+	if (sf->sf_ccolp != NULL)
+		*sf->sf_ccolp = ri->ri_ccol;
+}
+
+void
+fbwscons_init(struct sunfb *sf, int flags)
+{
+	struct rasops_info *ri = &sf->sf_ro;
+	int cols, rows;
+
+	/* ri_hw and ri_bits must have already been setup by caller */
+	ri->ri_flg = RI_CENTER | RI_FULLCLEAR | flags;
+	ri->ri_depth = sf->sf_depth;
+	ri->ri_stride = sf->sf_linebytes;
+	ri->ri_width = sf->sf_width;
+	ri->ri_height = sf->sf_height;
+
+#if defined(SUN4C) || defined(SUN4M)
+	if (CPU_ISSUN4COR4M) {
+		rows = a2int(getpropstring(optionsnode, "screen-#rows"), 34);
+		cols = a2int(getpropstring(optionsnode, "screen-#columns"), 80);
+	}
+#endif
+#if defined(SUN4)
+	if (CPU_ISSUN4) {
+		struct eeprom *ep = (struct eeprom *)eeprom_va;
+
+		if (ep != NULL) {
+			rows = (u_short)ep->eeTtyRows;
+			cols = (u_short)ep->eeTtyCols;
+			/* deal with broken nvram contents... */
+			if (rows <= 0)
+				rows = 34;
+			if (cols <= 0)
+				cols = 80;
+		} else {
+			rows = 34;
+			cols = 80;
+		}
+	}
+#endif
+
+	rasops_init(ri, rows, cols);
+}
+
+void
+fbwscons_console_init(struct sunfb *sf, int row)
+{
+	struct rasops_info *ri = &sf->sf_ro;
+	long defattr;
+
+	if (CPU_ISSUN4 || romgetcursoraddr(&sf->sf_crowp, &sf->sf_ccolp))
+		sf->sf_ccolp = sf->sf_crowp = NULL;
+	if (sf->sf_ccolp != NULL)
+		ri->ri_ccol = *sf->sf_ccolp;
+
+	if (row < 0) {
+		if (sf->sf_crowp != NULL)
+			ri->ri_crow = *sf->sf_crowp;
+		else
+			/* assume last row */
+			ri->ri_crow = ri->ri_rows - 1;
+	} else {
+		/*
+		 * If we force the display row, this is because the screen
+		 * has been cleared or the font has been changed.
+		 * In this case, choose not to keep pointers to the PROM
+		 * cursor position, as the values are likely to be inaccurate
+		 * upon shutdown...
+		 */
+		sf->sf_crowp = sf->sf_ccolp = NULL;
+		ri->ri_crow = row;
+	}
+
+	/*
+	 * Scale back rows and columns if the font would not otherwise
+	 * fit on this display. Without this we would panic later.
+	 */
+	if (ri->ri_crow >= ri->ri_rows)
+		ri->ri_crow = ri->ri_rows - 1;
+	if (ri->ri_ccol >= ri->ri_cols)
+		ri->ri_ccol = ri->ri_cols - 1;
+
+	/*
+	 * Take care of updating the PROM cursor position as well if we can.
+	 */
+	if (ri->ri_updatecursor == NULL &&
+	    (sf->sf_ccolp != NULL || sf->sf_crowp != NULL))
+		ri->ri_updatecursor = fb_updatecursor;
+
+	if (ISSET(ri->ri_caps, WSSCREEN_WSCOLORS))
+		ri->ri_ops.alloc_attr(ri,
+		    WSCOL_WHITE, WSCOL_BLACK, WSATTR_WSCOLORS, &defattr);
+	else
+		ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
+
+	fb_initwsd(sf);
+	wsdisplay_cnattach(&sf->sf_wsd, ri,
+	    ri->ri_ccol, ri->ri_crow, defattr);
+}
+
+void
+fbwscons_setcolormap(struct sunfb *sf,
+    void (*setcolor)(void *, u_int, u_int8_t, u_int8_t, u_int8_t))
+{
+	int i;
+	const u_char *color;
+
+	if (sf->sf_depth <= 8 && setcolor != NULL) {
+		for (i = 0; i < 16; i++) {
+			color = &rasops_cmap[i * 3];
+			setcolor(sf, i, color[0], color[1], color[2]);
+		}
+		for (i = 240; i < 256; i++) {
+			color = &rasops_cmap[i * 3];
+			setcolor(sf, i, color[0], color[1], color[2]);
+		}
+	}
+}
+
+void
+fbwscons_attach(struct sunfb *sf, struct wsdisplay_accessops *op, int isconsole)
+{
+	struct wsemuldisplaydev_attach_args waa;
+
+	if (isconsole == 0) {
+		/* done in wsdisplay_cnattach() earlier if console */
+		fb_initwsd(sf);
+	} else {
+		/* remember screen burner routine */
+		fb_burner = op->burn_screen;
+		fb_cookie = sf;
+	}
+
+	/* plug common wsdisplay_accessops if necessary */
+	if (op->alloc_screen == NULL) {
+		op->alloc_screen = fb_alloc_screen;
+		op->free_screen = fb_free_screen;
+		op->show_screen = fb_show_screen;
+	}
+
+	sf->sf_scrlist[0] = &sf->sf_wsd;
+	sf->sf_wsl.nscreens = 1;
+	sf->sf_wsl.screens = (const struct wsscreen_descr **)sf->sf_scrlist;
+
+	waa.console = isconsole;
+	waa.scrdata = &sf->sf_wsl;
+	waa.accessops = op;
+	waa.accesscookie = sf;
+	waa.defaultscreens = 0;
+	config_found(&sf->sf_dev, &waa, wsemuldisplaydevprint);
+}
+
+/*
+ * Common wsdisplay_accessops routines.
+ */
+int
+fb_alloc_screen(void *v, const struct wsscreen_descr *type,
+    void **cookiep, int *curxp, int *curyp, long *attrp)
+{
+	struct sunfb *sf = v;
+	struct rasops_info *ri = &sf->sf_ro;
+
+	if (sf->sf_nscreens > 0)
+		return (ENOMEM);
+
+	*cookiep = ri;
+	*curyp = 0;
+	*curxp = 0;
+	if (ISSET(ri->ri_caps, WSSCREEN_WSCOLORS))
+		ri->ri_ops.alloc_attr(ri,
+		    WSCOL_WHITE, WSCOL_BLACK, WSATTR_WSCOLORS, attrp);
+	else
+		ri->ri_ops.alloc_attr(ri, 0, 0, 0, attrp);
+	sf->sf_nscreens++;
+	return (0);
+}
+
+void
+fb_free_screen(void *v, void *cookie)
+{
+	struct sunfb *sf = v;
+
+	sf->sf_nscreens--;
+}
+
+int
+fb_show_screen(void *v, void *cookie, int waitok, void (*cb)(void *, int, int),
+    void *cbarg)
+{
+	return (0);
+}
+
+#if defined(SUN4)
+
+/*
+ * Support routines for P4 framebuffers.
+ */
+
+/*
+ * Probe for a P4 framebuffer.  Return values:
+ *	PFOUR_NOTPFOUR		framebuffer is not a P4 framebuffer
+ *	otherwise returns P4 ID
+ */
+int
+fb_pfour_id(void *va)
+{
+	volatile u_int32_t val, save, *pfour = va;
+
+	/* Read the pfour register. */
+	save = *pfour;
+
+	/*
+	 * Try to modify the type code.  If it changes, put the
+	 * original value back, and notify the caller that it's
+	 * not a pfour framebuffer.
+	 */
+	val = save & ~PFOUR_REG_RESET;
+	*pfour = (val ^ PFOUR_FBTYPE_MASK);
+	if ((*pfour ^ val) & PFOUR_FBTYPE_MASK) {
+		*pfour = save;
+		return (PFOUR_NOTPFOUR);
+	}
+
+	return (PFOUR_ID(val));
+}
+
+/*
+ * Screen burner routine for P4
+ */
+void
+fb_pfour_burner(void *v, u_int enable, u_int flags)
+{
+	struct sunfb *sf = (struct sunfb *)v;
+	volatile u_int32_t pfour;
+
+	pfour = *sf->sf_pfour & ~(PFOUR_REG_INTCLR | PFOUR_REG_VIDEO);
+	*sf->sf_pfour = pfour | (enable ? PFOUR_REG_VIDEO : 0);
+}
+
+#endif /* SUN4 */
+
+#endif	/* NWSDISPLAY */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: fb.c,v 1.28 2004/02/29 21:24:36 miod Exp $	*/
+d5 1
+a5 1
+ * Copyright (c) 2002 Miodrag Vallat
+a86 1
+#include <dev/wscons/wscons_raster.h>
+d109 11
+d141 1
+d146 1
+a146 6
+		if (CPU_ISSUN4 && (bustype == BUS_VME16 ||
+		    bustype == BUS_VME32))
+			goto donesize;
+
+#if defined(SUN4)
+		if (CPU_ISSUN4) {
+d151 1
+a151 12
+
+				/*
+				 * Some pfour framebuffers, e.g. the
+				 * cgsix, don't encode resolution the
+				 * same, so the driver handles that.
+				 * The driver can let us know that it
+				 * needs to do this by not mapping in
+				 * the pfour register by the time this
+				 * routine is called.
+				 */
+				if (sf->sf_pfour == NULL)
+					goto donesize;
+d165 3
+a167 1
+					goto donesize;
+d169 1
+a169 1
+				switch (PFOUR_SIZE(pfour)) {
+a173 1
+
+a177 1
+
+a181 1
+
+a185 1
+
+a189 1
+
+a193 8
+
+				default:
+					/*
+					 * XXX: Do nothing, I guess.
+					 * Should we print a warning about
+					 * an unknown value? --thorpej
+					 */
+					break;
+a200 1
+
+a204 1
+
+a208 1
+
+a212 8
+
+				default:
+					/*
+					 * XXX: Do nothing, I guess.
+					 * Should we print a warning about
+					 * an unknown value? --thorpej
+					 */
+					break;
+a222 1
+donesize:
+d237 1
+d244 1
+a244 1
+		if (sf->sf_linebytes < (sf->sf_width * sf->sf_depth) / 8) {
+d246 1
+a246 1
+		}
+a247 4
+
+	default:
+		panic("fb_setsize: inappropriate bustype");
+		/* NOTREACHED */
+d253 2
+a254 3
+int a2int(char *, int);
+
+int
+d265 23
+d292 1
+d296 5
+a300 5
+	sf->sf_ro.ri_flg = RI_CENTER | RI_FULLCLEAR | flags;
+	sf->sf_ro.ri_depth = sf->sf_depth;
+	sf->sf_ro.ri_stride = sf->sf_linebytes;
+	sf->sf_ro.ri_width = sf->sf_width;
+	sf->sf_ro.ri_height = sf->sf_height;
+d327 1
+a327 1
+	rasops_init(&sf->sf_ro, rows, cols);
+d331 1
+a331 2
+fbwscons_console_init(struct sunfb *sf, struct wsscreen_descr *wsc, int row,
+    void (*burner)(void *, u_int, u_int))
+d333 1
+d339 1
+a339 1
+		sf->sf_ro.ri_ccol = *sf->sf_ccolp;
+d343 1
+a343 1
+			sf->sf_ro.ri_crow = *sf->sf_crowp;
+d346 1
+a346 1
+			sf->sf_ro.ri_crow = sf->sf_ro.ri_rows - 1;
+d356 1
+a356 1
+		sf->sf_ro.ri_crow = row;
+d363 4
+a366 4
+	if (sf->sf_ro.ri_crow >= wsc->nrows)
+		sf->sf_ro.ri_crow = wsc->nrows - 1;
+	if (sf->sf_ro.ri_ccol >= wsc->ncols)
+		sf->sf_ro.ri_ccol = wsc->ncols - 1;
+d369 1
+a369 2
+	 * Select appropriate color settings to mimic a
+	 * black on white Sun console.
+d371 13
+a383 21
+	if (sf->sf_depth > 8) {
+		wscol_white = 0;
+		wscol_black = 255;
+		wskernel_bg = 0;
+		wskernel_fg = 255;
+	}
+
+	if (ISSET(wsc->capabilities, WSSCREEN_WSCOLORS) &&
+	    sf->sf_depth == 8) {
+		sf->sf_ro.ri_ops.alloc_attr(&sf->sf_ro,
+		    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, &defattr);
+	} else {
+		sf->sf_ro.ri_ops.alloc_attr(&sf->sf_ro, 0, 0, 0, &defattr);
+	}
+
+	wsdisplay_cnattach(wsc, &sf->sf_ro,
+	    sf->sf_ro.ri_ccol, sf->sf_ro.ri_crow, defattr);
+
+	/* remember screen burner routine */
+	fb_burner = burner;
+	fb_cookie = sf;
+d391 1
+a391 1
+	u_char *color;
+d395 1
+a395 1
+			color = (u_char *)&rasops_cmap[i * 3];
+d399 1
+a399 1
+			color = (u_char *)&rasops_cmap[i * 3];
+a401 5
+		/* compensate for BoW palette */
+		setcolor(sf, WSCOL_BLACK, 0, 0, 0);
+		setcolor(sf, 0xff ^ WSCOL_BLACK, 255, 255, 255);
+		setcolor(sf, WSCOL_WHITE, 255, 255, 255);
+		setcolor(sf, 0xff ^ WSCOL_WHITE, 0, 0, 0);
+d405 73
+d479 1
+d481 1
+a481 1
+ * Support routines for pfour framebuffers.
+d485 3
+a487 6
+ * Probe for a pfour framebuffer.  Return values:
+ *
+ *	PFOUR_NOTPFOUR		framebuffer is not a pfour
+ *				framebuffer
+ *
+ *	otherwise returns pfour ID
+a511 11
+
+/*
+ * Return the status of the video enable.
+ */
+int
+fb_pfour_get_video(struct sunfb *sf)
+{
+
+	return ((*sf->sf_pfour & PFOUR_REG_VIDEO) != 0);
+}
+
+d513 1
+a513 1
+ * Enable or disable the framebuffer.
+d516 1
+a516 1
+fb_pfour_set_video(struct sunfb *sf, int enable)
+d518 1
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@sync with openbsd-current
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: fb.c,v 1.43 2006/12/03 22:10:30 miod Exp $	*/
+d5 1
+a5 1
+ * Copyright (c) 2002, 2004  Miodrag Vallat.
+d87 1
+a93 9
+ * Sun specific color indexes.
+ * Black is not really 7, but rather ~0; to fit within the 8 ANSI color
+ * palette we are using on console, we pick (~0) & 0x07 instead.
+ * This essentially swaps WSCOL_BLACK and WSCOL_WHITE.
+ */
+#define	WSCOL_SUN_WHITE		0
+#define	WSCOL_SUN_BLACK		7
+
+/*
+a109 11
+#if defined(SUN4C) || defined(SUN4M)
+static int a2int(char *, int);
+#endif
+static void fb_initwsd(struct sunfb *);
+static void fb_updatecursor(struct rasops_info *);
+int	fb_alloc_screen(void *, const struct wsscreen_descr *, void **,
+	    int *, int *, long *);
+void	fb_free_screen(void *, void *);
+int	fb_show_screen(void *, void *, int, void (*)(void *, int, int),
+	    void *);
+
+a130 1
+#if defined(SUN4)
+d135 6
+a140 1
+		if (CPU_ISSUN4 && bustype == BUS_OBIO) {
+d145 12
+a156 1
+				u_int size;
+d170 1
+a170 3
+					size = 0x00; /* invalid */
+				else
+					size = PFOUR_SIZE(pfour);
+d172 1
+a172 1
+				switch (size) {
+d177 1
+d182 1
+d187 1
+d192 1
+d197 1
+d202 8
+d217 1
+d222 1
+d227 1
+d232 8
+d250 1
+a264 1
+
+d271 1
+a271 1
+		if (sf->sf_linebytes < (sf->sf_width * sf->sf_depth) / 8)
+d273 2
+d276 3
+a278 1
+		break;
+d284 3
+a286 2
+#if defined(SUN4C) || defined(SUN4M)
+static int
+a296 23
+#endif
+
+/* setup the embedded wsscreen_descr structure from rasops settings */
+static void
+fb_initwsd(struct sunfb *sf)
+{
+	strlcpy(sf->sf_wsd.name, "std", sizeof(sf->sf_wsd.name));
+	sf->sf_wsd.capabilities = sf->sf_ro.ri_caps;
+	sf->sf_wsd.nrows = sf->sf_ro.ri_rows;
+	sf->sf_wsd.ncols = sf->sf_ro.ri_cols;
+	sf->sf_wsd.textops = &sf->sf_ro.ri_ops;
+}
+
+static void
+fb_updatecursor(struct rasops_info *ri)
+{
+	struct sunfb *sf = (struct sunfb *)ri->ri_hw;
+
+	if (sf->sf_crowp != NULL)
+		*sf->sf_crowp = ri->ri_crow;
+	if (sf->sf_ccolp != NULL)
+		*sf->sf_ccolp = ri->ri_ccol;
+}
+a300 1
+	struct rasops_info *ri = &sf->sf_ro;
+d304 5
+a308 5
+	ri->ri_flg = RI_CENTER | RI_FULLCLEAR | flags;
+	ri->ri_depth = sf->sf_depth;
+	ri->ri_stride = sf->sf_linebytes;
+	ri->ri_width = sf->sf_width;
+	ri->ri_height = sf->sf_height;
+d335 1
+a335 17
+	rasops_init(ri, rows, cols);
+
+	if (sf->sf_depth == 8) {
+		/*
+		 * If we are running with an indexed palette, compensate
+		 * the swap of black and white through ri_devcmap.
+		 */
+		ri->ri_devcmap[WSCOL_SUN_BLACK] = 0;
+		ri->ri_devcmap[WSCOL_SUN_WHITE] = 0xffffffff;
+	} else if (sf->sf_depth > 8) {
+		/*
+		 * If we are running on a direct color frame buffer,
+		 * make the ``normal'' white the same as the hilighted
+		 * white.
+		 */
+		ri->ri_devcmap[WSCOL_WHITE] = ri->ri_devcmap[WSCOL_WHITE + 8];
+	}
+d339 2
+a340 1
+fbwscons_console_init(struct sunfb *sf, int row)
+a341 1
+	struct rasops_info *ri = &sf->sf_ro;
+d347 1
+a347 1
+		ri->ri_ccol = *sf->sf_ccolp;
+d351 1
+a351 1
+			ri->ri_crow = *sf->sf_crowp;
+d354 1
+a354 1
+			ri->ri_crow = ri->ri_rows - 1;
+d364 1
+a364 1
+		ri->ri_crow = row;
+d371 4
+a374 4
+	if (ri->ri_crow >= ri->ri_rows)
+		ri->ri_crow = ri->ri_rows - 1;
+	if (ri->ri_ccol >= ri->ri_cols)
+		ri->ri_ccol = ri->ri_cols - 1;
+d377 2
+a378 1
+	 * Take care of updating the PROM cursor position as well if we can.
+d380 6
+a385 3
+	if (ri->ri_updatecursor == NULL &&
+	    (sf->sf_ccolp != NULL || sf->sf_crowp != NULL))
+		ri->ri_updatecursor = fb_updatecursor;
+d387 3
+a389 2
+	if (ISSET(ri->ri_caps, WSSCREEN_WSCOLORS))
+		ri->ri_ops.alloc_attr(ri,
+d391 6
+a396 2
+	else
+		ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
+d398 3
+a400 3
+	fb_initwsd(sf);
+	wsdisplay_cnattach(&sf->sf_wsd, ri,
+	    ri->ri_ccol, ri->ri_crow, defattr);
+d408 1
+a408 1
+	const u_char *color;
+d412 1
+a412 1
+			color = &rasops_cmap[i * 3];
+d416 1
+a416 1
+			color = &rasops_cmap[i * 3];
+d419 5
+a423 10
+		/*
+		 * Compensate for BoW default hardware palette: existing
+		 * output (which we do not want to affect) is black on
+		 * white with color index 0 being white and 0xff being
+		 * black.
+		 */
+		setcolor(sf, WSCOL_SUN_WHITE, 0xff, 0xff, 0xff);
+		setcolor(sf, 0xff ^ WSCOL_SUN_WHITE, 0, 0, 0);
+		setcolor(sf, WSCOL_SUN_BLACK, 0, 0, 0);
+		setcolor(sf, 0xff ^ (WSCOL_SUN_BLACK), 0xff, 0xff, 0xff);
+a426 73
+void
+fbwscons_attach(struct sunfb *sf, struct wsdisplay_accessops *op, int isconsole)
+{
+	struct wsemuldisplaydev_attach_args waa;
+
+	if (isconsole == 0) {
+		/* done in wsdisplay_cnattach() earlier if console */
+		fb_initwsd(sf);
+	} else {
+		/* remember screen burner routine */
+		fb_burner = op->burn_screen;
+		fb_cookie = sf;
+	}
+
+	/* plug common wsdisplay_accessops if necessary */
+	if (op->alloc_screen == NULL) {
+		op->alloc_screen = fb_alloc_screen;
+		op->free_screen = fb_free_screen;
+		op->show_screen = fb_show_screen;
+	}
+
+	sf->sf_scrlist[0] = &sf->sf_wsd;
+	sf->sf_wsl.nscreens = 1;
+	sf->sf_wsl.screens = (const struct wsscreen_descr **)sf->sf_scrlist;
+
+	waa.console = isconsole;
+	waa.scrdata = &sf->sf_wsl;
+	waa.accessops = op;
+	waa.accesscookie = sf;
+	waa.defaultscreens = 0;
+	config_found(&sf->sf_dev, &waa, wsemuldisplaydevprint);
+}
+
+/*
+ * Common wsdisplay_accessops routines.
+ */
+int
+fb_alloc_screen(void *v, const struct wsscreen_descr *type,
+    void **cookiep, int *curxp, int *curyp, long *attrp)
+{
+	struct sunfb *sf = v;
+	struct rasops_info *ri = &sf->sf_ro;
+
+	if (sf->sf_nscreens > 0)
+		return (ENOMEM);
+
+	*cookiep = ri;
+	*curyp = 0;
+	*curxp = 0;
+	if (ISSET(ri->ri_caps, WSSCREEN_WSCOLORS))
+		ri->ri_ops.alloc_attr(ri,
+		    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, attrp);
+	else
+		ri->ri_ops.alloc_attr(ri, 0, 0, 0, attrp);
+	sf->sf_nscreens++;
+	return (0);
+}
+
+void
+fb_free_screen(void *v, void *cookie)
+{
+	struct sunfb *sf = v;
+
+	sf->sf_nscreens--;
+}
+
+int
+fb_show_screen(void *v, void *cookie, int waitok, void (*cb)(void *, int, int),
+    void *cbarg)
+{
+	return (0);
+}
+
+a427 1
+
+d429 1
+a429 1
+ * Support routines for P4 framebuffers.
+d433 6
+a438 3
+ * Probe for a P4 framebuffer.  Return values:
+ *	PFOUR_NOTPFOUR		framebuffer is not a P4 framebuffer
+ *	otherwise returns P4 ID
+d463 11
+d475 1
+a475 1
+ * Screen burner routine for P4
+d478 1
+a478 1
+fb_pfour_burner(void *v, u_int enable, u_int flags)
+a479 1
+	struct sunfb *sf = (struct sunfb *)v;
+@
+

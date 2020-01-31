@@ -1,0 +1,654 @@
+head	1.4;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype:1.1.115;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2017.04.15.19.21.42;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10058F2723111C7BEE2;
+
+1.3
+date	2013.08.06.19.47.58;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100520152445E05B912;
+
+1.2
+date	2008.02.26.20.04.59;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	10047C470A72A1E13CE;
+
+1.1
+date	2006.06.29.18.37.42;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10044A41DBD6368BED5;
+
+1.1.1.1
+date	2008.02.26.19.53.01;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.115.1
+date	2006.06.29.18.37.42;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.2
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.3
+date	2017.04.15.15.42.08;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.4
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  gxvmorx1.c                                                             */
+/*                                                                         */
+/*    TrueTypeGX/AAT morx table validation                                 */
+/*    body for type1 (Contextual Substitution) subtable.                   */
+/*                                                                         */
+/*  Copyright 2005-2016 by                                                 */
+/*  suzuki toshiya, Masatake YAMATO, Red Hat K.K.,                         */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+/***************************************************************************/
+/*                                                                         */
+/* gxvalid is derived from both gxlayout module and otvalid module.        */
+/* Development of gxlayout is supported by the Information-technology      */
+/* Promotion Agency(IPA), Japan.                                           */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include "gxvmorx.h"
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_gxvmorx
+
+
+  typedef struct  GXV_morx_subtable_type1_StateOptRec_
+  {
+    FT_ULong   substitutionTable;
+    FT_ULong   substitutionTable_length;
+    FT_UShort  substitutionTable_num_lookupTables;
+
+  }  GXV_morx_subtable_type1_StateOptRec,
+    *GXV_morx_subtable_type1_StateOptRecData;
+
+
+#define GXV_MORX_SUBTABLE_TYPE1_HEADER_SIZE \
+          ( GXV_STATETABLE_HEADER_SIZE + 2 )
+
+
+  static void
+  gxv_morx_subtable_type1_substitutionTable_load( FT_Bytes       table,
+                                                  FT_Bytes       limit,
+                                                  GXV_Validator  gxvalid )
+  {
+    FT_Bytes  p = table;
+
+    GXV_morx_subtable_type1_StateOptRecData  optdata =
+      (GXV_morx_subtable_type1_StateOptRecData)gxvalid->xstatetable.optdata;
+
+
+    GXV_LIMIT_CHECK( 2 );
+    optdata->substitutionTable = FT_NEXT_USHORT( p );
+  }
+
+
+  static void
+  gxv_morx_subtable_type1_subtable_setup( FT_ULong       table_size,
+                                          FT_ULong       classTable,
+                                          FT_ULong       stateArray,
+                                          FT_ULong       entryTable,
+                                          FT_ULong*      classTable_length_p,
+                                          FT_ULong*      stateArray_length_p,
+                                          FT_ULong*      entryTable_length_p,
+                                          GXV_Validator  gxvalid )
+  {
+    FT_ULong  o[4];
+    FT_ULong  *l[4];
+    FT_ULong  buff[5];
+
+    GXV_morx_subtable_type1_StateOptRecData  optdata =
+      (GXV_morx_subtable_type1_StateOptRecData)gxvalid->xstatetable.optdata;
+
+
+    o[0] = classTable;
+    o[1] = stateArray;
+    o[2] = entryTable;
+    o[3] = optdata->substitutionTable;
+    l[0] = classTable_length_p;
+    l[1] = stateArray_length_p;
+    l[2] = entryTable_length_p;
+    l[3] = &(optdata->substitutionTable_length);
+
+    gxv_set_length_by_ulong_offset( o, l, buff, 4, table_size, gxvalid );
+  }
+
+
+  static void
+  gxv_morx_subtable_type1_entry_validate(
+    FT_UShort                       state,
+    FT_UShort                       flags,
+    GXV_StateTable_GlyphOffsetCPtr  glyphOffset_p,
+    FT_Bytes                        table,
+    FT_Bytes                        limit,
+    GXV_Validator                   gxvalid )
+  {
+#ifdef GXV_LOAD_TRACE_VARS
+    FT_UShort  setMark;
+    FT_UShort  dontAdvance;
+#endif
+    FT_UShort  reserved;
+    FT_Short   markIndex;
+    FT_Short   currentIndex;
+
+    GXV_morx_subtable_type1_StateOptRecData  optdata =
+      (GXV_morx_subtable_type1_StateOptRecData)gxvalid->xstatetable.optdata;
+
+    FT_UNUSED( state );
+    FT_UNUSED( table );
+    FT_UNUSED( limit );
+
+
+#ifdef GXV_LOAD_TRACE_VARS
+    setMark      = (FT_UShort)( ( flags >> 15 ) & 1 );
+    dontAdvance  = (FT_UShort)( ( flags >> 14 ) & 1 );
+#endif
+
+    reserved = (FT_UShort)( flags & 0x3FFF );
+
+    markIndex    = (FT_Short)( glyphOffset_p->ul >> 16 );
+    currentIndex = (FT_Short)( glyphOffset_p->ul       );
+
+    GXV_TRACE(( " setMark=%01d dontAdvance=%01d\n",
+                setMark, dontAdvance ));
+
+    if ( 0 < reserved )
+    {
+      GXV_TRACE(( " non-zero bits found in reserved range\n" ));
+      GXV_SET_ERR_IF_PARANOID( FT_INVALID_DATA );
+    }
+
+    GXV_TRACE(( "markIndex = %d, currentIndex = %d\n",
+                markIndex, currentIndex ));
+
+    if ( optdata->substitutionTable_num_lookupTables < markIndex + 1 )
+      optdata->substitutionTable_num_lookupTables =
+        (FT_UShort)( markIndex + 1 );
+
+    if ( optdata->substitutionTable_num_lookupTables < currentIndex + 1 )
+      optdata->substitutionTable_num_lookupTables =
+        (FT_UShort)( currentIndex + 1 );
+  }
+
+
+  static void
+  gxv_morx_subtable_type1_LookupValue_validate( FT_UShort            glyph,
+                                                GXV_LookupValueCPtr  value_p,
+                                                GXV_Validator        gxvalid )
+  {
+    FT_UNUSED( glyph ); /* for the non-debugging case */
+
+    GXV_TRACE(( "morx subtable type1 subst.: %d -> %d\n", glyph, value_p->u ));
+
+    if ( value_p->u > gxvalid->face->num_glyphs )
+      FT_INVALID_GLYPH_ID;
+  }
+
+
+  static GXV_LookupValueDesc
+  gxv_morx_subtable_type1_LookupFmt4_transit(
+    FT_UShort            relative_gindex,
+    GXV_LookupValueCPtr  base_value_p,
+    FT_Bytes             lookuptbl_limit,
+    GXV_Validator        gxvalid )
+  {
+    FT_Bytes             p;
+    FT_Bytes             limit;
+    FT_UShort            offset;
+    GXV_LookupValueDesc  value;
+
+    /* XXX: check range? */
+    offset = (FT_UShort)( base_value_p->u +
+                          relative_gindex * sizeof ( FT_UShort ) );
+
+    p     = gxvalid->lookuptbl_head + offset;
+    limit = lookuptbl_limit;
+
+    GXV_LIMIT_CHECK ( 2 );
+    value.u = FT_NEXT_USHORT( p );
+
+    return value;
+  }
+
+
+  /*
+   * TODO: length should be limit?
+   **/
+  static void
+  gxv_morx_subtable_type1_substitutionTable_validate( FT_Bytes       table,
+                                                      FT_Bytes       limit,
+                                                      GXV_Validator  gxvalid )
+  {
+    FT_Bytes   p = table;
+    FT_UShort  i;
+
+    GXV_morx_subtable_type1_StateOptRecData  optdata =
+      (GXV_morx_subtable_type1_StateOptRecData)gxvalid->xstatetable.optdata;
+
+
+    /* TODO: calculate offset/length for each lookupTables */
+    gxvalid->lookupval_sign   = GXV_LOOKUPVALUE_UNSIGNED;
+    gxvalid->lookupval_func   = gxv_morx_subtable_type1_LookupValue_validate;
+    gxvalid->lookupfmt4_trans = gxv_morx_subtable_type1_LookupFmt4_transit;
+
+    for ( i = 0; i < optdata->substitutionTable_num_lookupTables; i++ )
+    {
+      FT_ULong  offset;
+
+
+      GXV_LIMIT_CHECK( 4 );
+      offset = FT_NEXT_ULONG( p );
+
+      gxv_LookupTable_validate( table + offset, limit, gxvalid );
+    }
+
+    /* TODO: overlapping of lookupTables in substitutionTable */
+  }
+
+
+  /*
+   * subtable for Contextual glyph substitution is a modified StateTable.
+   * In addition to classTable, stateArray, entryTable, the field
+   * `substitutionTable' is added.
+   */
+  FT_LOCAL_DEF( void )
+  gxv_morx_subtable_type1_validate( FT_Bytes       table,
+                                    FT_Bytes       limit,
+                                    GXV_Validator  gxvalid )
+  {
+    FT_Bytes  p = table;
+
+    GXV_morx_subtable_type1_StateOptRec  st_rec;
+
+
+    GXV_NAME_ENTER( "morx chain subtable type1 (Contextual Glyph Subst)" );
+
+    GXV_LIMIT_CHECK( GXV_MORX_SUBTABLE_TYPE1_HEADER_SIZE );
+
+    st_rec.substitutionTable_num_lookupTables = 0;
+
+    gxvalid->xstatetable.optdata =
+      &st_rec;
+    gxvalid->xstatetable.optdata_load_func =
+      gxv_morx_subtable_type1_substitutionTable_load;
+    gxvalid->xstatetable.subtable_setup_func =
+      gxv_morx_subtable_type1_subtable_setup;
+    gxvalid->xstatetable.entry_glyphoffset_fmt =
+      GXV_GLYPHOFFSET_ULONG;
+    gxvalid->xstatetable.entry_validate_func =
+      gxv_morx_subtable_type1_entry_validate;
+
+    gxv_XStateTable_validate( p, limit, gxvalid );
+
+    gxv_morx_subtable_type1_substitutionTable_validate(
+      table + st_rec.substitutionTable,
+      table + st_rec.substitutionTable + st_rec.substitutionTable_length,
+      gxvalid );
+
+    GXV_EXIT;
+  }
+
+
+/* END */
+@
+
+
+1.3
+log
+@fastmerge
+@
+text
+@d8 2
+a9 1
+/*  Copyright 2005, 2007 by suzuki toshiya, Masatake YAMATO, Red Hat K.K., */
+d59 1
+a59 1
+                                                  GXV_Validator  valid )
+d64 1
+a64 1
+      (GXV_morx_subtable_type1_StateOptRecData)valid->xstatetable.optdata;
+d80 1
+a80 1
+                                          GXV_Validator  valid )
+d87 1
+a87 1
+      (GXV_morx_subtable_type1_StateOptRecData)valid->xstatetable.optdata;
+d99 1
+a99 1
+    gxv_set_length_by_ulong_offset( o, l, buff, 4, table_size, valid );
+d110 1
+a110 1
+    GXV_Validator                   valid )
+d112 1
+d115 1
+d121 1
+a121 1
+      (GXV_morx_subtable_type1_StateOptRecData)valid->xstatetable.optdata;
+d128 1
+d131 1
+d144 1
+a144 2
+      if ( valid->root->level >= FT_VALIDATE_PARANOID )
+        FT_INVALID_DATA;
+d152 1
+a152 1
+        (FT_Short)( markIndex + 1 );
+d156 1
+a156 1
+        (FT_Short)( currentIndex + 1 );
+d163 1
+a163 1
+                                                GXV_Validator        valid )
+d169 1
+a169 1
+    if ( value_p->u > valid->face->num_glyphs )
+d179 1
+a179 1
+    GXV_Validator        valid )
+d190 1
+a190 1
+    p     = valid->lookuptbl_head + offset;
+d206 1
+a206 1
+                                                      GXV_Validator  valid )
+d212 1
+a212 1
+      (GXV_morx_subtable_type1_StateOptRecData)valid->xstatetable.optdata;
+d216 3
+a218 3
+    valid->lookupval_sign   = GXV_LOOKUPVALUE_UNSIGNED;
+    valid->lookupval_func   = gxv_morx_subtable_type1_LookupValue_validate;
+    valid->lookupfmt4_trans = gxv_morx_subtable_type1_LookupFmt4_transit;
+d228 1
+a228 1
+      gxv_LookupTable_validate( table + offset, limit, valid );
+d243 1
+a243 1
+                                    GXV_Validator  valid )
+d256 1
+a256 1
+    valid->xstatetable.optdata =
+d258 1
+a258 1
+    valid->xstatetable.optdata_load_func =
+d260 1
+a260 1
+    valid->xstatetable.subtable_setup_func =
+d262 1
+a262 1
+    valid->xstatetable.entry_glyphoffset_fmt =
+d264 1
+a264 1
+    valid->xstatetable.entry_validate_func =
+d267 1
+a267 1
+    gxv_XStateTable_validate( p, limit, valid );
+d272 1
+a272 1
+      valid );
+@
+
+
+1.2
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d106 1
+a106 1
+    GXV_StateTable_GlyphOffsetDesc  glyphOffset,
+d130 2
+a131 2
+    markIndex    = (FT_Short)( glyphOffset.ul >> 16 );
+    currentIndex = (FT_Short)( glyphOffset.ul       );
+d158 1
+a158 1
+                                                GXV_LookupValueDesc  value,
+d163 1
+a163 1
+    GXV_TRACE(( "morx subtable type1 subst.: %d -> %d\n", glyph, value.u ));
+d165 1
+a165 1
+    if ( value.u > valid->face->num_glyphs )
+d173 1
+a173 1
+    GXV_LookupValueDesc  base_value,
+d183 1
+a183 1
+    offset = (FT_UShort)( base_value.u +
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d8 1
+a8 1
+/*  Copyright 2005 by suzuki toshiya, Masatake YAMATO, Red Hat K.K.,       */
+d232 1
+a232 1
+   * subtable for Contextual glyph substition is a modified StateTable.
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d8 1
+a8 1
+/*  Copyright 2005, 2007 by suzuki toshiya, Masatake YAMATO, Red Hat K.K., */
+d232 1
+a232 1
+   * subtable for Contextual glyph substitution is a modified StateTable.
+@
+
+
+1.1.115.1
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@@
+
+
+1.1.115.2
+log
+@we need newer freetype for advance calculation
+@
+text
+@d8 1
+a8 1
+/*  Copyright 2005, 2007 by suzuki toshiya, Masatake YAMATO, Red Hat K.K., */
+d106 1
+a106 1
+    GXV_StateTable_GlyphOffsetCPtr  glyphOffset_p,
+d130 2
+a131 2
+    markIndex    = (FT_Short)( glyphOffset_p->ul >> 16 );
+    currentIndex = (FT_Short)( glyphOffset_p->ul       );
+d158 1
+a158 1
+                                                GXV_LookupValueCPtr  value_p,
+d163 1
+a163 1
+    GXV_TRACE(( "morx subtable type1 subst.: %d -> %d\n", glyph, value_p->u ));
+d165 1
+a165 1
+    if ( value_p->u > valid->face->num_glyphs )
+d173 1
+a173 1
+    GXV_LookupValueCPtr  base_value_p,
+d183 1
+a183 1
+    offset = (FT_UShort)( base_value_p->u +
+d232 1
+a232 1
+   * subtable for Contextual glyph substitution is a modified StateTable.
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d8 1
+a8 2
+/*  Copyright 2005-2016 by                                                 */
+/*  suzuki toshiya, Masatake YAMATO, Red Hat K.K.,                         */
+d58 1
+a58 1
+                                                  GXV_Validator  gxvalid )
+d63 1
+a63 1
+      (GXV_morx_subtable_type1_StateOptRecData)gxvalid->xstatetable.optdata;
+d79 1
+a79 1
+                                          GXV_Validator  gxvalid )
+d86 1
+a86 1
+      (GXV_morx_subtable_type1_StateOptRecData)gxvalid->xstatetable.optdata;
+d98 1
+a98 1
+    gxv_set_length_by_ulong_offset( o, l, buff, 4, table_size, gxvalid );
+d109 1
+a109 1
+    GXV_Validator                   gxvalid )
+a110 1
+#ifdef GXV_LOAD_TRACE_VARS
+a112 1
+#endif
+d118 1
+a118 1
+      (GXV_morx_subtable_type1_StateOptRecData)gxvalid->xstatetable.optdata;
+a124 1
+#ifdef GXV_LOAD_TRACE_VARS
+a126 1
+#endif
+d139 2
+a140 1
+      GXV_SET_ERR_IF_PARANOID( FT_INVALID_DATA );
+d148 1
+a148 1
+        (FT_UShort)( markIndex + 1 );
+d152 1
+a152 1
+        (FT_UShort)( currentIndex + 1 );
+d159 1
+a159 1
+                                                GXV_Validator        gxvalid )
+d165 1
+a165 1
+    if ( value_p->u > gxvalid->face->num_glyphs )
+d175 1
+a175 1
+    GXV_Validator        gxvalid )
+d186 1
+a186 1
+    p     = gxvalid->lookuptbl_head + offset;
+d202 1
+a202 1
+                                                      GXV_Validator  gxvalid )
+d208 1
+a208 1
+      (GXV_morx_subtable_type1_StateOptRecData)gxvalid->xstatetable.optdata;
+d212 3
+a214 3
+    gxvalid->lookupval_sign   = GXV_LOOKUPVALUE_UNSIGNED;
+    gxvalid->lookupval_func   = gxv_morx_subtable_type1_LookupValue_validate;
+    gxvalid->lookupfmt4_trans = gxv_morx_subtable_type1_LookupFmt4_transit;
+d224 1
+a224 1
+      gxv_LookupTable_validate( table + offset, limit, gxvalid );
+d239 1
+a239 1
+                                    GXV_Validator  gxvalid )
+d252 1
+a252 1
+    gxvalid->xstatetable.optdata =
+d254 1
+a254 1
+    gxvalid->xstatetable.optdata_load_func =
+d256 1
+a256 1
+    gxvalid->xstatetable.subtable_setup_func =
+d258 1
+a258 1
+    gxvalid->xstatetable.entry_glyphoffset_fmt =
+d260 1
+a260 1
+    gxvalid->xstatetable.entry_validate_func =
+d263 1
+a263 1
+    gxv_XStateTable_validate( p, limit, gxvalid );
+d268 1
+a268 1
+      gxvalid );
+@
+
+

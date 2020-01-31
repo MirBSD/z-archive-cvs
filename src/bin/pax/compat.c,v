@@ -1,0 +1,568 @@
+head	1.5;
+access;
+symbols
+	paxmirabilis-20190825:1.5
+	paxmirabilis-20190224:1.5
+	paxmirabilis-20190210:1.4
+	npax:1.1.0.2;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2019.02.23.23.24.54;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005C71D6461A38EAB3;
+
+1.4
+date	2019.02.10.22.31.37;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005C60A65B02C5D079;
+
+1.3
+date	2019.02.10.21.50.06;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005C609C8F43A9BDCB;
+
+1.2
+date	2018.12.12.18.08.42;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1005C114EA81986F5EC;
+
+1.1
+date	2018.12.12.03.13.30;	author tg;	state dead;
+branches
+	1.1.2.1;
+next	;
+commitid	1005C107CE315DC51F3;
+
+1.1.2.1
+date	2018.12.12.03.13.30;	author tg;	state Exp;
+branches;
+next	1.1.2.2;
+commitid	1005C107CE315DC51F3;
+
+1.1.2.2
+date	2018.12.12.04.04.48;	author tg;	state Exp;
+branches;
+next	1.1.2.3;
+commitid	1005C1088F174324DE8;
+
+1.1.2.3
+date	2018.12.12.09.08.56;	author tg;	state Exp;
+branches;
+next	1.1.2.4;
+commitid	1005C10D0381A00BE25;
+
+1.1.2.4
+date	2018.12.12.14.32.27;	author tg;	state Exp;
+branches;
+next	1.1.2.5;
+commitid	1005C111C134DFE1BC0;
+
+1.1.2.5
+date	2018.12.12.15.00.24;	author tg;	state Exp;
+branches;
+next	1.1.2.6;
+commitid	1005C11229872472EAF;
+
+1.1.2.6
+date	2018.12.12.15.38.31;	author tg;	state Exp;
+branches;
+next	1.1.2.7;
+commitid	1005C112B8E47E3ADA5;
+
+1.1.2.7
+date	2018.12.12.16.24.26;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005C11364A797CBA33;
+
+
+desc
+@@
+
+
+1.5
+log
+@work around bugs in old glibc to ensure LLONG_MIN et al. are defined
+
+for the gory details, see the commits leading up to and including
+https://evolvis.org/plugins/scmgit/cgi-bin/gitweb.cgi?p=alioth/pax.git;a=commit;h=878bbdcfedc82eda1c4b942fafb13cec4e163c58
+@
+text
+@/*-
+ * Copyright © 2019
+ *	mirabilos <m@@mirbsd.org>
+ * Copyright © 2018
+ *	mirabilos <t.glaser@@tarent.de>
+ * The copyright notices and licences of the files in .linked/ inclu‐
+ * ded below shall be considered being part of this copyright notice.
+ * Also contains material part of “jupp” (Joe’s Own Editor), © 2018
+ *	mirabilos <m@@mirbsd.org>
+ * Contains code from “mksh” (The MirBSD Korn Shell) © 2015
+ *	mirabilos <m@@mirbsd.org>
+ *	KO Myung-Hun <komh@@chollian.net>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un‐
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person’s immediate fault when using the work as intended.
+ */
+
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <unistd.h>
+
+#include "compat.h"
+#define PAX_JUST_THE_WARNINGS
+#include "extern.h"
+
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.4 2019/02/10 22:31:37 tg Exp $");
+
+int
+binopen3(int features, const char *path, int flags, mode_t mode)
+{
+	int fd;
+
+#ifdef O_BINARY
+	flags |= O_BINARY;
+#endif
+#ifdef O_CLOEXEC
+	if (features & BO_CLEXEC) {
+		flags |= O_CLOEXEC;
+		features &= ~BO_CLEXEC;
+	}
+#endif
+#ifdef O_DIRECTORY
+	if (features & BO_MAYBE_DIR)
+		flags |= O_DIRECTORY;
+#endif
+
+	if ((fd = (features & BO__TWO) ? open(path, flags) :
+	    open(path, flags, mode)) != -1) {
+#ifdef __OS2__
+		setmode(fd, O_BINARY);
+#endif
+		if ((features & BO_CLEXEC) &&
+		    fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
+			syswarn(0, errno,
+			    "Failed to set the close-on-exec flag");
+	}
+	return (fd);
+}
+
+ssize_t
+dwrite(int fd, const void *data, size_t size)
+{
+	const unsigned char *buf = data;
+	ssize_t rv = 0, z;
+
+	while (size) {
+		if ((z = write(fd, buf, size)) < 0) {
+			if (errno == EINTR)
+				continue;
+			return (rv ? /* fucked up since we got some */ -2 : -1);
+		}
+		rv += z;
+		buf += z;
+		size -= z;
+	}
+	return (rv);
+}
+
+#if !HAVE_DPRINTF
+#include <stdarg.h>
+#include <string.h>
+static char *dprintf_donum(char *, unsigned long long);
+
+/* replacement only as powerful as needed for this */
+void
+dprintf(int fd, const char *fmt, ...)
+{
+	/* %s %llu %lu %d */
+	const char *ccp;
+	char *cp, buf[24];
+	unsigned long long uval;
+	va_list ap;
+
+	va_start(ap, fmt);
+ loop:
+	switch (*fmt) {
+	case 0:
+		goto out;
+	case '%':
+		break;
+	default:
+		ccp = fmt;
+		do {
+			++ccp;
+		} while (*ccp && *ccp != '%');
+		if (dwrite(fd, fmt, ccp - fmt) < 0)
+			goto out;
+		fmt = ccp;
+		goto loop;
+	}
+	switch (*++fmt) {
+	case 'd': {
+		int ival;
+
+		ival = va_arg(ap, int);
+		cp = buf;
+		if (ival < 0) {
+			*cp++ = '-';
+			uval = -(long long)ival;
+		} else
+			uval = ival;
+		goto num;
+	}
+	case 'l':
+		switch (*++fmt) {
+		case 'l':
+			if (*++fmt != 'u') {
+ errfmt:
+				/* could do something about this? */
+				goto loop;
+			}
+			uval = va_arg(ap, unsigned long long);
+			break;
+		case 'u':
+			uval = va_arg(ap, unsigned long);
+			break;
+		default:
+			goto errfmt;
+		}
+		cp = buf;
+ num:
+		*dprintf_donum(cp, uval) = '\0';
+		cp = buf;
+		if (0)
+			/* FALLTHROUGH */
+	case 's':
+		  cp = va_arg(ap, char *);
+		if (dwrite(fd, cp, strlen(cp)) < 0)
+			goto out;
+		break;
+	default:
+		goto errfmt;
+	}
+	++fmt;
+	goto loop;
+
+ out:
+	va_end(ap);
+}
+
+static char *
+dprintf_donum(char *cp, unsigned long long val)
+{
+	unsigned long long subval = val / 10;
+
+	if (subval)
+		cp = dprintf_donum(cp, subval);
+	*cp++ = '0' + (val % 10);
+	return (cp);
+}
+#endif
+
+#if !HAVE_REALLOCARRAY
+#include ".linked/reallocarray.inc"
+#endif
+
+#if !HAVE_STRMODE
+#include ".linked/strmode.inc"
+#endif
+
+#if !HAVE_STRTONUM
+/* assumes serviceable “long long” */
+#include ".linked/strtonum.inc"
+#endif
+
+#if !HAVE_STRLCPY
+#undef WIDEC
+#define OUTSIDE_OF_LIBKERN
+#define L_strlcat
+#define L_strlcpy
+#include ".linked/strlfun.inc"
+#endif
+@
+
+
+1.4
+log
+@cobble together a dprintf implementation that should suffice for us
+@
+text
+@d32 1
+d39 1
+a39 1
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.3 2019/02/10 21:50:06 tg Exp $");
+@
+
+
+1.3
+log
+@port to Debian sid/{amd64,i386,hurd-i386,x32}, {stretch,jessie}/{amd64,i386}
+@
+text
+@d38 1
+a38 1
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.2 2018/12/12 18:08:42 tg Exp $");
+d92 4
+d98 77
+a174 1
+dprintf(int fd, const char *fmt MKSH_A_UNUSED, ...)
+d176 6
+a181 1
+	write(fd, "\nERROR: dprintf not yet implemented!\n", 37);
+@
+
+
+1.2
+log
+@merge the npax branch into MAIN
+
+asides from a missing dprintf and portability, this ought to be
+good enough for people (well me) to play with for now
+@
+text
+@d2 2
+d38 1
+a38 1
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.1.2.7 2018/12/12 16:24:26 tg Exp $");
+d108 5
+@
+
+
+1.1
+log
+@file compat.c was initially added on branch npax.
+@
+text
+@d1 112
+@
+
+
+1.1.2.1
+log
+@extremely rudimentary conversion to mirtoconf, doesn’t even build yet
+@
+text
+@a0 34
+/*-
+ * Copyright © 2018
+ *	mirabilos <t.glaser@@tarent.de>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un‐
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person’s immediate fault when using the work as intended.
+ */
+
+#include <unistd.h>
+
+#include "pax.h"
+
+__RCSID("$MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $");
+
+#if !HAVE_DPRINTF
+/* replacement only as powerful as needed for this */
+void
+dprintf(int fd, const char *fmt, ...)
+{
+	write(fd, "\nERROR: dprintf not yet implemented!\n", 37);
+}
+#endif
+@
+
+
+1.1.2.2
+log
+@pax.h needs <sys/stat.h> so pull this out
+@
+text
+@d23 1
+a23 1
+#include "compat.h"
+d25 1
+a25 1
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.1.2.1 2018/12/12 03:13:30 tg Exp $");
+@
+
+
+1.1.2.3
+log
+@merge ‘g’ and switch to a global “now”
+@
+text
+@a3 2
+ * The copyright notices and licences of the files in .linked/ inclu‐
+ * ded below shall be considered being part of this copyright notice.
+d25 1
+a25 1
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.1.2.2 2018/12/12 04:04:48 tg Exp $");
+a34 16
+
+#if !HAVE_REALLOCARRAY
+#include ".linked/reallocarray.inc"
+#endif
+
+#if !HAVE_STRMODE
+#include ".linked/strmode.inc"
+#endif
+
+#if !HAVE_STRLCPY
+#undef WIDEC
+#define OUTSIDE_OF_LIBKERN
+#define L_strlcat
+#define L_strlcpy
+#include ".linked/strlfun.inc"
+#endif
+@
+
+
+1.1.2.4
+log
+@some more goodies
+@
+text
+@a5 2
+ * Also contains material part of “jupp” (Joe’s Own Editor), © 2018
+ *	mirabilos <m@@mirbsd.org>
+d27 1
+a27 20
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.1.2.3 2018/12/12 09:08:56 tg Exp $");
+
+ssize_t
+dwrite(int fd, const void *data, size_t size)
+{
+	const unsigned char *buf = data;
+	ssize_t rv = 0, z;
+
+	while (size) {
+		if ((z = write(fd, buf, size)) < 0) {
+			if (errno == EINTR)
+				continue;
+			return (rv ? /* fucked up since we got some */ -2 : -1);
+		}
+		rv += z;
+		buf += z;
+		size -= z;
+	}
+	return (rv);
+}
+@
+
+
+1.1.2.5
+log
+@solution for rare open flags, also uses O_BINARY like in mksh
+@
+text
+@a7 3
+ * Contains code from “mksh” (The MirBSD Korn Shell) © 2015
+ *	mirabilos <m@@mirbsd.org>
+ *	KO Myung-Hun <komh@@chollian.net>
+a24 2
+#include <errno.h>
+#include <fcntl.h>
+d29 1
+a29 33
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.1.2.4 2018/12/12 14:32:27 tg Exp $");
+
+int
+binopen3(int features, const char *path, int flags, mode_t mode)
+{
+	int rv;
+
+#ifdef O_BINARY
+	flags |= O_BINARY;
+#endif
+#ifdef O_CLOEXEC
+	if (features & BO_CLEXEC) {
+		flags |= O_CLOEXEC;
+		features &= ~BO_CLEXEC;
+	}
+#endif
+#ifdef O_DIRECTORY
+	if (features & BO_MAYBE_DIR)
+		flags |= O_DIRECTORY;
+#endif
+
+	if ((rv = (features & BO__TWO) ? open(path, flags) :
+	    open(path, flags, mode)) != -1) {
+#ifdef __OS2__
+		setmode(fd, O_BINARY);
+#endif
+		if ((features & BO_CLEXEC) &&
+		    fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
+			syswarn(0, errno,
+			    "Failed to set the close-on-exec flag");
+	}
+	return (rv);
+}
+@
+
+
+1.1.2.6
+log
+@unwarn more
+@
+text
+@a32 2
+#define PAX_JUST_THE_WARNINGS
+#include "extern.h"
+d34 1
+a34 1
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.1.2.5 2018/12/12 15:00:24 tg Exp $");
+d39 1
+a39 1
+	int fd;
+d55 1
+a55 1
+	if ((fd = (features & BO__TWO) ? open(path, flags) :
+d65 1
+a65 1
+	return (fd);
+@
+
+
+1.1.2.7
+log
+@various bugfixes and a system header issue workaround in Makefile
+@
+text
+@d36 1
+a36 1
+__RCSID("$MirOS: src/bin/pax/compat.c,v 1.1.2.6 2018/12/12 15:38:31 tg Exp $");
+d92 1
+a92 1
+dprintf(int fd, const char *fmt MKSH_A_UNUSED, ...)
+@
+
+

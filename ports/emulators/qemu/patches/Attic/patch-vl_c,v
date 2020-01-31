@@ -1,0 +1,313 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2008.05.07.15.46.04;	author tg;	state dead;
+branches;
+next	1.4;
+commitid	1004821CEB27BD5D7BE;
+
+1.4
+date	2006.10.02.22.18.35;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004521904201C4D5DE;
+
+1.3
+date	2005.11.15.12.25.10;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	798c4379d381fa97;
+
+1.2
+date	2005.05.03.19.30.06;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.03.18.15.45.55;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.45.55;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.5
+log
+@move existing qemu port (0.7.2) to emulators/qemu/stable/
+@
+text
+@$MirOS: ports/emulators/qemu/patches/patch-vl_c,v 1.4 2006/10/02 22:18:35 tg Exp $
+--- vl.c.orig	Sun Sep  4 17:11:09 2005
++++ vl.c	Mon Oct  2 21:55:32 2006
+@@@@ -42,7 +42,7 @@@@
+ #include <dirent.h>
+ #ifdef _BSD
+ #include <sys/stat.h>
+-#ifndef __APPLE__
++#if !defined(__APPLE__) && !defined(__OpenBSD__)
+ #include <libutil.h>
+ #endif
+ #else
+@@@@ -503,10 +503,18 @@@@ int64_t cpu_get_real_ticks(void)
+ 
+ #elif defined(__i386__)
+ 
++#ifdef __OpenBSD__
++#include <machine/pctr.h>
++#endif
++
+ int64_t cpu_get_real_ticks(void)
+ {
+     int64_t val;
++#ifdef __OpenBSD__
++    val = rdtsc();
++#else
+     asm volatile ("rdtsc" : "=A" (val));
++#endif
+     return val;
+ }
+ 
+@@@@ -911,13 +919,6 @@@@ static int start_rtc_timer(void)
+     return 0;
+ }
+ 
+-#else
+-
+-static int start_rtc_timer(void)
+-{
+-    return -1;
+-}
+-
+ #endif /* !defined(__linux__) */
+ 
+ #endif /* !defined(_WIN32) */
+@@@@ -986,7 +987,9 @@@@ static void init_timers(void)
+         } else 
+ #endif /* defined(__linux__) */
+         {
++#if defined(__linux__)
+         use_itimer:
++#endif
+             pit_min_timer_count = ((uint64_t)itv.it_interval.tv_usec * 
+                                    PIT_FREQ) / 1000000;
+         }
+@@@@ -1635,6 +1638,7 @@@@ static int tun_open(char *ifname, int if
+ {
+     int fd;
+     char *dev;
++#ifndef __OpenBSD__
+     struct stat s;
+ 
+     fd = open("/dev/tap", O_RDWR);
+@@@@ -1645,6 +1649,22 @@@@ static int tun_open(char *ifname, int if
+ 
+     fstat(fd, &s);
+     dev = devname(s.st_rdev, S_IFCHR);
++#else
++    char dvn[20];
++    int n;
++
++    dev = dvn;
++    for (n = 0; n < 2147483647; ++n) {
++	snprintf(dvn, sizeof(dvn), "/dev/tun%d", n);
++	if ((fd = open(dvn, O_RDWR)) != -1)
++	    break;
++    }
++    if (fd == -1) {
++	fprintf(stderr, "warning: failed to open /dev/tunN for N = 0 .. 2147483647, no virtual network emulation\n");
++	return -1;
++    }
++    printf("Connected to host network interface: %s\n", dvn);
++#endif
+     pstrcpy(ifname, ifname_size, dev);
+ 
+     fcntl(fd, F_SETFL, O_NONBLOCK);
+@@@@ -3048,7 +3068,7 @@@@ const QEMUOption qemu_options[] = {
+     /* temporary options */
+     { "pci", 0, QEMU_OPTION_pci },
+     { "cirrusvga", 0, QEMU_OPTION_cirrusvga },
+-    { NULL },
++    { NULL, 0, 0 },
+ };
+ 
+ #if defined (TARGET_I386) && defined(USE_CODE_COPY)
+@@@@ -3185,7 +3205,7 @@@@ int main(int argc, char **argv)
+         serial_devices[i][0] = '\0';
+     serial_device_index = 0;
+     
+-    pstrcpy(parallel_devices[0], sizeof(parallel_devices[0]), "vc");
++    pstrcpy(parallel_devices[0], sizeof(parallel_devices[0]), "null");
+     for(i = 1; i < MAX_PARALLEL_PORTS; i++)
+         parallel_devices[i][0] = '\0';
+     parallel_device_index = 0;
+@
+
+
+1.4
+log
+@* pcnet code makes segfault, remove
+* clean up the port
+* re-enable SSP, WFM(tm)
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/emulators/qemu/patches/patch-vl_c,v 1.3 2005/11/15 12:25:10 tg Exp $
+@
+
+
+1.3
+log
+@* preliminary update of qemu to 0.7.2
+* merge OpenBSD port updates
+* enables Mac OSx86 support
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/emulators/qemu/patches/patch-vl_c,v 1.2 2005/05/03 19:30:06 tg Exp $
+d3 1
+a3 1
++++ vl.c	Tue Nov 15 11:53:40 2005
+d13 1
+a13 9
+@@@@ -128,6 +128,7 @@@@ NetDriverState nd_table[MAX_NICS];
+ QEMUTimer *gui_timer;
+ int vm_running;
+ int audio_enabled = 0;
++int nic_pcnet = 0;
+ int sb16_enabled = 1;
+ int adlib_enabled = 1;
+ int gus_enabled = 1;
+@@@@ -503,10 +504,18 @@@@ int64_t cpu_get_real_ticks(void)
+d32 1
+a32 1
+@@@@ -911,13 +920,6 @@@@ static int start_rtc_timer(void)
+d46 1
+a46 1
+@@@@ -986,7 +988,9 @@@@ static void init_timers(void)
+d56 1
+a56 1
+@@@@ -1635,6 +1639,7 @@@@ static int tun_open(char *ifname, int if
+d64 1
+a64 1
+@@@@ -1645,6 +1650,22 @@@@ static int tun_open(char *ifname, int if
+d87 1
+a87 18
+@@@@ -2846,6 +2867,7 @@@@ void help(void)
+ #if defined(TARGET_PPC) || defined(TARGET_SPARC)
+            "-g WxH[xDEPTH]  Set the initial graphical resolution and depth\n"
+ #endif
++           "-nic-pcnet     simulate an AMD PC-Net PCI ethernet adaptor\n"
+            "\n"
+            "Network options:\n"
+            "-nics n         simulate 'n' network cards [default=1]\n"
+@@@@ -2959,6 +2981,7 @@@@ enum {
+     QEMU_OPTION_L,
+     QEMU_OPTION_no_code_copy,
+     QEMU_OPTION_pci,
++    QEMU_OPTION_nic_pcnet,
+     QEMU_OPTION_isa,
+     QEMU_OPTION_prep,
+     QEMU_OPTION_k,
+@@@@ -3047,8 +3070,9 @@@@ const QEMUOption qemu_options[] = {
+     
+a89 1
++    { "nic-pcnet", 0, QEMU_OPTION_nic_pcnet },
+d96 1
+a96 1
+@@@@ -3185,7 +3209,7 @@@@ int main(int argc, char **argv)
+a104 10
+@@@@ -3452,6 +3476,9 @@@@ int main(int argc, char **argv)
+                 break;
+             case QEMU_OPTION_pci:
+                 pci_enabled = 1;
++                break;
++            case QEMU_OPTION_nic_pcnet:
++                nic_pcnet = 1;
+                 break;
+             case QEMU_OPTION_isa:
+                 pci_enabled = 0;
+@
+
+
+1.2
+log
+@update
+@
+text
+@d1 3
+a3 3
+$MirOS$
+--- vl.c.orig	Wed Apr 27 20:51:43 2005
++++ vl.c	Tue May  3 18:36:14 2005
+d13 9
+a21 1
+@@@@ -499,10 +499,18 @@@@ int64_t cpu_get_real_ticks(void)
+d40 1
+a40 1
+@@@@ -893,13 +901,6 @@@@ static int start_rtc_timer(void)
+d54 1
+a54 1
+@@@@ -968,7 +969,9 @@@@ static void init_timers(void)
+d64 1
+a64 1
+@@@@ -1595,6 +1598,7 @@@@ static int tun_open(char *ifname, int if
+d72 1
+a72 1
+@@@@ -1605,6 +1609,22 @@@@ static int tun_open(char *ifname, int if
+d95 18
+a112 1
+@@@@ -2950,7 +2970,7 @@@@ const QEMUOption qemu_options[] = {
+d115 1
+d118 1
+a118 1
++    { NULL, 0, 0 }
+d122 19
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 2
+a3 2
+--- vl.c.orig	Sun Nov 14 20:51:11 2004
++++ vl.c	Thu Feb 17 19:26:58 2005
+d13 20
+a32 1
+@@@@ -870,13 +870,6 @@@@ static int start_rtc_timer(void)
+d46 1
+a46 1
+@@@@ -945,7 +938,9 @@@@ static void init_timers(void)
+d56 1
+a56 1
+@@@@ -1568,6 +1563,7 @@@@ static int tun_open(char *ifname, int if
+d64 1
+a64 1
+@@@@ -1578,6 +1574,22 @@@@ static int tun_open(char *ifname, int if
+d87 9
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

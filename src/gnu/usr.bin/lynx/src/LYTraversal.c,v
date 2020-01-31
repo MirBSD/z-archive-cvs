@@ -1,0 +1,300 @@
+head	1.1;
+branch	1.1.109;
+access;
+symbols
+	lynx-2_8_8dev_16:1.1.109.3
+	lynx-2_8_8dev_15e:1.1.109.3
+	lynx-2_8_8dev_15:1.1.109.3
+	lynx-2_8_8dev_14:1.1.109.3
+	lynx-2_8_8dev_12:1.1.109.3
+	lynx-2_8_8dev_11:1.1.109.3
+	lynx-2_8_8dev_10a:1.1.109.3
+	lynx-2_8_8dev_7a:1.1.109.3
+	lynx-2_8_8dev_7:1.1.109.3
+	lynx-2_8_7rel_1:1.1.109.2
+	lynx-2_8_7dev_12:1.1.109.1
+	lynx-2_8_7dev_11a:1.1.109.1
+	MIRBSD_10:1.1.109.1.0.4
+	MIRBSD_10_BASE:1.1.109.1
+	lynx-2_8_7dev_8:1.1.109.1
+	lynx-2_8_7dev_7:1.1.109.1
+	lynx-2_8_7dev_5:1.1.109.1
+	lynx-2_8_7dev_2:1.1.109.1
+	lynx-2_8_6pre_5:1.1.109.1
+	lynx-2_8_6pre_4:1.1.109.1
+	lynx-2_8_6pre_3:1.1.109.1
+	MIRBSD_9_BASE:1.1.109.1
+	lynx-2_8_6dev_18c:1.1.109.1
+	lynx-2_8_6dev_18:1.1.109.1
+	MIRBSD_8:1.1.109.1.0.2
+	MIRBSD_8_BASE:1.1.109.1
+	lynx-2_8_6dev_16:1.1.109.1
+	lynx:1.1.109;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.03.27.22.12.14;	author tg;	state Exp;
+branches
+	1.1.109.1;
+next	;
+
+1.1.109.1
+date	2005.03.27.22.12.14;	author tg;	state Exp;
+branches;
+next	1.1.109.2;
+
+1.1.109.2
+date	2009.08.09.14.37.53;	author tg;	state Exp;
+branches;
+next	1.1.109.3;
+commitid	1004A7EDF4952738297;
+
+1.1.109.3
+date	2010.12.19.18.12.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004D0E4B24304015D1;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#include <HTUtils.h>
+#include <LYGlobalDefs.h>
+#include <LYUtils.h>
+#include <LYClean.h>
+#include <LYCurses.h>
+#include <LYStrings.h>
+#include <LYTraversal.h>
+
+#include <LYexit.h>
+#include <LYLeaks.h>
+
+/* routines to handle special traversal feature */
+
+static void final_perror(const char *msg, BOOLEAN clean_flag)
+{
+    int saved_errno = errno;
+
+    if (LYCursesON) {
+	if (clean_flag)
+	    cleanup();
+	else
+	    stop_curses();
+    }
+    set_errno(saved_errno);
+    perror(msg);
+}
+
+static void exit_with_perror(const char *msg)
+{
+    final_perror(msg, TRUE);
+    exit_immediately(EXIT_FAILURE);
+}
+
+BOOLEAN lookup_link(char *target)
+{
+    FILE *ifp;
+    char *buffer = NULL;
+    char *line = NULL;
+    int result = FALSE;
+
+    if ((ifp = fopen(TRAVERSE_FILE, TXT_R)) == NULL) {
+	if ((ifp = LYNewTxtFile(TRAVERSE_FILE)) == NULL) {
+	    exit_with_perror(CANNOT_OPEN_TRAV_FILE);
+	} else {
+	    LYCloseOutput(ifp);
+	    return (FALSE);
+	}
+    }
+
+    HTSprintf0(&line, "%s\n", target);
+
+    while (LYSafeGets(&buffer, ifp) != NULL) {
+	if (STREQ(line, buffer)) {
+	    result = TRUE;
+	    break;
+	}
+    }				/* end while */
+    FREE(line);
+    FREE(buffer);
+
+    LYCloseInput(ifp);
+    return (BOOL) (result);
+}
+
+void add_to_table(char *target)
+{
+
+    FILE *ifp;
+
+    if ((ifp = LYAppendToTxtFile(TRAVERSE_FILE)) == NULL) {
+	exit_with_perror(CANNOT_OPEN_TRAV_FILE);
+    }
+
+    fprintf(ifp, "%s\n", target);
+
+    LYCloseOutput(ifp);
+}
+
+void add_to_traverse_list(char *fname, char *prev_link_name)
+{
+
+    FILE *ifp;
+
+    if ((ifp = LYAppendToTxtFile(TRAVERSE_FOUND_FILE)) == NULL) {
+	exit_with_perror(CANNOT_OPEN_TRAF_FILE);
+    }
+
+    fprintf(ifp, "%s\t%s\n", fname, prev_link_name);
+
+    LYCloseOutput(ifp);
+}
+
+void dump_traversal_history(void)
+{
+    int x;
+    FILE *ifp;
+
+    if (nhist <= 0)
+	return;
+
+    if ((ifp = LYAppendToTxtFile(TRAVERSE_FILE)) == NULL) {
+	final_perror(CANNOT_OPEN_TRAV_FILE, FALSE);
+	return;
+    }
+
+    fprintf(ifp, "\n\n%s\n\n\t    %s\n\n",
+	    TRAV_WAS_INTERRUPTED,
+	    gettext("here is a list of the history stack so that you may rebuild"));
+
+    for (x = nhist - 1; x >= 0; x--) {
+	fprintf(ifp, "%s\t%s\n", HDOC(x).title, HDOC(x).address);
+    }
+
+    LYCloseOutput(ifp);
+}
+
+void add_to_reject_list(char *target)
+{
+
+    FILE *ifp;
+
+    CTRACE((tfp, "add_to_reject_list(%s)\n", target));
+
+    if ((ifp = LYAppendToTxtFile(TRAVERSE_REJECT_FILE)) == NULL) {
+	exit_with_perror(CANNOT_OPEN_REJ_FILE);
+    }
+
+    fprintf(ifp, "%s\n", target);
+
+    LYCloseOutput(ifp);
+}
+
+/* there need not be a reject file, so if it doesn't open, just return
+   FALSE, meaning "target not in reject file" If the last character in
+   a line in a reject file is "*", then also reject if target matches up to
+   that point in the string
+   Blank lines are ignored
+   Lines that contain just a * are allowed, but since they mean "reject
+   everything" it shouldn't come up much!
+ */
+
+BOOLEAN lookup_reject(char *target)
+{
+    FILE *ifp;
+    char *buffer = NULL;
+    char *line = NULL;
+    int len;
+    int result = FALSE;
+
+    if ((ifp = fopen(TRAVERSE_REJECT_FILE, TXT_R)) == NULL) {
+	return (FALSE);
+    }
+
+    HTSprintf0(&line, "%s", target);
+
+    while (LYSafeGets(&buffer, ifp) != NULL && !result) {
+	LYTrimTrailing(buffer);
+	len = strlen(buffer);
+	if (len > 0) {		/* if not an empty line */
+	    if (buffer[len - 1] == '*') {
+		/* if last char is * and the rest of the chars match */
+		if ((len == 1) || (strncmp(line, buffer, len - 1) == 0)) {
+		    result = TRUE;
+		}
+	    } else {
+		if (STREQ(line, buffer)) {
+		    result = TRUE;
+		}
+	    }
+	}
+    }				/* end while loop over the file */
+    FREE(buffer);
+    FREE(line);
+
+    LYCloseInput(ifp);
+
+    CTRACE((tfp, "lookup_reject(%s) -> %d\n", target, result));
+    return (BOOL) (result);
+}
+@
+
+
+1.1.109.1
+log
+@Lynx 2.8.6dev.11h (pre-patch) minus
+* lib
+* po
+* scripts
+@
+text
+@@
+
+
+1.1.109.2
+log
+@Woohoo, there’s a new Lynx release!
+@
+text
+@a0 3
+/*
+ * $LynxId: LYTraversal.c,v 1.27 2009/01/01 22:37:06 tom Exp $
+ */
+d147 1
+a147 1
+    unsigned len;
+d159 1
+a159 1
+	if (len != 0) {		/* if not an empty line */
+@
+
+
+1.1.109.3
+log
+@Import lynx-current
+@
+text
+@d2 1
+a2 1
+ * $LynxId: LYTraversal.c,v 1.30 2010/09/24 22:57:01 tom Exp $
+d17 1
+a17 1
+static void final_perror(const char *msg, int clean_flag)
+d150 1
+a150 1
+    size_t len;
+d165 1
+a165 1
+		if ((len == 1) || (StrNCmp(line, buffer, len - 1) == 0)) {
+@
+
+

@@ -1,0 +1,328 @@
+head	1.6;
+access;
+symbols
+	MIRBSD_10:1.5.0.2
+	MIRBSD_10_BASE:1.5
+	MIRBSD_9_BASE:1.4
+	MIRBSD_8:1.4.0.2
+	MIRBSD_8_BASE:1.4
+	cvs-200509212000:1.1.1.3
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2010.01.07.22.34.51;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004B46615B7479BC1B;
+
+1.5
+date	2007.05.07.15.21.18;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100463F43D3067E6553;
+
+1.4
+date	2005.09.22.20.09.06;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	545a43330f771d52;
+
+1.3
+date	2005.08.20.13.02.32;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	17a2430729fe815c;
+
+1.2
+date	2005.02.26.13.55.09;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.24.46;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.46;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.52.37;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2005.09.21.20.34.21;	author tg;	state Exp;
+branches;
+next	;
+commitid	20cd4331c3c732a2;
+
+
+desc
+@@
+
+
+1.6
+log
+@facilitate code and data sharing: move some passwd(8) functions
+sources by other stuff into libc or libutil; make commons out of
+things like digits, base64 data or code, etc. (publish the data
+parts as well, justin case) plus do some const cleanup
+@
+text
+@/**	$MirOS: src/lib/libc/hash/helper.c,v 1.5 2007/05/07 15:21:18 tg Exp $ */
+/*	$OpenBSD: helper.c,v 1.8 2005/08/08 08:05:35 espie Exp $	*/
+
+/*
+ * ----------------------------------------------------------------------------
+ * "THE BEER-WARE LICENSE" (Revision 42):
+ * <phk@@login.dkuug.dk> wrote this file.  As long as you retain this notice you
+ * can do whatever you want with this stuff. If we meet some day, and you think
+ * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
+ * ----------------------------------------------------------------------------
+ */
+
+#include <sys/param.h>
+#include <sys/stat.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <hashinc>
+
+__RCSID("$MirOS: src/lib/libc/hash/helper.c,v 1.5 2007/05/07 15:21:18 tg Exp $ helper for HASH hash");
+
+extern const uint8_t mbsd_digits_hex[17];
+extern const uint8_t mbsd_digits_HEX[17];
+
+/* ARGSUSED */
+char *
+HASHEnd(HASH_CTX *ctx, char *buf)
+{
+	int i;
+	u_int8_t digest[HASH_DIGEST_LENGTH];
+#ifdef HASH_DIGEST_UPPERCASE
+#define hex mbsd_digits_HEX
+#else
+#define hex mbsd_digits_hex
+#endif
+
+	if (buf == NULL && (buf = malloc(HASH_DIGEST_STRING_LENGTH)) == NULL)
+		return (NULL);
+
+	HASHFinal(digest, ctx);
+	for (i = 0; i < HASH_DIGEST_LENGTH; i++) {
+		buf[i + i] = hex[digest[i] >> 4];
+		buf[i + i + 1] = hex[digest[i] & 0x0f];
+	}
+	buf[i + i] = '\0';
+	memset(digest, 0, sizeof(digest));
+	return (buf);
+}
+
+char *
+HASHFileChunk(const char *filename, char *buf, off_t off, off_t len)
+{
+	struct stat sb;
+	u_char buffer[BUFSIZ];
+	HASH_CTX ctx;
+	int fd, save_errno;
+	ssize_t nr;
+
+	HASHInit(&ctx);
+
+	if ((fd = open(filename, O_RDONLY)) < 0)
+		return (NULL);
+	if (len == 0) {
+		if (fstat(fd, &sb) == -1) {
+			close(fd);
+			return (NULL);
+		}
+		len = sb.st_size;
+	}
+	if ((len < 0) || (off > 0 && lseek(fd, off, SEEK_SET) < 0))
+		return (NULL);
+
+	while ((nr = read(fd, buffer,
+	    (size_t)(len ? MIN(BUFSIZ, len) : BUFSIZ))) > 0) {
+		HASHUpdate(&ctx, buffer, (size_t)nr);
+		if (len > 0 && (len -= nr) == 0)
+			break;
+	}
+
+	save_errno = errno;
+	close(fd);
+	errno = save_errno;
+	return (nr < 0 ? NULL : HASHEnd(&ctx, buf));
+}
+
+char *
+HASHFile(const char *filename, char *buf)
+{
+	return (HASHFileChunk(filename, buf, (off_t)0, (off_t)0));
+}
+
+char *
+HASHData(const u_char *data, size_t len, char *buf)
+{
+	HASH_CTX ctx;
+
+	HASHInit(&ctx);
+	HASHUpdate(&ctx, data, len);
+	return (HASHEnd(&ctx, buf));
+}
+@
+
+
+1.5
+log
+@add suma and sfv hashes in the standard format, too
+(can't do adler32 that easily for now, later; sum/cksum/sysvsum differ, never)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/hash/helper.c,v 1.4 2005/09/22 20:09:06 tg Exp $ */
+d25 4
+a28 1
+__RCSID("$MirOS: src/lib/libc/hash/helper.c,v 1.4 2005/09/22 20:09:06 tg Exp $ helper for HASH hash");
+d37 1
+a37 1
+	static const char hex[] = "0123456789ABCDEF";
+d39 1
+a39 1
+	static const char hex[] = "0123456789abcdef";
+@
+
+
+1.4
+log
+@merge
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/hash/helper.c,v 1.3 2005/08/20 13:02:32 tg Exp $ */
+d25 1
+a25 1
+__RCSID("$MirOS: src/lib/libc/hash/helper.c,v 1.3 2005/08/20 13:02:32 tg Exp $ helper for HASH hash");
+d33 3
+d37 1
+@
+
+
+1.3
+log
+@merge recent OpenBSD import here
+@
+text
+@d1 2
+a2 2
+/**	$MirOS: src/lib/libc/hash/helper.c,v 1.2 2005/02/26 13:55:09 tg Exp $ */
+/*	$OpenBSD: helper.c,v 1.7 2004/09/16 15:12:09 millert Exp $	*/
+d25 1
+a25 1
+__RCSID("$MirOS: src/lib/libc/hash/helper.c,v 1.2 2005/02/26 13:55:09 tg Exp $ helper for HASH hash");
+@
+
+
+1.2
+log
+@merge hashes
+@
+text
+@d1 2
+a2 2
+/**	$MirOS$ */
+/*	$OpenBSD: helper.c,v 1.6 2004/06/22 01:57:29 jfb Exp $	*/
+d14 1
+d25 1
+a25 1
+__RCSID("$MirOS$ helper for HASH hash");
+d51 1
+d61 7
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a12 4
+#if defined(LIBC_SCCS) && !defined(lint)
+static const char rcsid[] = "$OpenBSD: helper.c,v 1.6 2004/06/22 01:57:29 jfb Exp $";
+#endif /* LIBC_SCCS and not lint */
+
+d24 2
+d59 1
+a59 1
+	if (off > 0 && lseek(fd, off, SEEK_SET) < 0)
+d62 2
+a63 1
+	while ((nr = read(fd, buffer, MIN(sizeof(buffer), len))) > 0) {
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: helper.c,v 1.7 2004/09/16 15:12:09 millert Exp $	*/
+d13 1
+a13 1
+static const char rcsid[] = "$OpenBSD: helper.c,v 1.7 2004/09/16 15:12:09 millert Exp $";
+a16 1
+#include <sys/stat.h>
+a50 1
+	struct stat sb;
+a59 7
+	if (len == 0) {
+		if (fstat(fd, &sb) == -1) {
+			close(fd);
+			return (NULL);
+		}
+		len = sb.st_size;
+	}
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD's libc as of today, minus some of the locale stuff,
+and with brk malloc instead of mmap malloc
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: helper.c,v 1.8 2005/08/08 08:05:35 espie Exp $	*/
+d12 4
+@
+
+

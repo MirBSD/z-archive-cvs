@@ -1,0 +1,135 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	OPENBSD_4_4:1.1.1.2
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200606302200:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200601311430:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.02.05.17.22.36;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.22.36;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.06.30.22.40.28;	author tg;	state Exp;
+branches;
+next	;
+commitid	10044A5A6F7276AA324;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#include "beos/beosish.h"
+
+#undef waitpid
+
+#include <sys/wait.h>
+
+/* In BeOS 5.0 the waitpid() seems to misbehave in that the status
+ * has the upper and lower bytes swapped compared with the usual
+ * POSIX/UNIX implementations.  To undo the surpise effect to the
+ * rest of Perl we need this wrapper.  (The rest of BeOS might be
+ * surprised because of this, though.) */
+
+pid_t beos_waitpid(pid_t process_id, int *status_location, int options) {
+    pid_t got = waitpid(process_id, status_location, options);
+    if (status_location)
+      *status_location =
+	(*status_location & 0x00FF) << 8 |
+	(*status_location & 0xFF00) >> 8;
+    return got;
+}
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import Perl 5.8.8 from OpenLSD
+@
+text
+@a3 2
+#undef kill
+#undef sigaction
+a4 5
+#include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+a6 2
+#include <OS.h>
+
+a20 38
+
+
+/* BeOS kill() doesn't like the combination of the pseudo-signal 0 and
+ * specifying a process group (i.e. pid < -1 || pid == 0). We work around
+ * by changing pid to the respective process group leader. That should work
+ * well enough in most cases. */
+
+int beos_kill(pid_t pid, int sig)
+{
+    if (sig == 0) {
+        if (pid == 0) {
+            /* it's our process group */
+            pid = getpgrp();
+        } else if (pid < -1) {
+            /* just address the process group leader */
+            pid = -pid;
+        }
+    }
+
+    return kill(pid, sig);
+}
+
+/* sigaction() should fail, if trying to ignore or install a signal handler
+ * for a signal that cannot be caught or ignored. The BeOS R5 sigaction()
+ * doesn't return an error, though. */
+int beos_sigaction(int sig, const struct sigaction *act,
+                   struct sigaction *oact)
+{
+    int result = sigaction(sig, act, oact);
+
+    if (result == 0 && act && act->sa_handler != SIG_DFL
+        && act->sa_handler != SIG_ERR && (sig == SIGKILL || sig == SIGSTOP)) {
+        result = -1;
+        errno = EINVAL;
+    }
+
+    return result;
+}
+@
+

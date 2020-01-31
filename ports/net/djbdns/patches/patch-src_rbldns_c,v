@@ -1,0 +1,75 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2006.01.17.20.55.33;	author tg;	state Exp;
+branches;
+next	;
+commitid	10043CD59A91A442803;
+
+
+desc
+@@
+
+
+1.1
+log
+@Apply http://www.iecc.com/rbldns-patch.txt and bump:
+
+| This tiny patch to rbldns adds records for the root of the zone.  That
+| is, if the rbldns zone is bad.example.com, with entries like
+| 3.0.0.127.bad.example.com, you can now also have A and TXT records for
+| plain bad.example.com.  I did this for my korea.services.net zone,
+| since potential users keep typing korea.services.net into their web
+| browsers and expecting something useful to happen.
+|
+| There's one new record type in the data file, a line starting with an
+| exclamation point, in the same format as the colon record, e.g.
+|
+|   !10.11.12.13:See http://bad.example.com
+|
+| (Unlike in a colon record, a $ at the end of the text isn't special.)
+|
+| No warranty expressed or implied.  If you find bugs, feel free to fix
+| them.
+| 			- John Levine, May 2002
+@
+text
+@$MirOS$
+--- src/rbldns.c.orig	Sun Feb 11 21:11:23 2001
++++ src/rbldns.c	Tue Jan 17 20:53:13 2006
+@@@@ -33,7 +33,19 @@@@ static int doit(char *q,char qtype[2])
+   if (byte_equal(qtype,2,DNS_T_ANY)) flaga = flagtxt = 1;
+   if (!flaga && !flagtxt) goto REFUSE;
+ 
+-  if (dd(q,base,reverseip) != 4) goto REFUSE;
++  i = dd(q,base,reverseip);
++  if(i == 0) { /* root entry */
++    r = cdb_find(&c,"R",1);
++    if (r == -1) return 0;
++    if (r && ((dlen = cdb_datalen(&c)) >= 4)) {
++      if (dlen > 100) dlen = 100;
++      if (cdb_read(&c,data,dlen,cdb_datapos(&c)) == -1) return 0;
++    }
++    else {
++      goto REFUSE;
++    }
++  } else {
++  if (i != 4) goto REFUSE;
+   uint32_unpack(reverseip,&ipnum);
+   uint32_pack_big(ip,ipnum);
+ 
+@@@@ -63,7 +75,7 @@@@ static int doit(char *q,char qtype[2])
+     --dlen;
+     dlen += ip4_fmt(data + dlen,ip);
+   }
+-
++  }
+   if (flaga) {
+     if (!response_rstart(q,DNS_T_A,2048)) return 0;
+     if (!response_addbytes(data,4)) return 0;
+@

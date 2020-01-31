@@ -1,0 +1,713 @@
+head	1.4;
+access;
+symbols
+	MIRBSD_10:1.3.0.2
+	MIRBSD_10_BASE:1.3
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2009.05.31.15.47.39;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004A22A6962407066D;
+
+1.3
+date	2007.07.15.19.28.39;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100469A757B74F8E7DC;
+
+1.2
+date	2007.07.15.19.10.31;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100469A711A213FBB87;
+
+1.1
+date	2005.02.05.17.30.04;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.30.04;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.21.00.57;	author tg;	state Exp;
+branches;
+next	;
+commitid	560042e0092f571e;
+
+
+desc
+@@
+
+
+1.4
+log
+@tr '\321' shall be 0xD1 not U+00D1
+@
+text
+@/*	$OpenBSD: str.c,v 1.9 2004/09/15 22:12:19 deraadt Exp $	*/
+/*	$NetBSD: str.c,v 1.7 1995/08/31 22:13:47 jtc Exp $	*/
+
+/*-
+ * Copyright (c) 2007
+ *	Thorsten Glaser <tg@@mirbsd.de>
+ * Copyright (c) 1991, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+
+#include <errno.h>
+#include <err.h>
+#include <stdbool.h>
+#include <wctype.h>
+
+#include "extern.h"
+
+__SCCSID("@@(#)str.c	8.2 (Berkeley) 4/28/95");
+__RCSID("$MirOS: src/usr.bin/tr/str.c,v 1.3 2007/07/15 19:28:39 tg Exp $");
+
+static wchar_t	backslash(STR *);
+static bool	bracket(STR *);
+static void	genclass(STR *);
+static void	genequiv(STR *);
+static bool	genrange(STR *);
+static void	genseq(STR *);
+
+bool
+next(STR *s)
+{
+	wchar_t ch;
+
+	switch (s->state) {
+	case EOS:
+		return (false);
+	case INFINITE:
+		return (true);
+	case NORMAL:
+		switch (ch = *s->str) {
+		case '\0':
+			s->state = EOS;
+			return (false);
+		case '\\':
+			s->lastch = backslash(s);
+			break;
+		case '[':
+			if (bracket(s))
+				return (next(s));
+			/* FALLTHROUGH */
+		default:
+			++s->str;
+			s->lastch = ch;
+			break;
+		}
+
+		/* We can start a range at any time. */
+		if (s->str[0] == L'-' && genrange(s))
+			return (next(s));
+		return (true);
+	case RANGE:
+		if (s->cnt-- == 0) {
+			s->state = NORMAL;
+			return (next(s));
+		}
+		++s->lastch;
+		return (true);
+	case SEQUENCE:
+		if (s->cnt-- == 0) {
+			s->state = NORMAL;
+			return (next(s));
+		}
+		return (true);
+	case SET:
+		if ((s->lastch = s->set[s->cnt++]) == OOBCH) {
+			s->state = NORMAL;
+			return (next(s));
+		}
+		return (true);
+	case WCLASS:
+		while (s->cnext != OOBCH) {
+			if (iswctype(s->cnext, s->wclass))
+				break;
+			s->cnext++;
+		}
+		if (s->cnext == OOBCH) {
+			s->state = NORMAL;
+			return (next(s));
+		}
+		s->lastch = s->cnext++;
+		return (true);
+	case WTRANS:
+		while (s->cnext != OOBCH) {
+			if (iswctype(s->cnext, s->wclass) &&
+			    (ch = towctrans(s->cnext, s->wtrans)) != s->cnext) {
+				s->lastch = s->which == STRING1 ? s->cnext : ch;
+				s->cnext++;
+				return (true);
+			}
+			s->cnext++;
+		}
+		s->state = NORMAL;
+		return (next(s));
+	default:
+		return (false);
+	}
+	/* NOTREACHED */
+}
+
+static bool
+bracket(STR *s)
+{
+	wchar_t *p;
+
+	switch (s->str[1]) {
+	case L':':				/* "[:class:]" */
+		if ((p = wcsstr(s->str + 2, L":]")) == NULL)
+			return (false);
+		*p = L'\0';
+		s->str += 2;
+		genclass(s);
+		s->str = p + 2;
+		return (true);
+	case L'=':				/* "[=equiv=]" */
+		if ((p = wcsstr(s->str + 2, L"=]")) == NULL)
+			return (false);
+		s->str += 2;
+		genequiv(s);
+		return (true);
+	default:				/* "[\###*n]" or "[#*n]" */
+		if ((p = wcspbrk(s->str + 2, L"*]")) == NULL)
+			return (false);
+		if (p[0] != L'*' || wcschr(p, L']') == NULL)
+			return (false);
+		s->str += 1;
+		genseq(s);
+		return (true);
+	}
+	/* NOTREACHED */
+}
+
+static void
+genclass(STR *s)
+{
+	wctype_t tmp;
+	size_t len;
+	char *cp;
+	bool alower;
+
+	if (s->use_wctrans && ((alower = !wcscmp(s->str, L"lower")) ||
+	    !wcscmp(s->str, L"upper"))) {
+		alower = (alower && s->which == STRING1) ||
+		    (!alower && s->which == STRING2);
+		s->wclass = alower ? wctype("lower") : wctype("upper");
+		s->wtrans = alower ? wctrans("toupper") : wctrans("tolower");
+		s->state = WTRANS;
+		s->cnext = 0;
+		return;
+	}
+
+	len = wcstombs(NULL, s->str, 0);
+	if ((cp = malloc(len + 1)) == NULL)
+		err(1, "out of memory allocating %zu bytes", len);
+	wcstombs(cp, s->str, len + 1);
+
+	if ((tmp = wctype(cp)) == 0)
+		errx(1, "unknown class %s", cp);
+
+	free(cp);
+	s->state = WCLASS;
+	s->wclass = tmp;
+	s->cnext = 0;
+}
+
+/*
+ * English doesn't have any equivalence classes, so for now
+ * we just syntax check and grab the character.
+ */
+static void
+genequiv(STR *s)
+{
+	if (*s->str == L'\\') {
+		s->equiv[0] = backslash(s);
+		if (*s->str != L'=')
+			errx(1, "misplaced equivalence equals sign");
+	} else {
+		s->equiv[0] = s->str[0];
+		if (s->str[1] != L'=')
+			errx(1, "misplaced equivalence equals sign");
+	}
+	s->str += 2;
+	s->cnt = 0;
+	s->state = SET;
+	s->set = s->equiv;
+}
+
+static bool
+genrange(STR *s)
+{
+	wchar_t stopval, *savestart;
+
+	savestart = s->str;
+	stopval = *++s->str == L'\\' ? backslash(s) : *s->str++;
+	if (stopval < s->lastch) {
+		s->str = savestart;
+		return (false);
+	}
+	s->cnt = stopval - s->lastch + 1;
+	s->state = RANGE;
+	--s->lastch;
+	return (true);
+}
+
+static void
+genseq(STR *s)
+{
+	wchar_t *ep;
+
+	if (s->which == STRING1)
+		errx(1, "sequences only valid in string2");
+
+	if (*s->str == L'\\')
+		s->lastch = backslash(s);
+	else
+		s->lastch = *s->str++;
+	if (*s->str != L'*')
+		errx(1, "misplaced sequence asterisk");
+
+	switch (*++s->str) {
+	case L'\\':
+		s->cnt = backslash(s);
+		break;
+	case L']':
+		s->cnt = 0;
+		++s->str;
+		break;
+	default:
+		if (iswdigit(*s->str)) {
+			s->cnt = wcstol(s->str, &ep, 0);
+			if (*ep == L']') {
+				s->str = ep + 1;
+				break;
+			}
+		}
+		errx(1, "illegal sequence count");
+		/* NOTREACHED */
+	}
+
+	s->state = s->cnt ? SEQUENCE : INFINITE;
+}
+
+/*
+ * Translate \??? into a character.  Up to 3 octal digits, if no digits either
+ * an escape code or a literal character.  Spew out a MirOS OPTU-16 raw octet.
+ */
+static wchar_t
+backslash(STR *s)
+{
+	wchar_t ch, cnt, val;
+
+	for (cnt = val = 0;;) {
+		ch = *++s->str;
+		if (ch < L'0' || ch > L'7')
+			break;
+		val = val * 8 + ch - L'0';
+		if (++cnt == 3) {
+			++s->str;
+			break;
+		}
+	}
+	if (cnt)
+		return ((val &= 0xFF) < 0x80 ? val : 0xEF00 | val);
+	if (ch != L'\0')
+		++s->str;
+	switch (ch) {
+		case L'a':			/* escape characters */
+			return (L'\7');
+		case L'b':
+			return (L'\b');
+		case L'f':
+			return (L'\f');
+		case L'n':
+			return (L'\n');
+		case L'r':
+			return (L'\r');
+		case L't':
+			return (L'\t');
+		case L'v':
+			return (L'\13');
+		case L'\0':			/*  \" -> \ */
+			s->state = EOS;
+			return (L'\\');
+		default:			/* \x" -> x */
+			return (ch);
+	}
+}
+@
+
+
+1.3
+log
+@tag © notice
+@
+text
+@d45 1
+a45 1
+__RCSID("$MirOS: src/usr.bin/tr/str.c,v 1.2 2007/07/15 19:10:31 tg Exp $");
+d279 1
+a279 1
+ * an escape code or a literal character.
+d297 1
+a297 1
+		return (val);
+@
+
+
+1.2
+log
+@• convert to unicode (wchar_t)
+• implement classes (wctype_t)
+• implement case conversion (wctrans_t) – fully mine! no other BSD has it!
+• cosmetics, make __CRAZY clean
+@
+text
+@d5 2
+d45 1
+a45 1
+__RCSID("$MirOS$");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: str.c,v 1.8 2003/06/03 02:56:20 millert Exp $	*/
+a32 8
+#ifndef lint
+#if 0
+static char sccsid[] = "@@(#)str.c	8.2 (Berkeley) 4/28/95";
+#endif
+static char rcsid[] = "$OpenBSD: str.c,v 1.8 2003/06/03 02:56:20 millert Exp $";
+#endif /* not lint */
+
+#include <sys/cdefs.h>
+a35 5
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+d37 2
+d42 5
+a46 3
+static int	backslash(STR *);
+static int	bracket(STR *);
+static int	c_class(const void *, const void *);
+d49 1
+a49 1
+static int	genrange(STR *);
+d52 2
+a53 3
+int
+next(s)
+	STR *s;
+d55 1
+a55 1
+	int ch;
+d59 1
+a59 1
+		return (0);
+d61 1
+a61 1
+		return (1);
+d66 1
+a66 1
+			return (0);
+d81 1
+a81 1
+		if (s->str[0] == '-' && genrange(s))
+d83 1
+a83 1
+		return (1);
+d90 1
+a90 1
+		return (1);
+d96 1
+a96 1
+		return (1);
+d102 25
+a126 1
+		return (1);
+d128 1
+a128 1
+		return 0;
+d133 2
+a134 3
+static int
+bracket(s)
+	STR *s;
+d136 1
+a136 1
+	char *p;
+d139 4
+a142 4
+	case ':':				/* "[:class:]" */
+		if ((p = strstr(s->str + 2, ":]")) == NULL)
+			return (0);
+		*p = '\0';
+d146 4
+a149 4
+		return (1);
+	case '=':				/* "[=equiv=]" */
+		if ((p = strstr(s->str + 2, "=]")) == NULL)
+			return (0);
+d152 1
+a152 1
+		return (1);
+d154 4
+a157 4
+		if ((p = strpbrk(s->str + 2, "*]")) == NULL)
+			return (0);
+		if (p[0] != '*' || strchr(p, ']') == NULL)
+			return (0);
+d160 1
+a160 1
+		return (1);
+a164 21
+typedef struct {
+	char *name;
+	int (*func)(int);
+	int *set;
+} CLASS;
+
+static CLASS classes[] = {
+	{ "alnum",  isalnum,  },
+	{ "alpha",  isalpha,  },
+	{ "blank",  isblank,  },
+	{ "cntrl",  iscntrl,  },
+	{ "digit",  isdigit,  },
+	{ "graph",  isgraph,  },
+	{ "lower",  islower,  },
+	{ "print",  isprint,  },
+	{ "punct",  ispunct,  },
+	{ "space",  isspace,  },
+	{ "upper",  isupper,  },
+	{ "xdigit", isxdigit, },
+};
+
+d166 1
+a166 2
+genclass(s)
+	STR *s;
+d168 15
+a182 21
+	int cnt, (*func)(int);
+	CLASS *cp, tmp;
+	int *p;
+
+	tmp.name = s->str;
+	if ((cp = (CLASS *)bsearch(&tmp, classes, sizeof(classes) /
+	    sizeof(CLASS), sizeof(CLASS), c_class)) == NULL)
+		errx(1, "unknown class %s", s->str);
+
+	if ((cp->set = p = malloc((NCHARS + 1) * sizeof(int))) == NULL)
+		errx(1, "no memory for a class");
+	bzero(p, (NCHARS + 1) * sizeof(int));
+	for (cnt = 0, func = cp->func; cnt < NCHARS; ++cnt)
+		if ((func)(cnt))
+			*p++ = cnt;
+	*p = OOBCH;
+
+	s->cnt = 0;
+	s->state = SET;
+	s->set = cp->set;
+}
+d184 12
+a195 5
+static int
+c_class(a, b)
+	const void *a, *b;
+{
+	return (strcmp(((CLASS *)a)->name, ((CLASS *)b)->name));
+d203 1
+a203 2
+genequiv(s)
+	STR *s;
+d205 1
+a205 1
+	if (*s->str == '\\') {
+d207 1
+a207 1
+		if (*s->str != '=')
+d211 1
+a211 1
+		if (s->str[1] != '=')
+d220 2
+a221 3
+static int
+genrange(s)
+	STR *s;
+d223 1
+a223 2
+	int stopval;
+	char *savestart;
+d226 2
+a227 2
+	stopval = *++s->str == '\\' ? backslash(s) : *s->str++;
+	if (stopval < (u_char)s->lastch) {
+d229 1
+a229 1
+		return (0);
+d234 1
+a234 1
+	return (1);
+d238 1
+a238 2
+genseq(s)
+	STR *s;
+d240 1
+a240 1
+	char *ep;
+d245 1
+a245 1
+	if (*s->str == '\\')
+d249 1
+a249 1
+	if (*s->str != '*')
+d253 1
+a253 1
+	case '\\':
+d256 1
+a256 1
+	case ']':
+d261 3
+a263 3
+		if (isdigit(*s->str)) {
+			s->cnt = strtol(s->str, &ep, 0);
+			if (*ep == ']') {
+d279 2
+a280 3
+static int
+backslash(s)
+	STR *s;
+d282 1
+a282 1
+	int ch, cnt, val;
+d286 1
+a286 1
+		if (!isascii(ch) || !isdigit(ch))
+d288 1
+a288 1
+		val = val * 8 + ch - '0';
+d296 1
+a296 1
+	if (ch != '\0')
+d299 15
+a313 15
+		case 'a':			/* escape characters */
+			return ('\7');
+		case 'b':
+			return ('\b');
+		case 'f':
+			return ('\f');
+		case 'n':
+			return ('\n');
+		case 'r':
+			return ('\r');
+		case 't':
+			return ('\t');
+		case 'v':
+			return ('\13');
+		case '\0':			/*  \" -> \ */
+d315 1
+a315 1
+			return ('\\');
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: str.c,v 1.9 2004/09/15 22:12:19 deraadt Exp $	*/
+d37 1
+a37 1
+static char rcsid[] = "$OpenBSD: str.c,v 1.9 2004/09/15 22:12:19 deraadt Exp $";
+d127 1
+a127 1
+		if ((p = strstr((char *)s->str + 2, ":]")) == NULL)
+d132 1
+a132 1
+		s->str = (unsigned char *)p + 2;
+d135 1
+a135 1
+		if ((p = strstr((char *)s->str + 2, "=]")) == NULL)
+d141 1
+a141 1
+		if ((p = strpbrk((char *)s->str + 2, "*]")) == NULL)
+d181 1
+a181 1
+	tmp.name = (char *)s->str;
+d234 1
+a234 1
+	unsigned char *savestart;
+d274 1
+a274 1
+			s->cnt = strtol((char *)s->str, &ep, 0);
+d276 1
+a276 1
+				s->str = (unsigned char *)ep + 1;
+@
+

@@ -1,0 +1,430 @@
+head	1.4;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2016.03.26.17.29.24;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10056F6C535787D61F0;
+
+1.3
+date	2006.06.15.01.43.17;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004490BB236D1F4B88;
+
+1.2
+date	2005.12.14.23.28.39;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043A0AA0E5A220A51;
+
+1.1
+date	2005.05.14.23.21.05;	author tg;	state Exp;
+branches
+	1.1.201.1;
+next	;
+commitid	1e94428687d39445;
+
+1.1.201.1
+date	2005.05.14.23.21.05;	author tg;	state Exp;
+branches;
+next	;
+commitid	1e94428687d39445;
+
+
+desc
+@@
+
+
+1.4
+log
+@complete overhaul of djbdns port:
+
+• merge t4/t6 flavours back into one binary
+  ‣ greatly simplify IPv6 handling, too; drop code for v6-less OSes
+• merge v4/v6 dnsroots back into one, update all of them
+• improve documentation a bit
+• apply two patches from http://www.your.org/dnscache/ (SECURITY):
+  ‣ merge identical outgoing requests
+  ‣ allow caching SOA responses
+• update to Fefe’s djbdns-1.05-test27.diff.bz2
+  ‣ fixes recursively resolving hosts behind IPv6-only nameservers;
+    spotted by Natureshadow (for Teckids’ Lunatics network) and via
+    http://serverfault.com/q/627912/189656 (which I’ll answer RSN)
+  ⚠ fix with “one second” CDB validity patch
+  ⚠ adapt for OpenBSD-style IPv6
+• drop ip6.int. reverse v6 DNS for good
+• improve dealing with mixing v4/v6 transport
+  ⇒ TODO add IP4SEND/IP6SEND support; currently; if IPSEND is v6
+    but we send to a v4 server, we use INADDR_ANY for outgoing,
+    as automatic fallback address
+@
+text
+@$MirOS: ports/net/djbdns/patches/patch-src_server_c,v 1.3 2006/06/15 01:43:17 tg Exp $
+--- src/server.c.orig	Sun Feb 11 21:11:23 2001
++++ src/server.c	Sat Mar 26 16:17:11 2016
+@@@@ -4,6 +4,7 @@@@
+ #include "buffer.h"
+ #include "strerr.h"
+ #include "ip4.h"
++#include "ip6.h"
+ #include "uint16.h"
+ #include "ndelay.h"
+ #include "socket.h"
+@@@@ -11,13 +12,17 @@@@
+ #include "qlog.h"
+ #include "response.h"
+ #include "dns.h"
++#include "alloc.h"
++#include "iopause.h"
++#include "str.h"
++#include <stdint.h>
+ 
+ extern char *fatal;
+ extern char *starting;
+ extern int respond(char *,char *,char *);
+ extern void initialize(void);
+ 
+-static char ip[4];
++static char ip[16];
+ static uint16 port;
+ 
+ static char buf[513];
+@@@@ -25,6 +30,11 @@@@ static int len;
+ 
+ static char *q;
+ 
++void nomem()
++{
++  strerr_die2x(111,fatal,"out of memory");
++}
++
+ static int doit(void)
+ {
+   unsigned int pos;
+@@@@ -82,35 +92,99 @@@@ static int doit(void)
+ int main()
+ {
+   char *x;
+-  int udp53;
++  int *udp53;
++  uint8_t *udp53t;
++  unsigned int off;
++  unsigned int cnt;
++  iopause_fd *iop;
+ 
+   x = env_get("IP");
+   if (!x)
+     strerr_die2x(111,fatal,"$IP not set");
+-  if (!ip4_scan(x,ip))
+-    strerr_die3x(111,fatal,"unable to parse IP address ",x);
+ 
+-  udp53 = socket_udp();
+-  if (udp53 == -1)
+-    strerr_die2sys(111,fatal,"unable to create UDP socket: ");
+-  if (socket_bind4_reuse(udp53,ip,53) == -1)
+-    strerr_die2sys(111,fatal,"unable to bind UDP socket: ");
++  off=cnt=0;
++  while (x[off]) {
++    unsigned int l;
++    char dummy[16];
++    l=ip6_scan(x+off,dummy);
++    if (!l)
++      strerr_die3x(111,fatal,"unable to parse IP address ",x+off);
++    cnt++;
++    if (!x[off+l]) break;
++    if (x[off+l]=='%')
++      while (x[off+l] && x[off+l]!=',') ++l;
++    if (x[off+l]!=',')
++      strerr_die3x(111,fatal,"unable to parse IP address ",x+off);
++    off+=l+1;
++  }
++  udp53=(int *) alloc(sizeof(int) *cnt);
++  if (!udp53) nomem();
++  udp53t=(uint8_t *) alloc(sizeof(uint8_t) *cnt);
++  if (!udp53t) nomem();
++  iop=(iopause_fd *) alloc(sizeof(*iop) * cnt);
++  if (!iop) nomem();
+ 
++  off=cnt=0;
++  while (x[off]) {
++    unsigned int l;
++    uint32 ifid=0;
++    l=ip6_scan(x+off,ip);
++    udp53t[cnt] = ip6_isv4mapped(ip);
++    udp53[cnt] = ip6_isv4mapped(ip) ? socket_udp() : socket_udp6();
++    if (udp53[cnt] == -1)
++      strerr_die2sys(111,fatal,"unable to create UDP socket: ");
++    if (x[off+l]=='%') {
++      char* interface=x+off+l+1;
++      int Len=str_chr(interface,',');
++      if (interface[Len]) {
++	interface[Len]=0;
++	ifid=socket_getifidx(interface);
++	interface[Len]=',';
++      } else
++	ifid=socket_getifidx(interface);
++      l+=Len;
++    }
++    if ((udp53t[cnt] ? socket_bind4_reuse(udp53[cnt],ip+12,53) :
++     socket_bind6_reuse(udp53[cnt],ip,53,ifid)) == -1)
++      strerr_die2sys(111,fatal,"unable to bind UDP socket: ");
++    ndelay_off(udp53[cnt]);
++    socket_tryreservein(udp53[cnt],65536);
++    iop[cnt].fd=udp53[cnt];
++    iop[cnt].events=IOPAUSE_READ;
++    cnt++;
++    if (!x[off+l]) break;
++    off+=l+1;
++  }
++
+   droproot(fatal);
+ 
+   initialize();
+   
+-  ndelay_off(udp53);
+-  socket_tryreservein(udp53,65536);
+-
+   buffer_putsflush(buffer_2,starting);
+ 
+   for (;;) {
+-    len = socket_recv4(udp53,buf,sizeof buf,ip,&port);
+-    if (len < 0) continue;
+-    if (!doit()) continue;
+-    if (response_len > 512) response_tc();
+-    socket_send4(udp53,response,response_len,ip,port);
+-    /* may block for buffer space; if it fails, too bad */
++    struct taia stamp;
++    struct taia deadline;
++    unsigned int i;
++    uint32 ifid;
++    taia_now(&stamp);
++    taia_uint(&deadline,300);
++    taia_add(&deadline,&deadline,&stamp);
++    iopause(iop,cnt,&deadline,&stamp);
++    for (i=0;i<cnt;i++)
++      if (iop[i].revents) {
++	if (udp53t[i]) {
++	  byte_copy(ip,12,(char *)V4mappedprefix);
++	  len = socket_recv4(udp53[i],buf,sizeof buf,ip+12,&port);
++	} else len = socket_recv6(udp53[i],buf,sizeof buf,ip,&port,&ifid);
++	if (len < 0) continue;
++	if (!doit()) continue;
++	if (response_len > 512) response_tc();
++	if (udp53t[i])
++	  socket_send4(udp53[i],response,response_len,ip+12,port);
++	else
++	  socket_send6(udp53[i],response,response_len,ip,port,ifid);
++	/* may block for buffer space; if it fails, too bad */
++      }
+   }
+ }
+@
+
+
+1.3
+log
+@* enable tinydnst6 to listen on IPv4 addresses too
+  (do I have all now? if so, can I nuke the v4 transport versions?)
+* fix a buglet in my :: address fix
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_server_c,v 1.2 2005/12/14 23:28:39 tg Exp $
+d3 2
+a4 2
++++ src/server.c	Thu Jun 15 01:16:06 2006
+@@@@ -4,6 +4,9 @@@@
+a7 1
++#ifdef DJB_V6ONLY
+a8 1
++#endif /* DJB_V6ONLY */
+d12 1
+a12 1
+@@@@ -11,13 +14,23 @@@@
+a15 1
++#ifdef DJB_V6ONLY
+d19 1
+a19 2
++#include <stdbool.h>
++#endif /* DJB_V6ONLY */
+d26 1
+a26 3
++#ifndef DJB_V6ONLY
+ static char ip[4];
++#else
+a27 1
++#endif /* DJB_V6ONLY */
+d31 1
+a31 1
+@@@@ -25,6 +38,13 @@@@ static int len;
+a34 1
++#ifdef DJB_V6ONLY
+a39 1
++#endif /* DJB_V6ONLY */
+d43 1
+a43 1
+@@@@ -82,11 +102,20 @@@@ static int doit(void)
+d47 1
+a47 3
++#ifndef DJB_V6ONLY
+   int udp53;
++#else
+d49 1
+a49 1
++  bool *udp53t;
+a52 1
++#endif /* DJB_V6ONLY */
+d57 2
+a58 7
++#ifndef DJB_V6ONLY
+   if (!ip4_scan(x,ip))
+     strerr_die3x(111,fatal,"unable to parse IP address ",x);
+ 
+@@@@ -96,21 +125,102 @@@@ int main()
+   if (socket_bind4_reuse(udp53,ip,53) == -1)
+     strerr_die2sys(111,fatal,"unable to bind UDP socket: ");
+d60 5
+a64 4
++  ndelay_off(udp53);
++  socket_tryreservein(udp53,65536);
++
++#else
+d82 1
+a82 1
++  udp53t=(bool *) alloc(sizeof(bool) *cnt);
+d86 1
+a86 1
++
+d118 1
+a118 1
++#endif /* DJB_V6ONLY */
+d129 6
+a134 8
++#ifndef DJB_V6ONLY
+     len = socket_recv4(udp53,buf,sizeof buf,ip,&port);
+     if (len < 0) continue;
+     if (!doit()) continue;
+     if (response_len > 512) response_tc();
+     socket_send4(udp53,response,response_len,ip,port);
+     /* may block for buffer space; if it fails, too bad */
++#else
+a157 1
++#endif /* DJB_V6ONLY */
+@
+
+
+1.2
+log
+@* update to fefe's djbdns-1.05-test23.diff
+  with djbdns-1.05-ixfr.diff
+* slightly change naming of v6-transport binaries
+* consolidate all added source files in a central directory
+  so it can be reused by the v6-transport stuff
+* integrate the v6 transport binaries
+* fix spacing
+* sync descriptive texts with reality
+* sync European ORSN (v4 and v6) to their root.hint
+* sync OpenNIC too
+* Open-RSC seeminly ceased to exist recently
+* Apply compiler-temporary-filename.patch
+  from http://homepages.tesco.net/~J.deBoynePollard/FGA/djbdns-problems.html
+* apply dnscache-cname-handling.patch
+* apply dnscache-strict-forwardonly.patch w/ IPv6 tweak
+* apply dnscacheip-space-separator.patch
+* apply tinydns-alias-chain-truncation.patch
+* apply tinydns-data-semantic-error.patch
+  appropriately for 6 and 3, too
+* fix shell code and path to includes
+* fix relative paths
+* fix names of library and programmes; NOMAN=yes here (t6)
+* Add support for the IPv6 transport module to communicate,
+  as a client, with IPv4 transport name servers as well.
+
+  WFM
+* build it with -Wall -Werror
+* honour ${SYSCONFDIR} throughout the port
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_server_c,v 1.1.201.1 2005/05/14 23:21:05 tg Exp $
+d3 1
+a3 1
++++ src/server.c	Tue Dec 13 21:44:42 2005
+d14 1
+a14 1
+@@@@ -11,13 +14,22 @@@@
+d22 1
+d38 1
+a38 1
+@@@@ -25,6 +37,13 @@@@ static int len;
+d52 1
+a52 1
+@@@@ -82,35 +101,118 @@@@ static int doit(void)
+d60 1
+d72 8
+d98 2
+d102 1
+a102 10
++#endif /* DJB_V6ONLY */
+ 
++#ifndef DJB_V6ONLY
+   udp53 = socket_udp();
+   if (udp53 == -1)
+     strerr_die2sys(111,fatal,"unable to create UDP socket: ");
+   if (socket_bind4_reuse(udp53,ip,53) == -1)
+     strerr_die2sys(111,fatal,"unable to bind UDP socket: ");
+ 
++#else
+d108 2
+a109 1
++    udp53[cnt] = socket_udp6();
+d123 2
+a124 1
++    if (socket_bind6_reuse(udp53[cnt],ip,53,ifid) == -1)
+a137 1
++#ifndef DJB_V6ONLY
+d139 3
+a141 4
+   ndelay_off(udp53);
+   socket_tryreservein(udp53,65536);
++#endif /* DJB_V6ONLY */
+ 
+d163 4
+a166 1
++	len = socket_recv6(udp53[i],buf,sizeof buf,ip,&port,&ifid);
+d170 4
+a173 1
++	socket_send6(udp53[i],response,response_len,ip,port,ifid);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 1
+a3 1
++++ src/server.c	Sat May 14 22:27:18 2005
+@
+
+
+1.1.201.1
+log
+@New djbdns port, #ifdef'd, "original" and "no_ipv6" flavours removed
+"no_ipv4" non-functional at the moment, will follow later after
+redesign using crunchgen(1) and crunchide(1)
+@
+text
+@@

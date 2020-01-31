@@ -1,0 +1,407 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	OPENBSD_4_4:1.1.1.2
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200606302200:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200601311430:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2005.02.05.17.24.02;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.02;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.06.30.22.47.00;	author tg;	state Exp;
+branches;
+next	;
+commitid	10044A5A6F7276AA324;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#!./perl
+#
+# check UNIVERSAL
+#
+
+BEGIN {
+    chdir 't' if -d 't';
+    @@INC = '../lib';
+    $| = 1;
+}
+
+print "1..100\n";
+
+$a = {};
+bless $a, "Bob";
+print "not " unless $a->isa("Bob");
+print "ok 1\n";
+
+package Human;
+sub eat {}
+
+package Female;
+@@ISA=qw(Human);
+
+package Alice;
+@@ISA=qw(Bob Female);
+sub sing;
+sub drink { return "drinking " . $_[1]  }
+sub new { bless {} }
+
+$Alice::VERSION = 2.718;
+
+{
+    package Cedric;
+    our @@ISA;
+    use base qw(Human);
+}
+
+{
+    package Programmer;
+    our $VERSION = 1.667;
+
+    sub write_perl { 1 }
+}
+
+package main;
+
+{ my $i = 2;
+  sub test {
+      print "not " unless $_[0];
+      print "ok ", $i++;
+      print " # at ", (caller)[1], ", line ", (caller)[2] unless $_[0];
+      print "\n";
+  }
+}
+
+$a = new Alice;
+
+test $a->isa("Alice");
+test $a->isa("main::Alice");    # check that alternate class names work
+
+test(("main::Alice"->new)->isa("Alice"));
+
+test $a->isa("Bob");
+test $a->isa("main::Bob");
+
+test $a->isa("Female");
+
+test $a->isa("Human");
+
+test ! $a->isa("Male");
+
+test ! $a->isa('Programmer');
+
+test $a->isa("HASH");
+
+test $a->can("eat");
+test ! $a->can("sleep");
+test my $ref = $a->can("drink");        # returns a coderef
+test $a->$ref("tea") eq "drinking tea"; # ... which works
+test $ref = $a->can("sing");
+eval { $a->$ref() };
+test $@@;                                # ... but not if no actual subroutine
+
+test (!Cedric->isa('Programmer'));
+
+test (Cedric->isa('Human'));
+
+push(@@Cedric::ISA,'Programmer');
+
+test (Cedric->isa('Programmer'));
+
+{
+    package Alice;
+    base::->import('Programmer');
+}
+
+test $a->isa('Programmer');
+test $a->isa("Female");
+
+@@Cedric::ISA = qw(Bob);
+
+test (!Cedric->isa('Programmer'));
+
+my $b = 'abc';
+my @@refs = qw(SCALAR SCALAR     LVALUE      GLOB ARRAY HASH CODE);
+my @@vals = (  \$b,   \3.14, \substr($b,1,1), \*b,  [],  {}, sub {} );
+for ($p=0; $p < @@refs; $p++) {
+    for ($q=0; $q < @@vals; $q++) {
+        test UNIVERSAL::isa($vals[$p], $refs[$q]) eq ($p==$q or $p+$q==1);
+    };
+};
+
+test ! UNIVERSAL::can(23, "can");
+
+test $a->can("VERSION");
+
+test $a->can("can");
+test ! $a->can("export_tags");	# a method in Exporter
+
+test (eval { $a->VERSION }) == 2.718;
+
+test ! (eval { $a->VERSION(2.719) }) &&
+         $@@ =~ /^Alice version 2.71(?:9|8999\d+) required--this is only version 2.718 at /;
+
+test (eval { $a->VERSION(2.718) }) && ! $@@;
+
+my $subs = join ' ', sort grep { defined &{"UNIVERSAL::$_"} } keys %UNIVERSAL::;
+## The test for import here is *not* because we want to ensure that UNIVERSAL
+## can always import; it is an historical accident that UNIVERSAL can import.
+if ('a' lt 'A') {
+    test $subs eq "can import isa VERSION";
+} else {
+    test $subs eq "VERSION can import isa";
+}
+
+test $a->isa("UNIVERSAL");
+
+test ! UNIVERSAL::isa([], "UNIVERSAL");
+
+test ! UNIVERSAL::can({}, "can");
+
+test UNIVERSAL::isa(Alice => "UNIVERSAL");
+
+test UNIVERSAL::can(Alice => "can") == \&UNIVERSAL::can;
+
+# now use UNIVERSAL.pm and see what changes
+eval "use UNIVERSAL";
+
+test $a->isa("UNIVERSAL");
+
+my $sub2 = join ' ', sort grep { defined &{"UNIVERSAL::$_"} } keys %UNIVERSAL::;
+# XXX import being here is really a bug
+if ('a' lt 'A') {
+    test $sub2 eq "can import isa VERSION";
+} else {
+    test $sub2 eq "VERSION can import isa";
+}
+
+eval 'sub UNIVERSAL::sleep {}';
+test $a->can("sleep");
+
+test ! UNIVERSAL::can($b, "can");
+
+test ! $a->can("export_tags");	# a method in Exporter
+
+test ! UNIVERSAL::isa("\xff\xff\xff\0", 'HASH');
+
+{
+    package Pickup;
+    use UNIVERSAL qw( isa can VERSION );
+
+    main::test isa "Pickup", UNIVERSAL;
+    main::test can( "Pickup", "can" ) == \&UNIVERSAL::can;
+    main::test VERSION "UNIVERSAL" ;
+}
+
+{
+    # test isa() and can() on magic variables
+    "Human" =~ /(.*)/;
+    test $1->isa("Human");
+    test $1->can("eat");
+    package HumanTie;
+    sub TIESCALAR { bless {} }
+    sub FETCH { "Human" }
+    tie my($x), "HumanTie";
+    ::test $x->isa("Human");
+    ::test $x->can("eat");
+}
+
+# bugid 3284
+# a second call to isa('UNIVERSAL') when @@ISA is null failed due to caching
+
+@@X::ISA=();
+my $x = {}; bless $x, 'X';
+test $x->isa('UNIVERSAL');
+test $x->isa('UNIVERSAL');
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import Perl 5.8.8 from OpenLSD
+@
+text
+@a9 1
+    require "./test.pl";
+d12 1
+a12 1
+print "1..102\n";
+d16 2
+a17 1
+ok $a->isa("Bob");
+d48 8
+a55 1
+
+d59 2
+a60 2
+ok $a->isa("Alice");
+ok $a->isa("main::Alice");    # check that alternate class names work
+d62 1
+a62 1
+ok(("main::Alice"->new)->isa("Alice"));
+d64 2
+a65 2
+ok $a->isa("Bob");
+ok $a->isa("main::Bob");
+d67 1
+a67 1
+ok $a->isa("Female");
+d69 1
+a69 1
+ok $a->isa("Human");
+d71 1
+a71 1
+ok ! $a->isa("Male");
+d73 1
+a73 1
+ok ! $a->isa('Programmer');
+d75 1
+a75 1
+ok $a->isa("HASH");
+d77 5
+a81 5
+ok $a->can("eat");
+ok ! $a->can("sleep");
+ok my $ref = $a->can("drink");        # returns a coderef
+is $a->$ref("tea"), "drinking tea"; # ... which works
+ok $ref = $a->can("sing");
+d83 1
+a83 1
+ok $@@;                                # ... but not if no actual subroutine
+d85 1
+a85 1
+ok (!Cedric->isa('Programmer'));
+d87 1
+a87 1
+ok (Cedric->isa('Human'));
+d91 1
+a91 1
+ok (Cedric->isa('Programmer'));
+d98 2
+a99 2
+ok $a->isa('Programmer');
+ok $a->isa("Female");
+d103 1
+a103 1
+ok (!Cedric->isa('Programmer'));
+d110 1
+a110 1
+        is UNIVERSAL::isa($vals[$p], $refs[$q]), ($p==$q or $p+$q==1);
+d114 1
+a114 1
+ok ! UNIVERSAL::can(23, "can");
+d116 1
+a116 1
+ok $a->can("VERSION");
+d118 2
+a119 2
+ok $a->can("can");
+ok ! $a->can("export_tags");	# a method in Exporter
+d121 1
+a121 1
+cmp_ok eval { $a->VERSION }, '==', 2.718;
+d123 2
+a124 2
+ok ! (eval { $a->VERSION(2.719) });
+like $@@, qr/^Alice version 2.71(?:9|8999\d+) required--this is only version 2.718 at /;
+d126 1
+a126 2
+ok (eval { $a->VERSION(2.718) });
+is $@@, '';
+d132 1
+a132 1
+    is $subs, "can import isa VERSION";
+d134 1
+a134 1
+    is $subs, "VERSION can import isa";
+d137 1
+a137 1
+ok $a->isa("UNIVERSAL");
+d139 1
+a139 1
+ok ! UNIVERSAL::isa([], "UNIVERSAL");
+d141 1
+a141 1
+ok ! UNIVERSAL::can({}, "can");
+d143 1
+a143 1
+ok UNIVERSAL::isa(Alice => "UNIVERSAL");
+d145 1
+a145 1
+cmp_ok UNIVERSAL::can(Alice => "can"), '==', \&UNIVERSAL::can;
+d150 1
+a150 1
+ok $a->isa("UNIVERSAL");
+d155 1
+a155 1
+    is $sub2, "can import isa VERSION";
+d157 1
+a157 1
+    is $sub2, "VERSION can import isa";
+d161 1
+a161 1
+ok $a->can("sleep");
+d163 1
+a163 1
+ok ! UNIVERSAL::can($b, "can");
+d165 1
+a165 1
+ok ! $a->can("export_tags");	# a method in Exporter
+d167 1
+a167 1
+ok ! UNIVERSAL::isa("\xff\xff\xff\0", 'HASH');
+d173 3
+a175 3
+    ::ok isa "Pickup", UNIVERSAL;
+    ::cmp_ok can( "Pickup", "can" ), '==', \&UNIVERSAL::can;
+    ::ok VERSION "UNIVERSAL" ;
+d181 2
+a182 2
+    ok $1->isa("Human");
+    ok $1->can("eat");
+d187 2
+a188 2
+    ::ok $x->isa("Human");
+    ::ok $x->can("eat");
+d196 2
+a197 2
+ok $x->isa('UNIVERSAL');
+ok $x->isa('UNIVERSAL');
+@
+

@@ -1,0 +1,137 @@
+head	1.1;
+branch	1.1.101;
+access;
+symbols
+	MIRBSD_10_BASE:1.1.101.1
+	MIRBSD_9_BASE:1.1.101.1
+	gcc-3_4_6:1.1.101.1
+	MIRBSD_8:1.1.101.1.0.2
+	MIRBSD_8_BASE:1.1.101.1
+	gcc-3_4-20051206:1.1.101.1
+	gcc-3_4-20051115:1.1.101.1
+	gcc-3_4-20050823:1.1.101.1
+	FSF:1.1.101;
+locks; strict;
+comment	@// @;
+
+
+1.1
+date	2005.03.21.12.07.39;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.03.21.12.07.39;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@// natFinalizerThread.cc - Implementation of FinalizerThread native methods.
+
+/* Copyright (C) 2001, 2004  Free Software Foundation
+
+   This file is part of libgcj.
+
+This software is copyrighted work licensed under the terms of the
+Libgcj License.  Please consult the file "LIBGCJ_LICENSE" for
+details.  */
+
+#include <config.h>
+
+#include <gcj/cni.h>
+#include <jvm.h>
+
+#include <gnu/gcj/runtime/FinalizerThread.h>
+
+#include <java-threads.h>
+
+static _Jv_Mutex_t mutex;
+static _Jv_ConditionVariable_t condition;
+
+// Initialize lock & condition variable.
+void
+gnu::gcj::runtime::FinalizerThread::init ()
+{
+  _Jv_MutexInit (&mutex);
+  _Jv_CondInit (&condition);
+}
+
+// This is called by the GC when a finalizer is ready to be
+// run.  It sets a flag and wakes up the finalizer thread. Note
+// that this MUST NOT aquire any Java lock, as this could result in 
+// the hash synchronization code being re-entered: the synchronization
+// code itself might need to allocate. See PR 16478.
+void
+gnu::gcj::runtime::FinalizerThread::finalizerReady ()
+{
+#ifdef __JV_NO_THREADS__
+  _Jv_RunFinalizers ();
+#else
+  _Jv_MutexLock (&mutex);
+  finalizer_ready = true;
+  _Jv_CondNotify (&condition, &mutex);
+  _Jv_MutexUnlock (&mutex);
+#endif
+}
+
+// Main loop for the finalizer thread. 
+void
+gnu::gcj::runtime::FinalizerThread::run ()
+{
+  while (true)
+    {
+      _Jv_MutexLock (&mutex);
+      if (! finalizer_ready)
+	_Jv_CondWait (&condition, &mutex, 0, 0);
+      finalizer_ready = false;
+      _Jv_MutexUnlock (&mutex);
+      _Jv_RunFinalizers ();
+    }
+}
+@
+
+
+1.1.101.1
+log
+@Import the GNU Compiler Collection 3.4-stable
+from gcc-3.4-20050318.tar.bz2 after having
+* all top-level non-directories (files)
+  - except config.if
+and these directories completely:
+* INSTALL
+* boehm-gc/Mac_files
+* boehm-gc/cord
+* boehm-gc/doc
+* boehm-gc/tests
+* contrib
+  - except texi2pod.pl
+* gcc/f
+* gcc/po
+* gcc/testsuite
+* gcc/treelang
+* include
+* intl
+* libf2c
+* libffi/testsuite
+* libiberty
+* libjava/testsuite
+* libstdc++-v3/docs
+* libstdc++-v3/po
+* libstdc++-v3/scripts
+* libstdc++-v3/testsuite
+* maintainer-scripts
+* zlib
+removed before importing.
+@
+text
+@@

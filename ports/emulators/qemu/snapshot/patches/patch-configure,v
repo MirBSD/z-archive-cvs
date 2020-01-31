@@ -1,0 +1,304 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2009.10.17.21.43.54;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004ADA3A7B39AC3403;
+
+1.1
+date	2008.05.07.15.53.09;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004821D01929BE53C2;
+
+
+desc
+@@
+
+
+1.2
+log
+@new qemu, slight help from pkgsrc® here (website only shows RC…)
+
+• sparc: regression against 0.10.1/linux – fdc probing results
+  in a timeout and then an unexpected interrupt or something
+  (probably skippable via UKC)
+• i386: findcpuspeed division by zero, should be fixable
+@
+text
+@$MirOS: ports/emulators/qemu/snapshot/patches/patch-configure,v 1.1 2008/05/07 15:53:09 tg Exp $
+$OpenBSD: patch-configure,v 1.10 2008/04/28 22:52:38 todd Exp $
+--- configure.orig	Wed Sep 23 19:01:07 2009
++++ configure	Sat Oct 17 21:21:23 2009
+@@@@ -25,11 +25,11 @@@@ prefix=""
+ interp_prefix="/usr/gnemul/qemu-%M"
+ static="no"
+ cross_prefix=""
+-cc="gcc"
++cc="${CC:-cc}"
+ audio_drv_list=""
+ audio_card_list="ac97 es1370 sb16"
+ audio_possible_cards="ac97 es1370 sb16 cs4231a adlib gus"
+-host_cc="gcc"
++host_cc="${CC:-cc}"
+ ar="ar"
+ make="make"
+ install="install"
+@@@@ -155,6 +155,9 @@@@ case "$cpu" in
+   sparc64)
+     cpu="sparc64"
+   ;;
++  armish|zaurus)
++    cpu="arm"
++  ;;
+   *)
+     cpu="unknown"
+   ;;
+@@@@ -268,6 +271,10 @@@@ openbsd="yes"
+ audio_drv_list="oss"
+ audio_possible_drivers="oss sdl esd"
+ oss_lib="-lossaudio"
++if [ "$cpu" = "i386" ] ; then
++    kqemu="yes"
++fi
++aio="no"
+ ;;
+ Darwin)
+ bsd="yes"
+@@@@ -511,7 +518,7 @@@@ for opt do
+ done
+ 
+ # default flags for all hosts
+-CFLAGS="$CFLAGS -g -fno-strict-aliasing"
++CFLAGS="$CPPFLAGS $CFLAGS -g -fno-strict-aliasing"
+ if test "$debug" = "no" ; then
+   CFLAGS="$CFLAGS -O2"
+ fi
+@@@@ -877,7 +884,7 @@@@ cat > $TMPC << EOF
+ #undef main /* We don't want SDL to override our main() */
+ int main( void ) { return SDL_Init (SDL_INIT_VIDEO); }
+ EOF
+-    if $cc $ARCH_CFLAGS -o $TMPE ${OS_CFLAGS} `$sdl_config --cflags 2> /dev/null` $TMPC `$sdl_config --libs 2> /dev/null` > $TMPSDLLOG 2>&1 ; then
++    if $cc $ARCH_CFLAGS -o $TMPE ${CFLAGS} ${OS_CFLAGS} `$sdl_config --cflags 2> /dev/null` $TMPC `$sdl_config --libs 2> /dev/null` > $TMPSDLLOG 2>&1 ; then
+         _sdlversion=`$sdl_config --version | sed 's/[^0-9]//g'`
+         if test "$_sdlversion" -lt 121 ; then
+             sdl_too_old=yes
+@@@@ -1384,7 +1391,7 @@@@ else
+   if test -z "$prefix" ; then
+       prefix="/usr/local"
+   fi
+-  mansuffix="/share/man"
++  mansuffix="/man"
+   datasuffix="/share/qemu"
+   docsuffix="/share/doc/qemu"
+   binsuffix="/bin"
+@@@@ -1417,9 +1424,7 @@@@ if test "$darwin" = "yes" ; then
+     echo "Cocoa support     $cocoa"
+ fi
+ echo "SDL support       $sdl"
+-if test "$sdl" != "no" ; then
+-    echo "SDL static link   $sdl_static"
+-fi
++echo "SDL static link   $sdl_static"
+ echo "curses support    $curses"
+ echo "curl support      $curl"
+ echo "mingw32 support   $mingw32"
+@@@@ -1553,7 +1558,9 @@@@ EOF
+ fi
+ 
+ if [ "$openbsd" = "yes" ] ; then
++  echo "#ifndef ENOTSUP" >>$config_host_h
+   echo "#define ENOTSUP 4096" >> $config_host_h
++  echo "#endif" >>$config_host_h
+ fi
+ 
+ if test "$darwin" = "yes" ; then
+@@@@ -1802,6 +1809,8 @@@@ if test `expr "$target_list" : ".*softmm
+   tools="qemu-img\$(EXESUF) $tools"
+   if [ "$linux" = "yes" ] ; then
+       tools="qemu-nbd\$(EXESUF) qemu-io\$(EXESUF) $tools"
++  elif [ "$openbsd" = "yes" ] ; then
++      tools="qemu-nbd\$(EXESUF) $tools"
+   elif test "$mingw32" = "yes" ; then
+       tools="qemu-io\$(EXESUF) $tools"
+   fi
+@
+
+
+1.1
+log
+@add qemu-0.9.1 port snitched from openbsd, with most of our old patches
+applied, and fixed to build with -Werror as well
+
+pro:
+• can netboot openbsd 3.9-current/amd64
+• can _almost_ boot mirbsd #10/sparc (bsd.rd has issues with esp, bsd.net
+  has none, except I have no rootfs handy ATM)
+• can still boot MS-DOS
+• said to be able to use kqemu – untested
+
+con:
+• regression: can *NOT* boot mirbsd #10/i386 any more
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 3
+a5 3
+--- configure.orig	Sun Jan  6 19:38:19 2008
++++ configure	Wed May  7 14:11:31 2008
+@@@@ -21,10 +21,10 @@@@ prefix=""
+d11 3
+a13 2
+ gcc3_search="yes"
+ gcc3_list="gcc-3.4.6 gcc-3.4 gcc34 gcc-3.3.6 gcc-3.3 gcc33 gcc-3.2 gcc32"
+d19 3
+a21 12
+@@@@ -44,7 +44,7 @@@@ case "$cpu" in
+   alpha)
+     cpu="alpha"
+   ;;
+-  "Power Macintosh"|ppc|ppc64)
++  "Power Macintosh"|macppc|ppc|ppc64)
+     cpu="powerpc"
+   ;;
+   mips)
+@@@@ -74,6 +74,9 @@@@ case "$cpu" in
+   x86_64|amd64)
+     cpu="x86_64"
+d29 4
+a32 8
+@@@@ -136,13 +139,25 @@@@ if [ "$cpu" = "i386" -o "$cpu" = "x86_64
+     kqemu="yes"
+ fi
+ ;;
++MirBSD)
++bsd="yes"
++openbsd="yes"
++oss="yes"
+d36 1
+a36 12
++;;
+ NetBSD)
+ bsd="yes"
+ oss="yes"
+ ;;
+ OpenBSD)
+ bsd="yes"
++openbsd="yes"
+ oss="yes"
++if [ "$cpu" = "i386" -o "$cpu" = "x86_64" ] ; then
++    kqemu="yes"
++fi
+d40 2
+a41 2
+@@@@ -329,7 +344,7 @@@@ else
+ fi
+d44 6
+a49 6
+-CFLAGS="$CFLAGS -Wall -O2 -g -fno-strict-aliasing"
++CFLAGS="$CFLAGS -Wall -g -fno-strict-aliasing"
+ LDFLAGS="$LDFLAGS -g"
+ if test "$werror" = "yes" ; then
+ CFLAGS="$CFLAGS -Werror"
+@@@@ -600,7 +615,7 @@@@ cat > $TMPC << EOF
+d53 6
+a58 26
+-        if $cc -o $TMPE ${OS_CFLAGS} `$sdl_config --cflags 2> /dev/null` $TMPC `$sdl_config --libs 2> /dev/null` 2> /tmp/qemu-$$-sdl-config.log ; then
++        if $cc -o $TMPE ${CFLAGS} ${OS_CFLAGS} `$sdl_config --cflags 2> /dev/null` $TMPC `$sdl_config --libs 2> /dev/null` 2> /tmp/qemu-$$-sdl-config.log ; then
+             _sdlversion=`$sdl_config --version | sed 's/[^0-9]//g'`
+             if test "$_sdlversion" -lt 121 ; then
+                 sdl_too_old=yes
+@@@@ -616,7 +631,7 @@@@ EOF
+                 `$sdl_config --static-libs 2>/dev/null | grep \\\-laa > /dev/null` && aa="yes"
+                 sdl_static_libs=`$sdl_config --static-libs 2>/dev/null`
+                 if [ "$aa" = "yes" ] ; then
+-                    sdl_static_libs="$sdl_static_libs `aalib-config --static-libs`"
++                    sdl_static_libs="$sdl_static_libs `aalib-config --static-libs 2>/dev/null`"
+                 fi
+ 
+                 if $cc -o $TMPE ${OS_CFLAGS} `$sdl_config --cflags 2> /dev/null` $TMPC $sdl_static_libs 2> /dev/null; then
+@@@@ -624,6 +639,10 @@@@ EOF
+                 fi
+             fi # static link
+         fi # sdl compile test
++	ed -s /tmp/qemu-$$-sdl-config.log <<-'EOF'
++		,g/ misused,/d
++		wq
++	EOF
+     fi # cross compilation
+ else
+     # Make sure to disable cocoa if sdl was set
+@@@@ -680,7 +699,7 @@@@ else
+d67 1
+a67 1
+@@@@ -709,9 +728,7 @@@@ if test "$darwin" = "yes" ; then
+d75 2
+d78 1
+a78 27
+ echo "Adlib support     $adlib"
+ echo "CoreAudio support $coreaudio"
+@@@@ -772,6 +789,7 @@@@ echo "mandir=\${prefix}$mansuffix" >> $c
+ echo "datadir=\${prefix}$datasuffix" >> $config_mak
+ echo "docdir=\${prefix}$docsuffix" >> $config_mak
+ echo "#define CONFIG_QEMU_SHAREDIR \"$prefix$datasuffix\"" >> $config_h
++echo "#define CONFIG_NO_AIO 1" >> $config_h
+ echo "MAKE=$make" >> $config_mak
+ echo "INSTALL=$install" >> $config_mak
+ echo "CC=$cc" >> $config_mak
+@@@@ -793,6 +811,9 @@@@ if test "$cpu" = "i386" ; then
+ elif test "$cpu" = "x86_64" ; then
+   echo "ARCH=x86_64" >> $config_mak
+   echo "#define HOST_X86_64 1" >> $config_h
++elif test "$cpu" = "arm" ; then
++  echo "ARCH=arm" >> $config_mak
++  echo "#define HOST_ARM 1" >> $config_h
+ elif test "$cpu" = "armv4b" ; then
+   echo "ARCH=arm" >> $config_mak
+   echo "#define HOST_ARM 1" >> $config_h
+@@@@ -892,6 +913,9 @@@@ fi
+ if test "$oss" = "yes" ; then
+   echo "CONFIG_OSS=yes" >> $config_mak
+   echo "#define CONFIG_OSS 1" >> $config_h
++  if test "$openbsd"="yes" ; then
++     echo "CONFIG_OSS_LIBRARY=yes" >> $config_mak
++  fi
+d80 5
+a84 14
+ if test "$coreaudio" = "yes" ; then
+   echo "CONFIG_COREAUDIO=yes" >> $config_mak
+@@@@ -943,7 +967,7 @@@@ if test "$sdl1" = "yes" ; then
+     echo "SDL_LIBS=`$sdl_config --libs`" >> $config_mak
+   fi
+   if [ "${aa}" = "yes" ] ; then
+-    echo "SDL_CFLAGS=`$sdl_config --cflags` `aalib-config --cflags`" >> $config_mak
++    echo "SDL_CFLAGS=`$sdl_config --cflags` `aalib-config --cflags 2>/dev/null`" >> $config_mak
+   else
+     echo "SDL_CFLAGS=`$sdl_config --cflags`" >> $config_mak
+   fi
+@@@@ -952,6 +976,15 @@@@ if test "$cocoa" = "yes" ; then
+     echo "#define CONFIG_COCOA 1" >> $config_h
+     echo "CONFIG_COCOA=yes" >> $config_mak
+a85 9
++
++if [ "$openbsd" = "yes" ] ; then
++  echo "#ifndef ENOTSUP" >>$config_h
++  echo "#define ENOTSUP 4096" >> $config_h
++  echo "#endif" >>$config_h
++  echo "#define qemu_siginfo siginfo_t" >> $config_h
++else
++  echo "#define qemu_siginfo struct siginfo" >> $config_h
++fi     
+d87 10
+a96 2
+ # XXX: suppress that
+ if [ "$bsd" = "yes" ] ; then
+@
+

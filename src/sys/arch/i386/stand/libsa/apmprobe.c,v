@@ -1,0 +1,494 @@
+head	1.4;
+access;
+symbols
+	tg-use_ldscript:1.4.0.2
+	tg-beforemerge-ksrc10:1.1.1.2
+	cvs-200808011000:1.1.1.2
+	MIRBSD_10:1.3.0.2
+	MIRBSD_10_BASE:1.3
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2
+	cvs-200507032030:1.1.1.1
+	cvs-200505050030:1.1.1.1
+	cvs-200504302230:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2008.08.01.11.24.59;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004892F2924667C00D;
+
+1.3
+date	2006.08.19.14.20.29;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10044E71E3D359AC2FA;
+
+1.2
+date	2005.03.06.21.27.05;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.27.28;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.27.28;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2008.08.01.10.28.37;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004892E54805BE97AB;
+
+
+desc
+@@
+
+
+1.4
+log
+@merge and reduce diff to obsd
+XXX not yet tested
+@
+text
+@/*	$OpenBSD: apmprobe.c,v 1.15 2007/09/13 06:58:47 weingart Exp $	*/
+
+/*
+ * Copyright (c) 1997-2000 Michael Shalayeff
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR OR HIS RELATIVES BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF MIND, USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
+/*
+ * APM derived from: apm_init.S, LP (Laptop Package)
+ * wich contained this:
+ * Copyright (C) 1994 by HOSOKAWA, Tatsumi <hosokawa@@mt.cs.keio.ac.jp>
+ *
+ */
+/*
+ * If you want to know the specification of APM BIOS, see the following
+ * documentations,
+ *
+ * [1] Intel Corporation and Microsoft Corporation, "Advanced Power
+ *     Management, The Next Generation, Version 1.0", Feb.,1992.
+ *
+ * [2] Intel Corporation and Microsoft Corporation, "Advanced Power
+ *     Management (APM) BIOS Interface Specification Revision 1.1",
+ *     Sep.,1993, Intel Order Number: 241704-001, Microsoft Part
+ *     Number: 781-110-X01
+ *
+ * or contact
+ *
+ * APM Support Desk (Intel Corporation, US)
+ *   TEL: (800)628-8686
+ *   FAX: (916)356-6100.
+ */
+
+#include <sys/param.h>
+#include "libsa.h"
+#include <stand/boot/bootarg.h>
+
+#include <uvm/uvm_extern.h>
+
+#include <dev/isa/isareg.h>
+
+#include <machine/apmvar.h>
+#include <machine/biosvar.h>
+
+#define vm_page_size 4096
+
+#include "debug.h"
+
+extern int debug;
+
+static __inline u_int
+apm_check(void)
+{
+	register u_int detail;
+	register u_int8_t f;
+
+	__asm __volatile(DOINT(0x15) "\n\t"
+	    "setc %b1\n\t"
+	    "movzwl %%ax, %0\n\t"
+	    "shll $16, %%ecx\n\t"
+	    "orl %%ecx, %0"
+	    : "=a" (detail), "=b" (f)
+	    : "0" (APM_INSTCHECK), "1" (APM_DEV_APM_BIOS)
+	    : "%ecx", "cc");
+
+	if (f || BIOS_regs.biosr_bx != 0x504d /* "PM" */ ) {
+#ifdef DEBUG
+		if (debug)
+			printf("apm_check: %x, %x, %x\n",
+			    f, BIOS_regs.biosr_bx, detail);
+#endif
+		return 0;
+	} else
+		return detail;
+}
+
+static __inline int
+apm_disconnect(void)
+{
+	register u_int16_t rv;
+
+	__asm __volatile(DOINT(0x15) "\n\t"
+	    "setc %b0"
+	    : "=a" (rv)
+	    : "0" (APM_DISCONNECT), "b" (APM_DEV_APM_BIOS)
+	    : "%ecx", "%edx", "cc");
+
+	return ((rv & 0xff)? rv >> 8 : 0);
+}
+
+static __inline int
+apm_connect(bios_apminfo_t *ai)
+{
+	register u_int16_t f;
+
+	__asm __volatile (DOINT(0x15) "\n\t"
+	    "setc %b1\n\t"
+	    "movb %%ah, %h1\n\t"
+	    "movzwl %%ax, %%eax\n\tshll $4, %0\n\t"
+	    "movzwl %%cx, %%ecx\n\tshll $4, %2\n\t"
+	    "movzwl %%dx, %%edx\n\tshll $4, %3\n\t"
+	    : "=a" (ai->apm_code32_base),
+	      "=b" (f),
+	      "=c" (ai->apm_code16_base),
+	      "=d" (ai->apm_data_base)
+	    : "0" (APM_PROT32_CONNECT), "1" (APM_DEV_APM_BIOS)
+	    : "cc");
+
+	if (f & 0xff)
+		return (f >> 8);
+
+	ai->apm_entry      = BIOS_regs.biosr_bx;
+#if 0
+	ai->apm_code_len   = BIOS_regs.biosr_si & 0xffff;
+	ai->apm_code16_len = BIOS_regs.biosr_si & 0xffff;
+	ai->apm_data_len   = BIOS_regs.biosr_di & 0xffff;
+#else
+	ai->apm_code_len   = 0xffff - (ai->apm_code32_base & 0xffff);
+	ai->apm_code16_len = 0xffff - (ai->apm_code16_base & 0xffff);
+	ai->apm_data_len   = 0xffff - (ai->apm_data_base & 0xffff);
+#endif
+	if (ai->apm_data_base < BOOTARG_OFF)
+		ai->apm_data_len = NBPG - (ai->apm_data_base & PGOFSET) - 1;
+
+#ifdef DEBUG
+	if (debug)
+		printf("cs=%x:%x/%x:%x, ds=%x:%x\n",
+		    ai->apm_code32_base, ai->apm_code_len,
+		    ai->apm_code16_base, ai->apm_code16_len,
+		    ai->apm_data_base,   ai->apm_data_len);
+#endif
+	/* inform apm bios about our driver version */
+	__asm __volatile (DOINT(0x15) "\n\t"
+	    "setc %b1\n\t"
+	    "movb %%ah, %h1"
+	    : "=b" (f)
+	    : "a" (APM_DRIVER_VERSION),
+	      "0" (APM_DEV_APM_BIOS),
+	      "c" (APM_VERSION)
+	    : "cc");
+
+	return 0;
+}
+
+static bios_apminfo_t ai;
+
+void
+apmprobe(void)
+{
+	if ((ai.apm_detail = apm_check())) {
+
+		apm_disconnect();
+
+		if (apm_connect(&ai) != 0) {
+#ifdef DEBUG
+			printf("\napm: connect error\n");
+#endif
+			return;
+		}
+#ifdef DEBUG
+		if (debug)
+			printf("apm[%x cs=%x[%x]/%x[%x] ds=%x[%x] @@ %x]",
+			    ai.apm_detail,
+			    ai.apm_code32_base, ai.apm_code_len,
+			    ai.apm_code16_base, ai.apm_code16_len,
+			    ai.apm_data_base, ai.apm_data_len,
+			    ai.apm_entry);
+		else
+			printf(" apm");
+#else
+		printf(" apm");
+#endif
+		addbootarg(BOOTARG_APMINFO, sizeof(ai), &ai);
+	}
+}
+
+void
+apmfixmem(void)
+{
+#ifdef DEBUG
+	printf("apmremove (%d)", ai.apm_detail);
+#endif
+	if (ai.apm_detail)
+		mem_delete(trunc_page(ai.apm_data_base),
+		    round_page(ai.apm_data_base + ai.apm_data_len));
+}
+@
+
+
+1.3
+log
+@attempt to shrink fdboot even more
+@
+text
+@d1 1
+a1 2
+/**	$MirOS: src/sys/arch/i386/stand/libsa/apmprobe.c,v 1.2 2005/03/06 21:27:05 tg Exp $	*/
+/*	$OpenBSD: apmprobe.c,v 1.13 2004/03/11 17:41:23 tom Exp $	*/
+d57 2
+d64 2
+a69 2
+static int apm_is_connected;
+
+d88 1
+a88 1
+			printf("apm_check: %X, %X, %X\n",
+a106 1
+	if (!(rv & 0xff)) apm_is_connected = 0;
+d146 1
+a146 1
+		printf("cs=%X:%X/%X:%X, ds=%X:%X\n",
+a150 1
+	apm_is_connected = 2;
+a163 40
+static __inline int
+apm_driver_version(int v)
+{
+	register u_int16_t rv;
+	__asm __volatile(DOINT(0x15) "\n\t"
+			 "setc %b0"
+			 : "=a" (rv)
+			 : "0" (APM_DRIVER_VERSION), "b" (APM_DEV_APM_BIOS), "c" (v)
+			 : "%edx", "cc");
+	return (rv & 0xff)? rv >> 8 : 0;
+}
+
+static __inline int
+apm_connect_real(bios_apminfo_t *ai)
+{
+	register u_int16_t f;
+	__asm __volatile (DOINT(0x15) "\n\t"
+			  "setc %b1\n\t"
+			  "movb %%ah, %h1\n\t"
+			  "movzwl %%ax, %%eax\n\tshll $4, %0\n\t"
+			  "movzwl %%cx, %%ecx\n\tshll $4, %2\n\t"
+			  "movzwl %%dx, %%edx\n\tshll $4, %3\n\t"
+			  : "=a" (ai->apm_code32_base),
+			    "=b" (f),
+			    "=c" (ai->apm_code16_base),
+			    "=d" (ai->apm_data_base)
+			  : "0" (APM_REAL_CONNECT), "1" (APM_DEV_APM_BIOS)
+			  : "cc");
+	ai->apm_entry    = BIOS_regs.biosr_bx;
+#if 0
+	ai->apm_code_len = BIOS_regs.biosr_si & 0xffff;
+	ai->apm_data_len = BIOS_regs.biosr_di & 0xffff;
+#else
+	ai->apm_code_len = 0x10000;
+	ai->apm_data_len = 0x10000;
+#endif
+	if (!(f & 0xff)) apm_is_connected = 1;
+	return (f & 0xff)? f >> 8 : 0;
+}
+
+a165 12
+static __inline int
+apm_set_power_state(int devices, int how)
+{
+	register u_int16_t rv;
+	__asm __volatile(DOINT(0x15) "\n\t"
+			 "setc %b0"
+			 : "=a" (rv)
+			 : "0" (APM_SET_PWR_STATE), "b" (devices), "c" (how)
+			 : "%edx", "cc");
+	return (rv & 0xff)? rv >> 8 : 0;
+}
+
+d174 1
+d176 1
+d181 1
+a181 1
+			printf("apm[%X cs=%X[%X]/%X[%X] ds=%X[%X] @@ %X]",
+d203 2
+a204 54
+		mem_delete(i386_trunc_page(ai.apm_data_base),
+		    i386_round_page(ai.apm_data_base + ai.apm_data_len));
+}
+
+void
+apmturnoff(int a1, int a2)
+{
+	bios_apminfo_t ai;
+	int f;
+
+	if (a1 == -1) a1 = APM_DEV_ALLDEVS;
+	if (a2 == -1) a2 = APM_SYS_OFF;
+	if ((ai.apm_detail = apm_check())) {
+
+		apm_disconnect();
+		if (apm_connect_real(&ai) != 0)
+			printf("apmturnoff: connect error\n");
+		else {
+			f = apm_driver_version(0x0102);
+			if (f) {
+				f = apm_driver_version(0x0101);
+#ifdef DEBUG
+				if (f)
+					printf ("apmturnoff: driver_version returned %X\n", f);
+				  else	printf ("apmturnoff: 1.1 connection\n");
+#endif
+			}
+
+			f = apm_set_power_state(a1, a2);
+#ifdef DEBUG
+			printf ("apmturnoff: apm_set_power_state returned %X\n",
+				 f);
+			printf ("apmturnoff: detail=%X\n",
+				ai.apm_detail);
+#endif
+		}
+#ifdef DEBUG
+	} else {
+		printf ("apmturnoff: apm_check returned 0\n");
+#endif
+	}
+}
+
+/*
+ *	if we are booting into DOS, we should not
+ *	leave apm connected in "real mode".  Try to
+ *	leave apm in the "reset" state.
+ */
+
+void
+apm_reset(void)
+{
+	if (apm_is_connected)
+		apm_disconnect();
+@
+
+
+1.2
+log
+@* merge src/sys/
+  (at least the better part of it)
+* revert IPv6 networking to OpenBSD, since
+  I didn't get IPV4_MAPPED addresses working :(
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$	*/
+d275 1
+d279 1
+d283 1
+d288 1
+d290 2
+a291 1
+	} else
+d293 2
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d67 2
+d87 1
+a87 1
+			printf("apm_check: %x, %x, %x\n",
+d106 1
+d146 1
+a146 1
+		printf("cs=%x:%x/%x:%x, ds=%x:%x\n",
+d151 1
+d165 40
+d207 12
+d232 1
+a232 1
+			printf("apm[%x cs=%x[%x]/%x[%x] ds=%x[%x] @@ %x]",
+d257 45
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@import bootloader-related pieces from openbsd, as first part of the
+aspired 4.4 merge… and something else
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: apmprobe.c,v 1.15 2007/09/13 06:58:47 weingart Exp $	*/
+a56 2
+#include <uvm/uvm_extern.h>
+
+a61 2
+#define vm_page_size 4096
+
+a169 1
+#ifdef DEBUG
+a170 1
+#endif
+d197 2
+a198 2
+		mem_delete(trunc_page(ai.apm_data_base),
+		    round_page(ai.apm_data_base + ai.apm_data_len));
+@
+

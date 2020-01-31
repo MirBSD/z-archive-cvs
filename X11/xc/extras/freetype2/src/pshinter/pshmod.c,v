@@ -1,0 +1,381 @@
+head	1.4;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2017.04.15.19.21.56;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10058F2723111C7BEE2;
+
+1.3
+date	2013.08.06.19.48.13;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100520152445E05B912;
+
+1.2
+date	2008.02.26.20.05.04;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	10047C470A72A1E13CE;
+
+1.1
+date	2005.03.18.10.43.15;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.20;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.15;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.37;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2013.08.06.19.12.26;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.3
+date	2017.04.15.15.42.00;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.4
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  pshmod.c                                                               */
+/*                                                                         */
+/*    FreeType PostScript hinter module implementation (body).             */
+/*                                                                         */
+/*  Copyright 2001-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_OBJECTS_H
+#include "pshrec.h"
+#include "pshalgo.h"
+#include "pshpic.h"
+
+
+  /* the Postscript Hinter module structure */
+  typedef struct  PS_Hinter_Module_Rec_
+  {
+    FT_ModuleRec          root;
+    PS_HintsRec           ps_hints;
+
+    PSH_Globals_FuncsRec  globals_funcs;
+    T1_Hints_FuncsRec     t1_funcs;
+    T2_Hints_FuncsRec     t2_funcs;
+
+  } PS_Hinter_ModuleRec, *PS_Hinter_Module;
+
+
+  /* finalize module */
+  FT_CALLBACK_DEF( void )
+  ps_hinter_done( PS_Hinter_Module  module )
+  {
+    module->t1_funcs.hints = NULL;
+    module->t2_funcs.hints = NULL;
+
+    ps_hints_done( &module->ps_hints );
+  }
+
+
+  /* initialize module, create hints recorder and the interface */
+  FT_CALLBACK_DEF( FT_Error )
+  ps_hinter_init( PS_Hinter_Module  module )
+  {
+    FT_Memory  memory = module->root.memory;
+    void*      ph     = &module->ps_hints;
+
+
+    ps_hints_init( &module->ps_hints, memory );
+
+    psh_globals_funcs_init( &module->globals_funcs );
+
+    t1_hints_funcs_init( &module->t1_funcs );
+    module->t1_funcs.hints = (T1_Hints)ph;
+
+    t2_hints_funcs_init( &module->t2_funcs );
+    module->t2_funcs.hints = (T2_Hints)ph;
+
+    return 0;
+  }
+
+
+  /* returns global hints interface */
+  FT_CALLBACK_DEF( PSH_Globals_Funcs )
+  pshinter_get_globals_funcs( FT_Module  module )
+  {
+    return &((PS_Hinter_Module)module)->globals_funcs;
+  }
+
+
+  /* return Type 1 hints interface */
+  FT_CALLBACK_DEF( T1_Hints_Funcs )
+  pshinter_get_t1_funcs( FT_Module  module )
+  {
+    return &((PS_Hinter_Module)module)->t1_funcs;
+  }
+
+
+  /* return Type 2 hints interface */
+  FT_CALLBACK_DEF( T2_Hints_Funcs )
+  pshinter_get_t2_funcs( FT_Module  module )
+  {
+    return &((PS_Hinter_Module)module)->t2_funcs;
+  }
+
+
+  FT_DEFINE_PSHINTER_INTERFACE(
+    pshinter_interface,
+
+    pshinter_get_globals_funcs,
+    pshinter_get_t1_funcs,
+    pshinter_get_t2_funcs
+  )
+
+
+  FT_DEFINE_MODULE(
+    pshinter_module_class,
+
+    0,
+    sizeof ( PS_Hinter_ModuleRec ),
+    "pshinter",
+    0x10000L,
+    0x20000L,
+
+    &PSHINTER_INTERFACE_GET,              /* module-specific interface */
+
+    (FT_Module_Constructor)ps_hinter_init,  /* module_init   */
+    (FT_Module_Destructor) ps_hinter_done,  /* module_done   */
+    (FT_Module_Requester)  NULL             /* get_interface */
+  )
+
+/* END */
+@
+
+
+1.3
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001, 2002, 2007 by                                          */
+d96 3
+a98 1
+  FT_DEFINE_PSHINTER_INTERFACE(pshinter_interface,
+d105 2
+a106 1
+  FT_DEFINE_MODULE(pshinter_module_class,
+d114 1
+a114 1
+    &FTPSHINTER_INTERFACE_GET,            /* module-specific interface */
+d116 3
+a118 3
+    (FT_Module_Constructor)ps_hinter_init,
+    (FT_Module_Destructor) ps_hinter_done,
+    (FT_Module_Requester)  0        /* no additional interface for now */
+@
+
+
+1.2
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d23 1
+d96 1
+a96 3
+  static
+  const PSHinter_Interface  pshinter_interface =
+  {
+d100 2
+a101 1
+  };
+d103 1
+a104 3
+  FT_CALLBACK_TABLE_DEF
+  const FT_Module_Class  pshinter_module_class =
+  {
+d111 1
+a111 1
+    &pshinter_interface,            /* module-specific interface */
+d116 1
+a116 2
+  };
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001, 2002 by                                                */
+d54 1
+d62 1
+a62 1
+    module->t1_funcs.hints = (T1_Hints)&module->ps_hints;
+d65 1
+a65 1
+    module->t2_funcs.hints = (T2_Hints)&module->ps_hints;
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001, 2002, 2007 by                                          */
+a53 1
+    void*      ph     = &module->ps_hints;
+d61 1
+a61 1
+    module->t1_funcs.hints = (T1_Hints)ph;
+d64 1
+a64 1
+    module->t2_funcs.hints = (T2_Hints)ph;
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001, 2002, 2007 by                                          */
+a22 1
+#include "pshpic.h"
+a53 1
+    void*      ph     = &module->ps_hints;
+d61 1
+a61 1
+    module->t1_funcs.hints = (T1_Hints)ph;
+d64 1
+a64 1
+    module->t2_funcs.hints = (T2_Hints)ph;
+d94 3
+a96 1
+  FT_DEFINE_PSHINTER_INTERFACE(pshinter_interface,
+d100 1
+a100 1
+  )
+d103 3
+a105 2
+  FT_DEFINE_MODULE(pshinter_module_class,
+
+d112 1
+a112 1
+    &FTPSHINTER_INTERFACE_GET,            /* module-specific interface */
+d117 2
+a118 1
+  )
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2001-2016 by                                                 */
+d96 1
+a96 3
+  FT_DEFINE_PSHINTER_INTERFACE(
+    pshinter_interface,
+
+d103 1
+a103 2
+  FT_DEFINE_MODULE(
+    pshinter_module_class,
+d111 1
+a111 1
+    &PSHINTER_INTERFACE_GET,              /* module-specific interface */
+d113 3
+a115 3
+    (FT_Module_Constructor)ps_hinter_init,  /* module_init   */
+    (FT_Module_Destructor) ps_hinter_done,  /* module_done   */
+    (FT_Module_Requester)  NULL             /* get_interface */
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

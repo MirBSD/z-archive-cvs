@@ -1,0 +1,262 @@
+head	1.4;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2016.03.26.17.29.20;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10056F6C535787D61F0;
+
+1.3
+date	2006.01.17.20.45.42;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10043CD575B2AADC8AB;
+
+1.2
+date	2005.12.14.23.28.31;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043A0AA0E5A220A51;
+
+1.1
+date	2005.05.14.23.21.02;	author tg;	state Exp;
+branches
+	1.1.201.1;
+next	;
+commitid	1e94428687d39445;
+
+1.1.201.1
+date	2005.05.14.23.21.02;	author tg;	state Exp;
+branches;
+next	;
+commitid	1e94428687d39445;
+
+
+desc
+@@
+
+
+1.4
+log
+@complete overhaul of djbdns port:
+
+• merge t4/t6 flavours back into one binary
+  ‣ greatly simplify IPv6 handling, too; drop code for v6-less OSes
+• merge v4/v6 dnsroots back into one, update all of them
+• improve documentation a bit
+• apply two patches from http://www.your.org/dnscache/ (SECURITY):
+  ‣ merge identical outgoing requests
+  ‣ allow caching SOA responses
+• update to Fefe’s djbdns-1.05-test27.diff.bz2
+  ‣ fixes recursively resolving hosts behind IPv6-only nameservers;
+    spotted by Natureshadow (for Teckids’ Lunatics network) and via
+    http://serverfault.com/q/627912/189656 (which I’ll answer RSN)
+  ⚠ fix with “one second” CDB validity patch
+  ⚠ adapt for OpenBSD-style IPv6
+• drop ip6.int. reverse v6 DNS for good
+• improve dealing with mixing v4/v6 transport
+  ⇒ TODO add IP4SEND/IP6SEND support; currently; if IPSEND is v6
+    but we send to a v4 server, we use INADDR_ANY for outgoing,
+    as automatic fallback address
+@
+text
+@$MirOS: ports/net/djbdns/patches/patch-src_dns_h,v 1.3 2006/01/17 20:45:42 tg Exp $
+--- src/dns.h.orig	Sun Feb 11 21:11:23 2001
++++ src/dns.h	Sat Mar 26 16:21:47 2016
+@@@@ -20,6 +20,8 @@@@
+ #define DNS_T_SIG "\0\30"
+ #define DNS_T_KEY "\0\31"
+ #define DNS_T_AAAA "\0\34"
++#define DNS_T_SRV "\0\41"
++#define DNS_T_IXFR "\0\373"
+ #define DNS_T_AXFR "\0\374"
+ #define DNS_T_ANY "\0\377"
+ 
+@@@@ -35,7 +37,8 @@@@ struct dns_transmit {
+   struct taia deadline;
+   unsigned int pos;
+   const char *servers;
+-  char localip[4];
++  char localip[16];
++  unsigned int scope_id;
+   char qtype[2];
+ } ;
+ 
+@@@@ -43,6 +46,7 @@@@ extern void dns_random_init(const char *
+ extern unsigned int dns_random(unsigned int);
+ 
+ extern void dns_sortip(char *,unsigned int);
++extern void dns_sortip6(char *,unsigned int);
+ 
+ extern void dns_domain_free(char **);
+ extern int dns_domain_copy(char **,const char *);
+@@@@ -68,10 +72,13 @@@@ extern struct dns_transmit dns_resolve_t
+ 
+ extern int dns_ip4_packet(stralloc *,const char *,unsigned int);
+ extern int dns_ip4(stralloc *,const stralloc *);
++extern int dns_ip6_packet(stralloc *,char *,unsigned int);
++extern int dns_ip6(stralloc *,stralloc *);
+ extern int dns_name_packet(stralloc *,const char *,unsigned int);
+ extern void dns_name4_domain(char *,const char *);
+ #define DNS_NAME4_DOMAIN 31
+ extern int dns_name4(stralloc *,const char *);
++extern int dns_name6(stralloc *,const char *);
+ extern int dns_txt_packet(stralloc *,const char *,unsigned int);
+ extern int dns_txt(stralloc *,const stralloc *);
+ extern int dns_mx_packet(stralloc *,const char *,unsigned int);
+@@@@ -80,5 +87,10 @@@@ extern int dns_mx(stralloc *,const stral
+ extern int dns_resolvconfrewrite(stralloc *);
+ extern int dns_ip4_qualify_rules(stralloc *,stralloc *,const stralloc *,const stralloc *);
+ extern int dns_ip4_qualify(stralloc *,stralloc *,const stralloc *);
++extern int dns_ip6_qualify_rules(stralloc *,stralloc *,const stralloc *,const stralloc *);
++extern int dns_ip6_qualify(stralloc *,stralloc *,const stralloc *);
++
++extern int dns_name6_domain(char *,const char *);
++#define DNS_NAME6_DOMAIN (4*16+11)
+ 
+ #endif
+@
+
+
+1.3
+log
+@Apply http://tinydns.org/srv-patch, bump patchlevel:
+
+| From: Michael Handler <handler@@sub-rosa.com>
+| To: dns@@list.cr.yp.to
+| Subject: tinydns-data SRV & axfr-get SRV/PTR patches
+| Date: Thu, 14 Sep 2000 20:37:50 -0400
+|
+| Here's a combined patch that:
+|
+| a) adds a native SRV type to tinydns-data
+|
+| Sfqdn:ip:x:port:weight:priority:ttl:timestamp
+|
+| Standard rules for ip, x, ttl, and timestamp apply. Port, weight, and
+| priority all range from 0-65535. Weight and priority are optional; they
+| default to zero if not provided.
+|
+| Sconsole.zoinks.example.com:1.2.3.4:rack102-con1:2001:69:7:300:
+|
+| b) makes axfr-get decompose SRV and PTR records and write them out in
+| native format, rather than opaque. Again, this is necessary because if the
+| DNAME fields in the records reference the same zone as fqdn, they can have
+| compression pointers that are bogus outside the context of that specific
+| packet, and which can't be correctly loaded into data.cdb by tinydns-data.
+|
+| --michael
+|
+| Laurent G. Bercot <ska-djbdns@@skarnet.org> updated it for djbdns-1.05:
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_dns_h,v 1.2 2005/12/14 23:28:31 tg Exp $
+d3 1
+a3 1
++++ src/dns.h	Tue Jan 17 20:36:06 2006
+d45 1
+a45 1
+@@@@ -80,5 +87,13 @@@@ extern int dns_mx(stralloc *,const stral
+d52 1
+a52 4
++#define DNS_IP6_INT 0
++#define DNS_IP6_ARPA 1
++
++extern int dns_name6_domain(char *,const char *,int);
+@
+
+
+1.2
+log
+@* update to fefe's djbdns-1.05-test23.diff
+  with djbdns-1.05-ixfr.diff
+* slightly change naming of v6-transport binaries
+* consolidate all added source files in a central directory
+  so it can be reused by the v6-transport stuff
+* integrate the v6 transport binaries
+* fix spacing
+* sync descriptive texts with reality
+* sync European ORSN (v4 and v6) to their root.hint
+* sync OpenNIC too
+* Open-RSC seeminly ceased to exist recently
+* Apply compiler-temporary-filename.patch
+  from http://homepages.tesco.net/~J.deBoynePollard/FGA/djbdns-problems.html
+* apply dnscache-cname-handling.patch
+* apply dnscache-strict-forwardonly.patch w/ IPv6 tweak
+* apply dnscacheip-space-separator.patch
+* apply tinydns-alias-chain-truncation.patch
+* apply tinydns-data-semantic-error.patch
+  appropriately for 6 and 3, too
+* fix shell code and path to includes
+* fix relative paths
+* fix names of library and programmes; NOMAN=yes here (t6)
+* Add support for the IPv6 transport module to communicate,
+  as a client, with IPv4 transport name servers as well.
+
+  WFM
+* build it with -Wall -Werror
+* honour ${SYSCONFDIR} throughout the port
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/net/djbdns/patches/patch-src_dns_h,v 1.1.201.1 2005/05/14 23:21:02 tg Exp $
+d3 2
+a4 2
++++ src/dns.h	Wed Dec 14 01:59:28 2005
+@@@@ -20,6 +20,7 @@@@
+d8 1
+d13 1
+a13 1
+@@@@ -35,7 +36,8 @@@@ struct dns_transmit {
+d23 1
+a23 1
+@@@@ -43,6 +45,7 @@@@ extern void dns_random_init(const char *
+d31 1
+a31 1
+@@@@ -68,10 +71,13 @@@@ extern struct dns_transmit dns_resolve_t
+d45 1
+a45 1
+@@@@ -80,5 +86,13 @@@@ extern int dns_mx(stralloc *,const stral
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 1
+a3 1
++++ src/dns.h	Sat May 14 22:27:17 2005
+d30 1
+a30 1
+@@@@ -68,6 +71,8 @@@@ extern struct dns_transmit dns_resolve_t
+d39 6
+a44 1
+@@@@ -80,5 +85,10 @@@@ extern int dns_mx(stralloc *,const stral
+d51 5
+a55 2
++extern int dns_name6_domain(char *,char *);
++#define DNS_NAME6_DOMAIN (4*16+10)
+@
+
+
+1.1.201.1
+log
+@New djbdns port, #ifdef'd, "original" and "no_ipv6" flavours removed
+"no_ipv4" non-functional at the moment, will follow later after
+redesign using crunchgen(1) and crunchide(1)
+@
+text
+@@

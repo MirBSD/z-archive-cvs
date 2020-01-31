@@ -1,0 +1,104 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2014.03.29.20.56.43;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1005337335E54AE6E17;
+
+1.1
+date	2012.05.30.18.46.56;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004FC66B2F1B24356F;
+
+
+desc
+@@
+
+
+1.2
+log
+@Update X.509v3 Root CA certificates in the base system
+• drastically reduce number of CAs shipped, to follow current best practice
+  (per recommendation of IanG and mostly Debian)
+• install OpenSSL 1.x-format hashed files, by request of bsiegert@@
+@
+text
+@#!/bin/mksh
+rcsid='$MirOS: ports/essentials/ca-certificates/mntner/pem2lnk,v 1.1 2012/05/30 18:46:56 tg Exp $'
+#-
+# Run this to generate a list of symlinks for CA certificates
+# using the OpenSSL 1.0.0+ hash format.
+
+# XXX pem/* must already have normalised names
+[[ -d pem/. ]] || exit 1
+[[ -d lnk/. ]] && exit 1
+rm -f certhash.lnk ssl.links.shar
+[[ -e certhash.lnk ]] && exit 1
+[[ -e ssl.links.shar ]] && exit 1
+mkdir lnk
+[[ -d lnk/. ]] || exit 1
+
+cp pem/* lnk/
+cd lnk
+set -A files -- *.*
+
+for file in "${files[@@]}"; do
+	if [[ $file != [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].+([0-9]) ]]; then
+		print -ru2 "Invalid file '$file'"
+		exit 1
+	fi
+	fbase=${file%.*}
+	hash0=$(openssl x509 -subject_hash_old -noout -in $file)
+	hash1=$(openssl x509 -subject_hash -noout -in $file)
+	if [[ $file != "${hash0}."+([0-9]) ]]; then
+		print -ru2 "Invalid hash $file expected $hash0"
+		exit 1
+	fi
+	print -ru2 "Processing $file → $hash1"
+	num=0
+	while [[ -e $hash1.$num ]]; do
+		let num++
+	done
+	ln -s $file $hash1.$num
+	print $file $hash1.$num >>OUT
+done
+
+cd ..
+mv -f lnk/OUT certhash.lnk
+while read src dst; do
+	print -r "echo $src → $dst; ln -s $src $dst"
+done <certhash.lnk >ssl.links.shar
+rm -rf lnk
+@
+
+
+1.1
+log
+@adding openssl 1.x compat symlinks to this package now, too
+@
+text
+@d2 1
+a2 1
+rcsid='$MirOS: contrib/hosted/tg/deb/ca-bundle/debian/ca-bundle.links.in,v 1.2 2011/04/24 17:08:16 tg Exp $'
+d4 2
+a5 4
+# Run this on Debian/sid to generate a list of symlinks
+# for OpenSSL 1.0.0+ compatibility of hashed directory.
+
+[[ $(openssl version) = 'OpenSSL 1'* ]] || exit 1
+d10 1
+a10 1
+rm -f certhash.lnk
+d12 1
+a18 1
+set -A links
+d43 3
+@
+

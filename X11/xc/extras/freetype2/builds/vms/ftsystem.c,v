@@ -1,0 +1,535 @@
+head	1.3;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2017.04.15.19.20.27;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10058F2723111C7BEE2;
+
+1.2
+date	2006.06.29.20.24.21;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.00;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.47;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.00;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.34.25;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.38.06;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2017.04.15.15.41.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.3
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftsystem.c                                                             */
+/*                                                                         */
+/*    VMS-specific FreeType low-level system interface (body).             */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+  /* we use our special ftconfig.h file, not the standard one */
+#include <ftconfig.h>
+#include FT_INTERNAL_DEBUG_H
+#include FT_SYSTEM_H
+#include FT_ERRORS_H
+#include FT_TYPES_H
+#include FT_INTERNAL_OBJECTS_H
+
+  /* memory-mapping includes and definitions */
+#ifdef HAVE_UNISTD_H
+#include <unistd.h>
+#endif
+
+#include <sys/mman.h>
+#ifndef MAP_FILE
+#define MAP_FILE  0x00
+#endif
+
+#ifdef MUNMAP_USES_VOIDP
+#define MUNMAP_ARG_CAST  void *
+#else
+#define MUNMAP_ARG_CAST  char *
+#endif
+
+#ifdef NEED_MUNMAP_DECL
+
+#ifdef __cplusplus
+  extern "C"
+#else
+  extern
+#endif
+  int
+  munmap( char*  addr,
+          int    len );
+
+#define MUNMAP_ARG_CAST  char *
+
+#endif /* NEED_DECLARATION_MUNMAP */
+
+
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#ifdef HAVE_FCNTL_H
+#include <fcntl.h>
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*                       MEMORY MANAGEMENT INTERFACE                     */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_alloc                                                           */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The memory allocation function.                                    */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory :: A pointer to the memory object.                          */
+  /*                                                                       */
+  /*    size   :: The requested size in bytes.                             */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    The address of newly allocated block.                              */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void* )
+  ft_alloc( FT_Memory  memory,
+            long       size )
+  {
+    FT_UNUSED( memory );
+
+    return malloc( size );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_realloc                                                         */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The memory reallocation function.                                  */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory   :: A pointer to the memory object.                        */
+  /*                                                                       */
+  /*    cur_size :: The current size of the allocated memory block.        */
+  /*                                                                       */
+  /*    new_size :: The newly requested size in bytes.                     */
+  /*                                                                       */
+  /*    block    :: The current address of the block in memory.            */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    The address of the reallocated memory block.                       */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void* )
+  ft_realloc( FT_Memory  memory,
+              long       cur_size,
+              long       new_size,
+              void*      block )
+  {
+    FT_UNUSED( memory );
+    FT_UNUSED( cur_size );
+
+    return realloc( block, new_size );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_free                                                            */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The memory release function.                                       */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    memory :: A pointer to the memory object.                          */
+  /*                                                                       */
+  /*    block  :: The address of block in memory to be freed.              */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void )
+  ft_free( FT_Memory  memory,
+           void*      block )
+  {
+    FT_UNUSED( memory );
+
+    free( block );
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*                     RESOURCE MANAGEMENT INTERFACE                     */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_io
+
+  /* We use the macro STREAM_FILE for convenience to extract the       */
+  /* system-specific stream handle from a given FreeType stream object */
+#define STREAM_FILE( stream )  ( (FILE*)stream->descriptor.pointer )
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    ft_close_stream                                                    */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    The function to close a stream.                                    */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    stream :: A pointer to the stream object.                          */
+  /*                                                                       */
+  FT_CALLBACK_DEF( void )
+  ft_close_stream( FT_Stream  stream )
+  {
+    munmap( (MUNMAP_ARG_CAST)stream->descriptor.pointer, stream->size );
+
+    stream->descriptor.pointer = NULL;
+    stream->size               = 0;
+    stream->base               = 0;
+  }
+
+
+  /* documentation is in ftobjs.h */
+
+  FT_BASE_DEF( FT_Error )
+  FT_Stream_Open( FT_Stream    stream,
+                  const char*  filepathname )
+  {
+    int          file;
+    struct stat  stat_buf;
+
+
+    if ( !stream )
+      return FT_THROW( Invalid_Stream_Handle );
+
+    /* open the file */
+    file = open( filepathname, O_RDONLY );
+    if ( file < 0 )
+    {
+      FT_ERROR(( "FT_Stream_Open:" ));
+      FT_ERROR(( " could not open `%s'\n", filepathname ));
+      return FT_THROW( Cannot_Open_Resource );
+    }
+
+    if ( fstat( file, &stat_buf ) < 0 )
+    {
+      FT_ERROR(( "FT_Stream_Open:" ));
+      FT_ERROR(( " could not `fstat' file `%s'\n", filepathname ));
+      goto Fail_Map;
+    }
+
+    stream->size = stat_buf.st_size;
+    if ( !stream->size )
+    {
+      FT_ERROR(( "FT_Stream_Open:" ));
+      FT_ERROR(( " opened `%s' but zero-sized\n", filepathname ));
+      goto Fail_Map;
+    }
+
+    stream->pos  = 0;
+    stream->base = (unsigned char *)mmap( NULL,
+                                          stream->size,
+                                          PROT_READ,
+                                          MAP_FILE | MAP_PRIVATE,
+                                          file,
+                                          0 );
+
+    if ( (long)stream->base == -1 )
+    {
+      FT_ERROR(( "FT_Stream_Open:" ));
+      FT_ERROR(( " could not `mmap' file `%s'\n", filepathname ));
+      goto Fail_Map;
+    }
+
+    close( file );
+
+    stream->descriptor.pointer = stream->base;
+    stream->pathname.pointer   = (char*)filepathname;
+
+    stream->close = ft_close_stream;
+    stream->read  = 0;
+
+    FT_TRACE1(( "FT_Stream_Open:" ));
+    FT_TRACE1(( " opened `%s' (%d bytes) successfully\n",
+                filepathname, stream->size ));
+
+    return FT_Err_Ok;
+
+  Fail_Map:
+    close( file );
+
+    stream->base = NULL;
+    stream->size = 0;
+    stream->pos  = 0;
+
+    return FT_THROW( Cannot_Open_Stream );
+  }
+
+
+#ifdef FT_DEBUG_MEMORY
+
+  extern FT_Int
+  ft_mem_debug_init( FT_Memory  memory );
+
+  extern void
+  ft_mem_debug_done( FT_Memory  memory );
+
+#endif
+
+
+  /* documentation is in ftobjs.h */
+
+  FT_BASE_DEF( FT_Memory )
+  FT_New_Memory( void )
+  {
+    FT_Memory  memory;
+
+
+    memory = (FT_Memory)malloc( sizeof ( *memory ) );
+    if ( memory )
+    {
+      memory->user    = 0;
+      memory->alloc   = ft_alloc;
+      memory->realloc = ft_realloc;
+      memory->free    = ft_free;
+#ifdef FT_DEBUG_MEMORY
+      ft_mem_debug_init( memory );
+#endif
+    }
+
+    return memory;
+  }
+
+
+  /* documentation is in ftobjs.h */
+
+  FT_BASE_DEF( void )
+  FT_Done_Memory( FT_Memory  memory )
+  {
+#ifdef FT_DEBUG_MEMORY
+    ft_mem_debug_done( memory );
+#endif
+    memory->free( memory, memory );
+  }
+
+
+/* END */
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005 by                                     */
+d215 1
+a215 1
+      return FT_Err_Invalid_Stream_Handle;
+d223 1
+a223 1
+      return FT_Err_Cannot_Open_Resource;
+d234 7
+d277 1
+a277 1
+    return FT_Err_Cannot_Open_Stream;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002 by                                           */
+d206 1
+a206 1
+  FT_EXPORT_DEF( FT_Error )
+d287 1
+a287 1
+  FT_EXPORT_DEF( FT_Memory )
+d311 1
+a311 1
+  FT_EXPORT_DEF( void )
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005 by                                     */
+d206 1
+a206 1
+  FT_BASE_DEF( FT_Error )
+d287 1
+a287 1
+  FT_BASE_DEF( FT_Memory )
+d311 1
+a311 1
+  FT_BASE_DEF( void )
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2005 by                                     */
+d206 1
+a206 1
+  FT_BASE_DEF( FT_Error )
+d287 1
+a287 1
+  FT_BASE_DEF( FT_Memory )
+d311 1
+a311 1
+  FT_BASE_DEF( void )
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+d215 1
+a215 1
+      return FT_THROW( Invalid_Stream_Handle );
+d223 1
+a223 1
+      return FT_THROW( Cannot_Open_Resource );
+a233 7
+    if ( !stream->size )
+    {
+      FT_ERROR(( "FT_Stream_Open:" ));
+      FT_ERROR(( " opened `%s' but zero-sized\n", filepathname ));
+      goto Fail_Map;
+    }
+
+d270 1
+a270 1
+    return FT_THROW( Cannot_Open_Stream );
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

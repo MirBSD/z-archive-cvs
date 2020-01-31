@@ -1,0 +1,316 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2012.02.11.19.30.00;	author tg;	state dead;
+branches;
+next	1.4;
+commitid	1004F36C11F02848ED5;
+
+1.4
+date	2010.09.18.22.35.09;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004C953D8624E3E654;
+
+1.3
+date	2010.09.15.20.57.02;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C9132F41004B31C;
+
+1.2
+date	2007.03.10.23.53.50;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045F344D65465EF23;
+
+1.1
+date	2006.10.02.05.59.17;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004520AAAB453C7791;
+
+
+desc
+@@
+
+
+1.5
+log
+@update the CVS package in MirPorts (to match base and Debian)
+
+• since the Debian cvs source package was taken over by this one,
+  reverse things and use the Debian *.diff.gz to get our patches
+  from ;-) saves tracking things in CVS thrice
+• since the Debian cvs binary package contains PDF documentation
+  generated from something with our patches, ship it instead of
+  the one from the vanilla CVS distfile
+• ship cvs-switchroot(1) from Debian, which is just a fancy name
+  for mircvs://src/scripts/mnt-cvsroot and has a manpage
+• move stuff from PREFIX/share/cvs to PREFIX/share/doc/cvs as is proper
+• fix regression testsuite on MirBSD as much as possible (same as base)
+@
+text
+@$MirOS: ports/devel/cvs/patches/patch-src_parseinfo_c,v 1.4 2010/09/18 22:35:09 tg Exp $
+--- src/parseinfo.c.orig	Tue Sep  6 04:40:15 2005
++++ src/parseinfo.c	Sat Sep 18 18:04:01 2010
+@@@@ -15,6 +15,8 @@@@
+ #include "getline.h"
+ #include "history.h"
+ 
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_parseinfo_c,v 1.4 2010/09/18 22:35:09 tg Exp $");
++
+ /*
+  * Parse the INFOFILE file for the specified REPOSITORY.  Invoke CALLPROC for
+  * the first line in the file that matches the REPOSITORY, or if ALL != 0, any
+@@@@ -230,7 +232,7 @@@@ readSizeT (const char *infopath, const c
+ 	return true;
+     }
+ 
+-    /* Record the factor character (kilo, mega, giga, tera).  */
++    /* Record the factor character (kibi, mebi, gibi, tebi).  */
+     if (!isdigit (p[strlen(p) - 1]))
+     {
+ 	switch (p[strlen(p) - 1])
+@@@@ -241,16 +243,16 @@@@ readSizeT (const char *infopath, const c
+ 		factor = xtimes (factor, 1024);
+ 	    case 'M':
+ 		factor = xtimes (factor, 1024);
+-	    case 'k':
++	    case 'K':
+ 		factor = xtimes (factor, 1024);
+ 		break;
+ 	    default:
+ 		error (0, 0,
+     "%s: Unknown %s factor: `%c'",
+-		       infopath, option, p[strlen(p)]);
++		       infopath, option, p[strlen(p) - 1]);
+ 		return false;
+ 	}
+-	TRACE (TRACE_DATA, "readSizeT(): Found factor %u for %s",
++	TRACE (TRACE_DATA, "readSizeT(): Found factor %zu for %s",
+ 	       factor, option);
+     }
+ 
+@@@@ -274,9 +276,9 @@@@ readSizeT (const char *infopath, const c
+ 	/* Don't return an error, just max out.  */
+ 	num = SIZE_MAX;
+ 
+-    TRACE (TRACE_DATA, "readSizeT(): read number %u for %s", num, option);
++    TRACE (TRACE_DATA, "readSizeT(): read number %zu for %s", num, option);
+     *val = xtimes (strtoul (p, NULL, 10), factor);
+-    TRACE (TRACE_DATA, "readSizeT(): returnning %u for %s", *val, option);
++    TRACE (TRACE_DATA, "readSizeT(): returnning %zu for %s", *val, option);
+     return true;
+ }
+ 
+@@@@ -298,7 +300,7 @@@@ new_config (void)
+     new->MaxCompressionLevel = 9;
+ #endif /* SERVER_SUPPORT */
+ #ifdef PROXY_SUPPORT
+-    new->MaxProxyBufferSize = (size_t)(8 * 1024 * 1024); /* 8 megabytes,
++    new->MaxProxyBufferSize = (size_t)(8 * 1024 * 1024); /* 8 mebibytes,
+                                                           * by default.
+                                                           */
+ #endif /* PROXY_SUPPORT */
+@@@@ -392,6 +394,9 @@@@ parse_config (const char *cvsroot, const
+      */
+     bool processing = true;
+     bool processed = true;
++#ifdef SERVER_SUPPORT
++    size_t dummy_sizet;
++#endif
+ 
+     TRACE (TRACE_FUNCTION, "parse_config (%s)", cvsroot);
+ 
+@@@@ -689,13 +694,29 @@@@ parse_config (const char *cvsroot, const
+ 	    readBool (infopath, "UseArchiveCommentLeader", p,
+ 		      &retval->UseArchiveCommentLeader);
+ #ifdef SERVER_SUPPORT
+-	else if (!strcmp (line, "MinCompressionLevel"))
+-	    readSizeT (infopath, "MinCompressionLevel", p,
+-		       &retval->MinCompressionLevel);
+-	else if (!strcmp (line, "MaxCompressionLevel"))
+-	    readSizeT (infopath, "MaxCompressionLevel", p,
+-		       &retval->MaxCompressionLevel);
++	else if (!strcmp (line, "MinCompressionLevel")) {
++	    readSizeT (infopath, "MinCompressionLevel", p, &dummy_sizet);
++	    retval->MinCompressionLevel = dummy_sizet;
++	}
++	else if (!strcmp (line, "MaxCompressionLevel")) {
++	    readSizeT (infopath, "MaxCompressionLevel", p, &dummy_sizet);
++	    retval->MaxCompressionLevel = dummy_sizet;
++	}
+ #endif /* SERVER_SUPPORT */
++#if !defined(LOCK_COMPATIBILITY) || !defined(SUPPORT_OLD_INFO_FMT_STRINGS)
++	else if ((!strcmp (line, "tag")) || (!strcmp (line, "umask"))
++	  || (!strcmp (line, "DisableXProg")) || (!strcmp (line, "dlimit"))
++	  || (!strcmp (line, "forceReadOnlyFS"))) {
++	    /* We are dealing with keywords removed between cvs 1.11.1p1
++	       and cvs 1.12.10; odds are we are not being able to handle
++	       access or concurrent access with 1.11 cvs correctly */
++	    error (0, 0, "%s: found keyword '%s' in repository",
++		   infopath, line);
++	    error (readonlyfs ? 0 : 1, 0, readonlyfs
++		? "Danger: Granting read access to incompatible repository!"
++		: "Do not try to access a cvs 1.11 repository!");
++	}
++#endif
+ 	else
+ 	    /* We may be dealing with a keyword which was added in a
+ 	       subsequent version of CVS.  In that case it is a good idea
+@
+
+
+1.4
+log
+@wip mostly from working on testsuite
+• run part of it under posixtz (can't do for all of it because date(1) is
+  linked statically and thus not affected, which breaks parts of it)
+• sync getdate.c
+• adjust getdate testsuite against our output format
+• revert debian patches because they break things and the original issues
+  cannot be reproduced anyway
+  ‣ 93_homedir
+  ‣ 95_flag_conflicted_copies
+• parseinfo.c: correct off-by-one bug in the original GNU CVS, discovered
+  because of the testsuite (it was not adapted to binary ISO units yet)
+• sanity.sh: work on the cvs testsuite
+  – add (commented out) debug to aid temporarily
+  – configure UserAdminOptions because --with-cvs-admin-group=_cvsadmin
+  – accept our version strings
+  – recognise GNU getopt changed error messages
+  – run part of it with posixtz
+  – sync with changed output
+  – use ISO/IEC 60027-2 binary præficēs properly
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_parseinfo_c,v 1.3 2010/09/15 20:57:02 tg Exp $
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_parseinfo_c,v 1.3 2010/09/15 20:57:02 tg Exp $");
+@
+
+
+1.3
+log
+@WIP port (will be worked on more, commit for safety)
+
+Some changes, in this order:
+• re-sync with MirOS base cvs
+• reduce diff against upstream
+• apply cvs-datetime.patch from Arkadiusz Miskiewicz <arekm>
+  via Concurrent Versions System - Bugs: bug #21523, can't parse date/time: =UTC when commiting file (workaround/fix attached)
+• apply (only those considered somewhat sane) patches from Debian cvs_1:1.12.13-12
+  – 11_check_method_crash
+  – 12_rcs2log_POSIX_sort
+  – 14_ext_expansion
+  – 15_PATH_MAX_check
+  – 20_readdir_errno
+  – 21_getcwd_chroot
+  – 25_import-n-X
+  – 51_newlines_in_commit_template (partially)
+  – 55_keyword_alphanumerics (modified)
+  – 62_cvsrc_whitespace
+  – 65_login_cvspass_message
+  – 69_ext_allowroot (modified)
+  – 71_cvsbug_tmpfix
+  – 81_fix_-l (modified)
+  – 85_normalize_correct_roots
+  – 86_server_wrapper (modified)
+  – 93_homedir (modified)
+  – 95_flag_conflicted_copies
+  – 96_manpage_fixes (partially)
+  – 97_cvs.info.typo (partially)
+  – 98_fix_sparc_sigbus.diff
+• document Debian’s changes in the Texinfo manual
+• modify mkman.pl to produce more correct looking output
+• point to texinfo HTML document from HTML manpage
+• fix fseeko configure.in test
+• correct bugs in Debian’s changes
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 1
+a3 1
++++ src/parseinfo.c	Wed Sep 15 19:36:15 2010
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_parseinfo_c,v 1.2 2007/03/10 23:53:50 tg Exp $");
+d22 1
+a22 1
+@@@@ -241,7 +243,7 @@@@ readSizeT (const char *infopath, const c
+d31 4
+a34 2
+@@@@ -250,7 +252,7 @@@@ readSizeT (const char *infopath, const c
+ 		       infopath, option, p[strlen(p)]);
+@
+
+
+1.2
+log
+@sync the cvs port and the cvs in the base system;
+RCSID stuff like in commitid 10045F33CB2157CFEAE
+@
+text
+@d1 3
+a3 3
+$MirOS: ports/devel/cvs/patches/patch-src_parseinfo_c,v 1.1 2006/10/02 05:59:17 tg Exp $
+--- src/parseinfo.c.orig	Sat Mar 10 23:14:20 2007
++++ src/parseinfo.c	Sat Mar 10 23:14:14 2007
+d8 1
+a8 1
++__RCSID("$MirOS$");
+@
+
+
+1.1
+log
+@add cvs port, compiles fine and warning-free on MirOS-current;
+other OSes not tested, older MirOS may have issues (mktime, regex/wctype)
+@
+text
+@d1 13
+a13 4
+$MirOS$
+--- src/parseinfo.c.orig	Tue Sep  6 04:40:15 2005
++++ src/parseinfo.c	Mon Oct  2 04:40:37 2006
+@@@@ -230,7 +230,7 @@@@ readSizeT (const char *infopath, const c
+d22 1
+a22 1
+@@@@ -241,7 +241,7 @@@@ readSizeT (const char *infopath, const c
+d31 1
+a31 1
+@@@@ -250,7 +250,7 @@@@ readSizeT (const char *infopath, const c
+d36 1
+a36 1
++	TRACE (TRACE_DATA, "readSizeT(): Found factor %lu for %s",
+d40 1
+a40 1
+@@@@ -274,9 +274,9 @@@@ readSizeT (const char *infopath, const c
+d45 1
+a45 1
++    TRACE (TRACE_DATA, "readSizeT(): read number %lu for %s", num, option);
+d48 1
+a48 1
++    TRACE (TRACE_DATA, "readSizeT(): returnning %lu for %s", *val, option);
+d52 1
+a52 1
+@@@@ -298,7 +298,7 @@@@ new_config (void)
+d61 1
+a61 1
+@@@@ -392,6 +392,9 @@@@ parse_config (const char *cvsroot, const
+d71 1
+a71 1
+@@@@ -689,13 +692,29 @@@@ parse_config (const char *cvsroot, const
+@
+

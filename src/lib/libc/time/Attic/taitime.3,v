@@ -1,0 +1,629 @@
+head	1.8;
+access;
+symbols
+	MIRBSD_10:1.6.0.2
+	MIRBSD_10_BASE:1.6
+	MIRBSD_9_BASE:1.4
+	MIRBSD_8:1.4.0.2
+	MIRBSD_8_BASE:1.4
+	mirbsd:1.1.7;
+locks; strict;
+comment	@.\" @;
+
+
+1.8
+date	2011.11.20.04.57.13;	author tg;	state dead;
+branches;
+next	1.7;
+commitid	1004EC8880406A80564;
+
+1.7
+date	2008.11.08.23.03.56;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10049161AB22DF5DFC5;
+
+1.6
+date	2007.02.07.20.43.24;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10045CA39907FBE4A06;
+
+1.5
+date	2006.11.01.20.01.21;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004548FD236EA4946C;
+
+1.4
+date	2005.12.17.05.46.15;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10043A3A3E65E20A413;
+
+1.3
+date	2005.10.19.17.52.09;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	49f743568777e989;
+
+1.2
+date	2005.03.28.21.21.50;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.03.06.16.33.39;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.06.16.33.39;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.8
+log
+@first steps toward a new time API
+• no DJB code (actual code) any more, only reimplementation of algorithms
+  whose code is placed in USA PD
+• no struct returns any more
+• skip the extra tai_t step
+• no _t suffix for types I define
+• try to be a bit more elegant – I learned a lot since then, after all
+
+the old ABI is still provided until we bump libc major
+‣ the new API might wander off libc into libmbfun then, _too_
+
+goal is functional equivalence (after all, it’s been proven correct)
+@
+text
+@.\" $MirOS: src/lib/libc/time/taitime.3,v 1.7 2008/11/08 23:03:56 tg Exp $
+.\"-
+.\" Copyright (c) 2004, 2005, 2007
+.\"	Thorsten Glaser <tg@@mirbsd.de>
+.\"
+.\" Provided that these terms and disclaimer and all copyright notices
+.\" are retained or reproduced in an accompanying document, permission
+.\" is granted to deal in this work without restriction, including un-
+.\" limited rights to use, publicly perform, distribute, sell, modify,
+.\" merge, give away, or sublicence.
+.\"
+.\" Advertising materials mentioning features or use of this work must
+.\" display the following acknowledgement:
+.\"	This product includes material provided by Thorsten Glaser.
+.\"
+.\" This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+.\" the utmost extent permitted by applicable law, neither express nor
+.\" implied; without malicious intent or gross negligence. In no event
+.\" may a licensor, author or contributor be held liable for indirect,
+.\" direct, other damage, loss, or other issues arising in any way out
+.\" of dealing in the work, even if advised of the possibility of such
+.\" damage or existence of a defect, except proven that it results out
+.\" of said person's immediate fault when using the work as intended.
+.\"-
+.Dd February 7, 2007
+.Dt TAITIME 3
+.Os
+.Sh NAME
+.Nm tai_leaps ,
+.Nm tai_isleap ,
+.Nm timet2tai ,
+.Nm tai2timet ,
+.Nm utc2tai ,
+.Nm tai2utc ,
+.Nm mjd2tai ,
+.Nm tai2mjd ,
+.Nm mjd2tm ,
+.Nm tm2mjd ,
+.Nm tai_time ,
+.Nm taina_time ,
+.Nm exporttai ,
+.Nm importtai
+.Nd year-2038-safe leap second compliant 64 bit time functions
+.Sh SYNOPSIS
+.Fd #include <sys/types.h>
+.Fd #include <sys/taitime.h>
+.Pp
+.Ft "tai64_t"
+.Fn tai_time "tai64_t *t"
+.Ft "void"
+.Fn taina_time "tai64na_t *t"
+.Ft "tai64_t *"
+.Fn tai_leaps "void"
+.Ft "int"
+.Fn tai_isleap "tai64_t t"
+.Ft "tai64_t"
+.Fn timet2tai "time_t tv"
+.Ft "time_t"
+.Fn tai2timet "tai64_t t"
+.Ft "tai64_t"
+.Fn utc2tai "int64_t t"
+.Ft "int64_t"
+.Fn tai2utc "tai64_t t"
+.Ft "tai64_t"
+.Fn mjd2tai "mjd_t mjd"
+.Ft "mjd_t"
+.Fn tai2mjd "tai64_t t"
+.Ft "struct tm"
+.Fn mjd2tm "mjd_t mjd"
+.Ft "mjd_t"
+.Fn tm2mjd "struct tm tm"
+.Ft "void"
+.Fn exporttai "u_int8_t *dst" "tai64na_t *src"
+.Ft "void"
+.Fn importtai "u_int8_t *src" "tai64na_t *dst"
+.Sh DESCRIPTION
+The
+.Fn tai_time
+and
+.Fn taina_time
+functions return the current time in the TAI64 format into the
+tai64_t or tai64na_t variable pointed to by the
+.Fa t
+argument, if the argument is not
+.Dv NULL .
+Additionally,
+.Fn tai_time
+returns the value.
+.Pp
+The
+.Vt tai64_t
+and
+.Vt tai64na_t
+data types are specified further below.
+.Pp
+The
+.Fn tai_leaps
+function returns a pointer, which is guaranteed to be not
+.Dv NULL ,
+to a zero-terminated array of
+.Vt tai64_t
+values, each denoting a positive leap second.
+DJB says, negative leap seconds are not likely to happen;
+if they should, a new interface will be published.
+This function uses a table which should be initialised with
+.Fn tzset
+beforehand if mechanisms such as
+.Xr chroot 2
+are employed.
+.Pp
+The
+.Fn tai_isleap
+function returns 1 if
+.Fa t
+is known to be a (positive) leap second, 0 if otherwise.
+.Pp
+The
+.Fn timet2tai
+and
+.Fn tai2timet
+routines convert their argument between the TAI64 format and the
+.Vt time_t
+data type which is generally used in time keeping, for example by the
+.Xr gettimeofday 2
+system call.
+Generally speaking, a
+.Vt time_t
+counts the number of real seconds that have happened since January 1,
+1970, 00:00:00 UTC (coordinated universal time).
+.Pp
+The
+.Fn utc2tai
+and
+.Fn tai2utc
+functions convert between the TAI64 format and an UTC value expressed as
+.Vt int64_t .
+The UTC value equals the
+.Vt time_t
+value as shown above, with the difference that not real seconds are
+counted, but seconds that would have happened if every full day had
+exactly 86400 seconds.
+Because there are leap seconds, in reality some days have 86401 and
+some 86399 seconds, that's why this format cannot be used for reliable
+time keeping (it \fBis\fR being used by the NTP protocol), but it's
+useful for conversion between calendar dates and second-counting dates.
+.St -p1003.1
+compliant systems, unlike
+.Mx ,
+force their
+.Vt time_t
+type and internal kernel time to be in this format, completely ignoring
+the existence of leap seconds.
+.Pp
+The
+.Fn mjd2tai
+and
+.Fn tai2mjd
+functions convert between the TAI64 type and the MJD structure described
+further below, which keeps time in a calendar format.
+.Pp
+The
+.Fn mjd2tm
+and
+.Fn tm2mjd
+functions convert between the MJD structure and the more common
+.Vt struct tm
+as used by
+.Xr mktime 3 .
+.Fn tm2mjd
+converts the fields
+.Ic tm_sec , tm_min , tm_hour , tm_mday ,
+.Ic tm_mon , tm_year , tm_gmtoff
+of
+.Vt struct tm ;
+.Fn mjd2tm
+fills the fields
+.Ic tm_sec , tm_min , tm_hour , tm_mday ,
+.Ic tm_mon , tm_year , tm_wday , tm_yday
+with sensible values and
+.Ic tm_isdst , tm_gmtoff , tm_zone
+with null values.
+.Pp
+The
+.Fn exporttai
+and
+.Fn importtai
+functions convert between internal TAI64NA format and DJB-compatible
+on-the-wire TAI64NA/TAICLOCK format.
+See below for further documentation.
+.Pp
+The functions and data types described above are defined in the
+.Aq Pa time.h
+header file.
+The data type
+.Li tai64_t
+is aliased to
+.Li int64_t .
+The data type
+.Li tai64na_t
+includes the following fields:
+.Bd -literal -offset indent
+	tai64_t secs;		/* seconds (see below) */
+	uint32_t nano;		/* nanoseconds */
+	uint32_t atto;		/* attoseconds */
+.Ed
+.Pp
+The data type
+.Li mjd_t
+includes the following fields:
+.Bd -literal -offset indent
+	time_t mjd;		/* day of modified julian calendar */
+	int32_t sec;		/* second within the day */
+.Ed
+.Sh FILES
+.Bl -tag -width "/usr/share/zoneinfo/posixrules" -compact
+.It Pa /usr/share/zoneinfo
+time zone information directory
+.It Pa /usr/share/zoneinfo/UTC
+default source of leap second information
+.It Pa /usr/share/zoneinfo/posixrules
+alternative source of leap second information, if
+.Pa UTC
+is absent.
+.El
+.Sh SEE ALSO
+.Xr chroot 2 ,
+.Xr gettimeofday 2 ,
+.Xr mktime 3 ,
+.Xr ntpd 8 ,
+.Xr tzset 3
+.Sh STANDARDS
+This set of functions expects your operating system to not conform to
+.St -p1003.1
+for correct
+.Vt time_t
+handling.
+.Pp
+The exported TAI64NA datatype and the TAI64 second offset
+have been standardised by Dan J. Bernstein, see
+.Pa http://cr.yp.to/proto/utctai.html
+for a general overview of UTC, TAI and the NTP/POSIX problems,
+.Pa http://cr.yp.to/libtai/tai64.html
+for the various data types and
+.Pa http://cr.yp.to/proto/taiclock.txt
+for the specification of the on-wire TAICLOCK format,
+which contains the result of the
+.Fn exporttai
+function in bytes 4 to 19.
+.Sh HISTORY
+The TAI function suite appeared in
+.Mx 8 .
+.Sh AUTHORS
+The original author of the TAI64 data types and the libtai library
+for TAI64 manipulation, which was placed into public domain, is
+.An Dan J. Bernstein Aq djb@@cr.yp.to .
+.Pp
+The libc implementation of TAI64 functions are authored by
+.An Thorsten Do mirabilos Dc Glaser Aq tg@@mirbsd.org .
+.Sh CAVEATS
+The libc TAI functions have different function names and data
+types (except the exported TAI64NA on-the-wire format) than
+the DJB libtai ones.
+This allows one to use both libraries at the same time.
+The functions are exchangable, it is feasible to patch djb
+libtai to use this set of functions provided by libc internally.
+.Pp
+A
+.Vt tai64_t
+value is, in contrast to
+.Vt time_t ,
+not zero-based, but has a bias of
+.Dv __TAI64_BIAS ,
+which is implementation-defined to 0x4000000000000000ULL for the
+.Mx
+operating system.
+You will have to be extra carefully when adding values of type
+.Vt tai64_t
+or storing time values versus time distances in variables.
+.Sh BUGS
+The leap second table is read from the timezone information file.
+This has implications on the location of the file and its up-to-dateness.
+.Pp
+There is no method to select POSIX-conformant behaviour.
+It's probably better this way, though.
+.Pp
+Few sanitising of values is done, but the functions are considered safe.
+@
+
+
+1.7
+log
+@more mass conversions, including ancient eMail addresses
+@
+text
+@d1 1
+a1 1
+.\" $MirOS: src/lib/libc/time/taitime.3,v 1.6 2007/02/07 20:43:24 tg Exp $
+@
+
+
+1.6
+log
+@* attempt to move taitime(3) functions from libc and kernel to kernbase,
+  its prototypes from <time.h> and <sys/time.h> (which includes <time.h>)
+  and <lib/libkern/taitime.h> to <sys/taitime.h>, split between indepen-
+  dent and dependent (kernel/userland different leap table initialisation;
+  userland additional tai_time(), taina_time(), importtai(), exporttai()),
+  reduce required headers; reduce diff from headers to upstream
+* move kernel tai leap second table from kernel objects to libkern
+@
+text
+@d1 1
+a1 1
+.\" $MirOS: src/share/misc/licence.template,v 1.20 2006/12/11 21:04:56 tg Rel $
+d258 1
+a258 1
+.An Thorsten Do mirabilos Dc Glaser Aq tg@@66h.42h.de .
+@
+
+
+1.5
+log
+@sync licences, minor wcwidth KNF
+@
+text
+@d1 1
+a1 1
+.\" $MirOS: src/lib/libc/time/taitime.3,v 1.4 2005/12/17 05:46:15 tg Exp $
+d3 2
+a4 2
+.\" Copyright (c) 2004, 2005
+.\"	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+d6 5
+a10 6
+.\" Licensee is hereby permitted to deal in this work without restric-
+.\" tion, including unlimited rights to use, publicly perform, modify,
+.\" merge, distribute, sell, give away or sublicence, provided all co-
+.\" pyright notices above, these terms and the disclaimer are retained
+.\" in all redistributions or reproduced in accompanying documentation
+.\" or other materials provided with binary redistributions.
+d16 8
+a23 8
+.\" Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+.\" express, or implied, to the maximum extent permitted by applicable
+.\" law, without malicious intent or gross negligence; in no event may
+.\" licensor, an author or contributor be held liable for any indirect
+.\" or other damage, or direct damage except proven a consequence of a
+.\" direct error of said person and intended use of this work, loss or
+.\" other issues arising in any way out of its use, even if advised of
+.\" the possibility of such damage or existence of a defect.
+d25 2
+a26 2
+.Dd September 29, 2004
+.Dt TAI_LEAPS 3
+a28 2
+.Nm tai_time ,
+.Nm taina_time ,
+d39 2
+d43 1
+a43 1
+.Nd Year-2038-safe leap second compliant 64 bit time functions
+d46 1
+a46 1
+.Fd #include <time.h>
+d51 1
+a51 1
+.Fn taina_time "tai64na_t *ta"
+a83 2
+or
+.Fa ta
+d88 1
+a88 1
+returns the time value.
+d90 5
+a94 1
+The TAI64 and TAI64NA data types are specified further below.
+d98 3
+a100 1
+function returns a pointer to a zero-terminated array of
+d128 1
+a128 1
+counts the number of real seconds that have happened after January 1st,
+a168 3
+Time zone information is discarded \- when converting from
+.Vt struct tm ,
+you have to ensure the values are already in UTC format. 
+d170 12
+a181 4
+converts the following fields of
+.Vt struct tm :
+.Sy tm_gmtoff , No tm_year , tm_mon ,
+.No tm_mday , tm_hour , tm_min , tm_sec .
+d197 1
+a197 1
+.Li time_t .
+d203 2
+a204 2
+	u_int32_t nano;		/* nanoseconds */
+	u_int32_t atto;		/* attoseconds */
+d211 1
+a211 1
+	int32_t mjd;		/* day of modified julian calendar */
+d235 1
+a235 1
+.Li time_t
+d258 1
+a258 1
+.An Thorsten Do mirabile Dc Glaser Aq tg@@66h.42h.de .
+d267 1
+a267 1
+The
+d269 1
+a269 1
+is, in contrast to
+d272 2
+a273 2
+.Dv __TAI64_BIAS
+which is defined in the implementation as 0x4000000000000000ULL for the
+d281 1
+a281 1
+This has implications on the location of the file and its actuality.
+d286 1
+a286 1
+Few sanitizing of values is done, but the functions are considered safe.
+@
+
+
+1.4
+log
+@big fat licence update (I left some which are bsiegert@@'s alone though)
+also, remove licence boilerplate from some .h files who don't deserve it
+and remove and add some advertising clauses because I say so
+@
+text
+@d1 1
+a1 1
+.\" $MirOS: src/lib/libc/time/taitime.3,v 1.3 2005/10/19 17:52:09 tg Exp $
+d13 2
+a14 2
+.\" All advertising materials mentioning features or use of this soft-
+.\" ware must display the following acknowledgement:
+d24 1
+a24 1
+.\" the possibility of such damage or existence of a nontrivial bug.
+@
+
+
+1.3
+log
+@* fix spaces etc. by s/Ft/Vt/ in documentation body
+* document that tm2mjd DOES use the tm_gmtoff slot!
+@
+text
+@d1 1
+a1 1
+.\" $MirOS: src/lib/libc/time/taitime.3,v 1.2 2005/03/28 21:21:50 tg Exp $
+d17 8
+a24 7
+.\" Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+.\" any kind, expressed or implied, to the maximum extent permitted by
+.\" applicable law, but with the warranty of being written without ma-
+.\" licious intent or gross negligence; in no event shall licensor, an
+.\" author or contributor be held liable for any damage, direct, indi-
+.\" rect or other, however caused, arising in any way out of the usage
+.\" of this work, even if advised of the possibility of such damage.
+@
+
+
+1.2
+log
+@tzset(3) is now the preferred method for initialising the
+TAI leap second table as well
+@
+text
+@d1 1
+a1 1
+.\" $MirOS: src/share/misc/licence.template,v 1.2 2005/03/03 19:43:30 tg Rel $
+d97 1
+a97 1
+.Ft tai64_t
+d118 1
+a118 1
+.Ft time_t
+d123 1
+a123 1
+.Ft time_t
+d132 1
+a132 1
+.Ft int64_t .
+d134 1
+a134 1
+.Ft time_t
+d146 1
+a146 1
+.Ft time_t
+d162 1
+a162 1
+.Ft struct tm
+d166 1
+a166 1
+.Ft struct tm ,
+d168 5
+d259 1
+a259 1
+.Ft tai64_t
+d261 1
+a261 1
+.Ft time_t ,
+d268 1
+a268 1
+.Ft tai64_t
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d3 1
+a3 1
+.\" Copyright (c) 2004
+d13 4
+d101 5
+d215 2
+a216 1
+.Xr ntpd 8
+a264 5
+.Pp
+When writing chrooting daemons, be sure to initialise the leap second
+table first by issuing the following command early:
+.br
+.Li 	(void) tai_leaps();		/* initialise leap second table */
+@
+
+
+1.1.7.1
+log
+@Add some missing files, such as some ISDN4BSD stuff,
+documentation, tmac and tab files, TAI64 etc.
+@
+text
+@@

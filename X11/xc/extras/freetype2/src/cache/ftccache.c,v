@@ -1,0 +1,1473 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.21.32;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.47.48;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.02.26.20.04.55;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.47;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.45;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.11;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.13;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.41.59;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftccache.c                                                             */
+/*                                                                         */
+/*    The FreeType internal cache interface (body).                        */
+/*                                                                         */
+/*  Copyright 2000-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include "ftcmanag.h"
+#include FT_INTERNAL_OBJECTS_H
+#include FT_INTERNAL_DEBUG_H
+
+#include "ftccback.h"
+#include "ftcerror.h"
+
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_cache
+
+
+#define FTC_HASH_MAX_LOAD  2
+#define FTC_HASH_MIN_LOAD  1
+#define FTC_HASH_SUB_LOAD  ( FTC_HASH_MAX_LOAD - FTC_HASH_MIN_LOAD )
+
+  /* this one _must_ be a power of 2! */
+#define FTC_HASH_INITIAL_SIZE  8
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                   CACHE NODE DEFINITIONS                      *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  /* add a new node to the head of the manager's circular MRU list */
+  static void
+  ftc_node_mru_link( FTC_Node     node,
+                     FTC_Manager  manager )
+  {
+    void  *nl = &manager->nodes_list;
+
+
+    FTC_MruNode_Prepend( (FTC_MruNode*)nl,
+                         (FTC_MruNode)node );
+    manager->num_nodes++;
+  }
+
+
+  /* remove a node from the manager's MRU list */
+  static void
+  ftc_node_mru_unlink( FTC_Node     node,
+                       FTC_Manager  manager )
+  {
+    void  *nl = &manager->nodes_list;
+
+
+    FTC_MruNode_Remove( (FTC_MruNode*)nl,
+                        (FTC_MruNode)node );
+    manager->num_nodes--;
+  }
+
+
+#ifndef FTC_INLINE
+
+  /* move a node to the head of the manager's MRU list */
+  static void
+  ftc_node_mru_up( FTC_Node     node,
+                   FTC_Manager  manager )
+  {
+    FTC_MruNode_Up( (FTC_MruNode*)&manager->nodes_list,
+                    (FTC_MruNode)node );
+  }
+
+
+  /* get a top bucket for specified hash from cache,
+   * body for FTC_NODE_TOP_FOR_HASH( cache, hash )
+   */
+  FT_LOCAL_DEF( FTC_Node* )
+  ftc_get_top_node_for_hash( FTC_Cache  cache,
+                             FT_Offset  hash )
+  {
+    FTC_Node*  pnode;
+    FT_Offset  idx;
+
+
+    idx = hash & cache->mask;
+    if ( idx < cache->p )
+      idx = hash & ( 2 * cache->mask + 1 );
+    pnode = cache->buckets + idx;
+    return pnode;
+  }
+
+#endif /* !FTC_INLINE */
+
+
+  /* Note that this function cannot fail.  If we cannot re-size the
+   * buckets array appropriately, we simply degrade the hash table's
+   * performance!
+   */
+  static void
+  ftc_cache_resize( FTC_Cache  cache )
+  {
+    for (;;)
+    {
+      FTC_Node  node, *pnode;
+      FT_UFast  p     = cache->p;
+      FT_UFast  mask  = cache->mask;
+      FT_UFast  count = mask + p + 1;    /* number of buckets */
+
+
+      /* do we need to shrink the buckets array? */
+      if ( cache->slack < 0 )
+      {
+        FTC_Node  new_list = NULL;
+
+
+        /* try to expand the buckets array _before_ splitting
+         * the bucket lists
+         */
+        if ( p >= mask )
+        {
+          FT_Memory  memory = cache->memory;
+          FT_Error   error;
+
+
+          /* if we can't expand the array, leave immediately */
+          if ( FT_RENEW_ARRAY( cache->buckets,
+                               ( mask + 1 ) * 2, ( mask + 1 ) * 4 ) )
+            break;
+        }
+
+        /* split a single bucket */
+        pnode = cache->buckets + p;
+
+        for (;;)
+        {
+          node = *pnode;
+          if ( !node )
+            break;
+
+          if ( node->hash & ( mask + 1 ) )
+          {
+            *pnode     = node->link;
+            node->link = new_list;
+            new_list   = node;
+          }
+          else
+            pnode = &node->link;
+        }
+
+        cache->buckets[p + mask + 1] = new_list;
+
+        cache->slack += FTC_HASH_MAX_LOAD;
+
+        if ( p >= mask )
+        {
+          cache->mask = 2 * mask + 1;
+          cache->p    = 0;
+        }
+        else
+          cache->p = p + 1;
+      }
+
+      /* do we need to expand the buckets array? */
+      else if ( cache->slack > (FT_Long)count * FTC_HASH_SUB_LOAD )
+      {
+        FT_UFast   old_index = p + mask;
+        FTC_Node*  pold;
+
+
+        if ( old_index + 1 <= FTC_HASH_INITIAL_SIZE )
+          break;
+
+        if ( p == 0 )
+        {
+          FT_Memory  memory = cache->memory;
+          FT_Error   error;
+
+
+          /* if we can't shrink the array, leave immediately */
+          if ( FT_RENEW_ARRAY( cache->buckets,
+                               ( mask + 1 ) * 2, mask + 1 ) )
+            break;
+
+          cache->mask >>= 1;
+          p             = cache->mask;
+        }
+        else
+          p--;
+
+        pnode = cache->buckets + p;
+        while ( *pnode )
+          pnode = &(*pnode)->link;
+
+        pold   = cache->buckets + old_index;
+        *pnode = *pold;
+        *pold  = NULL;
+
+        cache->slack -= FTC_HASH_MAX_LOAD;
+        cache->p      = p;
+      }
+
+      /* otherwise, the hash table is balanced */
+      else
+        break;
+    }
+  }
+
+
+  /* remove a node from its cache's hash table */
+  static void
+  ftc_node_hash_unlink( FTC_Node   node0,
+                        FTC_Cache  cache )
+  {
+    FTC_Node  *pnode = FTC_NODE_TOP_FOR_HASH( cache, node0->hash );
+
+
+    for (;;)
+    {
+      FTC_Node  node = *pnode;
+
+
+      if ( !node )
+      {
+        FT_TRACE0(( "ftc_node_hash_unlink: unknown node\n" ));
+        return;
+      }
+
+      if ( node == node0 )
+        break;
+
+      pnode = &(*pnode)->link;
+    }
+
+    *pnode      = node0->link;
+    node0->link = NULL;
+
+    cache->slack++;
+    ftc_cache_resize( cache );
+  }
+
+
+  /* add a node to the `top' of its cache's hash table */
+  static void
+  ftc_node_hash_link( FTC_Node   node,
+                      FTC_Cache  cache )
+  {
+    FTC_Node  *pnode = FTC_NODE_TOP_FOR_HASH( cache, node->hash );
+
+
+    node->link = *pnode;
+    *pnode     = node;
+
+    cache->slack--;
+    ftc_cache_resize( cache );
+  }
+
+
+  /* remove a node from the cache manager */
+  FT_LOCAL_DEF( void )
+  ftc_node_destroy( FTC_Node     node,
+                    FTC_Manager  manager )
+  {
+    FTC_Cache  cache;
+
+
+#ifdef FT_DEBUG_ERROR
+    /* find node's cache */
+    if ( node->cache_index >= manager->num_caches )
+    {
+      FT_TRACE0(( "ftc_node_destroy: invalid node handle\n" ));
+      return;
+    }
+#endif
+
+    cache = manager->caches[node->cache_index];
+
+#ifdef FT_DEBUG_ERROR
+    if ( !cache )
+    {
+      FT_TRACE0(( "ftc_node_destroy: invalid node handle\n" ));
+      return;
+    }
+#endif
+
+    manager->cur_weight -= cache->clazz.node_weight( node, cache );
+
+    /* remove node from mru list */
+    ftc_node_mru_unlink( node, manager );
+
+    /* remove node from cache's hash table */
+    ftc_node_hash_unlink( node, cache );
+
+    /* now finalize it */
+    cache->clazz.node_free( node, cache );
+
+#if 0
+    /* check, just in case of general corruption :-) */
+    if ( manager->num_nodes == 0 )
+      FT_TRACE0(( "ftc_node_destroy: invalid cache node count (%d)\n",
+                  manager->num_nodes ));
+#endif
+  }
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                    ABSTRACT CACHE CLASS                       *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  FT_LOCAL_DEF( FT_Error )
+  FTC_Cache_Init( FTC_Cache  cache )
+  {
+    return ftc_cache_init( cache );
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  ftc_cache_init( FTC_Cache  cache )
+  {
+    FT_Memory  memory = cache->memory;
+    FT_Error   error;
+
+
+    cache->p     = 0;
+    cache->mask  = FTC_HASH_INITIAL_SIZE - 1;
+    cache->slack = FTC_HASH_INITIAL_SIZE * FTC_HASH_MAX_LOAD;
+
+    (void)FT_NEW_ARRAY( cache->buckets, FTC_HASH_INITIAL_SIZE * 2 );
+    return error;
+  }
+
+
+  static void
+  FTC_Cache_Clear( FTC_Cache  cache )
+  {
+    if ( cache && cache->buckets )
+    {
+      FTC_Manager  manager = cache->manager;
+      FT_UFast     i;
+      FT_UFast     count;
+
+
+      count = cache->p + cache->mask + 1;
+
+      for ( i = 0; i < count; i++ )
+      {
+        FTC_Node  *pnode = cache->buckets + i, next, node = *pnode;
+
+
+        while ( node )
+        {
+          next        = node->link;
+          node->link  = NULL;
+
+          /* remove node from mru list */
+          ftc_node_mru_unlink( node, manager );
+
+          /* now finalize it */
+          manager->cur_weight -= cache->clazz.node_weight( node, cache );
+
+          cache->clazz.node_free( node, cache );
+          node = next;
+        }
+        cache->buckets[i] = NULL;
+      }
+      ftc_cache_resize( cache );
+    }
+  }
+
+
+  FT_LOCAL_DEF( void )
+  ftc_cache_done( FTC_Cache  cache )
+  {
+    if ( cache->memory )
+    {
+      FT_Memory  memory = cache->memory;
+
+
+      FTC_Cache_Clear( cache );
+
+      FT_FREE( cache->buckets );
+      cache->mask  = 0;
+      cache->p     = 0;
+      cache->slack = 0;
+
+      cache->memory = NULL;
+    }
+  }
+
+
+  FT_LOCAL_DEF( void )
+  FTC_Cache_Done( FTC_Cache  cache )
+  {
+    ftc_cache_done( cache );
+  }
+
+
+  static void
+  ftc_cache_add( FTC_Cache  cache,
+                 FT_Offset  hash,
+                 FTC_Node   node )
+  {
+    node->hash        = hash;
+    node->cache_index = (FT_UInt16)cache->index;
+    node->ref_count   = 0;
+
+    ftc_node_hash_link( node, cache );
+    ftc_node_mru_link( node, cache->manager );
+
+    {
+      FTC_Manager  manager = cache->manager;
+
+
+      manager->cur_weight += cache->clazz.node_weight( node, cache );
+
+      if ( manager->cur_weight >= manager->max_weight )
+      {
+        node->ref_count++;
+        FTC_Manager_Compress( manager );
+        node->ref_count--;
+      }
+    }
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  FTC_Cache_NewNode( FTC_Cache   cache,
+                     FT_Offset   hash,
+                     FT_Pointer  query,
+                     FTC_Node   *anode )
+  {
+    FT_Error  error;
+    FTC_Node  node;
+
+
+    /*
+     * We use the FTC_CACHE_TRYLOOP macros to support out-of-memory
+     * errors (OOM) correctly, i.e., by flushing the cache progressively
+     * in order to make more room.
+     */
+
+    FTC_CACHE_TRYLOOP( cache )
+    {
+      error = cache->clazz.node_new( &node, query, cache );
+    }
+    FTC_CACHE_TRYLOOP_END( NULL );
+
+    if ( error )
+      node = NULL;
+    else
+    {
+     /* don't assume that the cache has the same number of buckets, since
+      * our allocation request might have triggered global cache flushing
+      */
+      ftc_cache_add( cache, hash, node );
+    }
+
+    *anode = node;
+    return error;
+  }
+
+
+#ifndef FTC_INLINE
+
+  FT_LOCAL_DEF( FT_Error )
+  FTC_Cache_Lookup( FTC_Cache   cache,
+                    FT_Offset   hash,
+                    FT_Pointer  query,
+                    FTC_Node   *anode )
+  {
+    FTC_Node*  bucket;
+    FTC_Node*  pnode;
+    FTC_Node   node;
+    FT_Error   error        = FT_Err_Ok;
+    FT_Bool    list_changed = FALSE;
+
+    FTC_Node_CompareFunc  compare = cache->clazz.node_compare;
+
+
+    if ( !cache || !anode )
+      return FT_THROW( Invalid_Argument );
+
+    /* Go to the `top' node of the list sharing same masked hash */
+    bucket = pnode = FTC_NODE_TOP_FOR_HASH( cache, hash );
+
+    /* Lookup a node with exactly same hash and queried properties.  */
+    /* NOTE: _nodcomp() may change the linked list to reduce memory. */
+    for (;;)
+    {
+      node = *pnode;
+      if ( !node )
+        goto NewNode;
+
+      if ( node->hash == hash                           &&
+           compare( node, query, cache, &list_changed ) )
+        break;
+
+      pnode = &node->link;
+    }
+
+    if ( list_changed )
+    {
+      /* Update bucket by modified linked list */
+      bucket = pnode = FTC_NODE_TOP_FOR_HASH( cache, hash );
+
+      /* Update pnode by modified linked list */
+      while ( *pnode != node )
+      {
+        if ( !*pnode )
+        {
+          FT_ERROR(( "FTC_Cache_Lookup: oops!!!  node missing\n" ));
+          goto NewNode;
+        }
+        else
+          pnode = &((*pnode)->link);
+      }
+    }
+
+    /* Reorder the list to move the found node to the `top' */
+    if ( node != *bucket )
+    {
+      *pnode     = node->link;
+      node->link = *bucket;
+      *bucket    = node;
+    }
+
+    /* move to head of MRU list */
+    {
+      FTC_Manager  manager = cache->manager;
+
+
+      if ( node != manager->nodes_list )
+        ftc_node_mru_up( node, manager );
+    }
+    *anode = node;
+
+    return error;
+
+  NewNode:
+    return FTC_Cache_NewNode( cache, hash, query, anode );
+  }
+
+#endif /* !FTC_INLINE */
+
+
+  FT_LOCAL_DEF( void )
+  FTC_Cache_RemoveFaceID( FTC_Cache   cache,
+                          FTC_FaceID  face_id )
+  {
+    FT_UFast     i, count;
+    FTC_Manager  manager = cache->manager;
+    FTC_Node     frees   = NULL;
+
+
+    count = cache->p + cache->mask + 1;
+    for ( i = 0; i < count; i++ )
+    {
+      FTC_Node*  bucket = cache->buckets + i;
+      FTC_Node*  pnode  = bucket;
+
+
+      for (;;)
+      {
+        FTC_Node  node = *pnode;
+        FT_Bool   list_changed = FALSE;
+
+
+        if ( !node )
+          break;
+
+        if ( cache->clazz.node_remove_faceid( node, face_id,
+                                              cache, &list_changed ) )
+        {
+          *pnode     = node->link;
+          node->link = frees;
+          frees      = node;
+        }
+        else
+          pnode = &node->link;
+      }
+    }
+
+    /* remove all nodes in the free list */
+    while ( frees )
+    {
+      FTC_Node  node;
+
+
+      node  = frees;
+      frees = node->link;
+
+      manager->cur_weight -= cache->clazz.node_weight( node, cache );
+      ftc_node_mru_unlink( node, manager );
+
+      cache->clazz.node_free( node, cache );
+
+      cache->slack++;
+    }
+
+    ftc_cache_resize( cache );
+  }
+
+
+/* END */
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006, 2007, 2009 by       */
+d35 1
+a35 1
+/* this one _must_ be a power of 2! */
+d86 19
+d118 3
+a120 3
+      FT_UFast  p      = cache->p;
+      FT_UFast  mask   = cache->mask;
+      FT_UFast  count  = mask + p + 1;    /* number of buckets */
+d139 2
+a140 1
+          if ( FT_RENEW_ARRAY( cache->buckets, (mask+1)*2, (mask+1)*4 ) )
+d150 1
+a150 1
+          if ( node == NULL )
+d214 3
+a216 1
+      else /* the hash table is balanced */
+d227 1
+a227 2
+    FTC_Node  *pnode;
+    FT_UInt    idx;
+a229 6
+    idx = (FT_UInt)( node0->hash & cache->mask );
+    if ( idx < cache->p )
+      idx = (FT_UInt)( node0->hash & ( 2 * cache->mask + 1 ) );
+
+    pnode = cache->buckets + idx;
+
+d235 1
+a235 1
+      if ( node == NULL )
+d260 1
+a260 2
+    FTC_Node  *pnode;
+    FT_UInt    idx;
+a262 6
+    idx = (FT_UInt)( node->hash & cache->mask );
+    if ( idx < cache->p )
+      idx = (FT_UInt)( node->hash & (2 * cache->mask + 1 ) );
+
+    pnode = cache->buckets + idx;
+
+a271 3
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+  FT_BASE_DEF( void )
+#else
+a272 1
+#endif
+d291 1
+a291 1
+    if ( cache == NULL )
+d353 1
+a353 1
+    if ( cache )
+d417 1
+a417 1
+                 FT_UInt32  hash,
+d420 2
+a421 2
+    node->hash = hash;
+    node->cache_index = (FT_UInt16) cache->index;
+d445 1
+a445 1
+                     FT_UInt32   hash,
+d463 1
+a463 1
+    FTC_CACHE_TRYLOOP_END();
+d484 1
+a484 1
+                    FT_UInt32   hash,
+a487 1
+    FT_UFast   idx;
+d491 2
+a492 1
+    FT_Error   error = 0;
+d497 2
+a498 2
+    if ( cache == NULL || anode == NULL )
+      return FT_Err_Invalid_Argument;
+d500 2
+a501 3
+    idx = hash & cache->mask;
+    if ( idx < cache->p )
+      idx = hash & ( cache->mask * 2 + 1 );
+d503 2
+a504 2
+    bucket = cache->buckets + idx;
+    pnode  = bucket;
+d508 1
+a508 1
+      if ( node == NULL )
+d511 2
+a512 1
+      if ( node->hash == hash && compare( node, query, cache ) )
+d518 19
+d553 1
+d572 1
+a572 1
+    count = cache->p + cache->mask;
+d579 1
+a579 1
+      for ( ;; )
+d582 1
+d585 1
+a585 1
+        if ( node == NULL )
+d588 2
+a589 1
+        if ( cache->clazz.node_remove_faceid( node, face_id, cache ) )
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006, 2007 by             */
+d27 3
+d99 3
+a101 3
+      FT_UInt   p      = cache->p;
+      FT_UInt   mask   = cache->mask;
+      FT_UInt   count  = mask + p + 1;    /* number of buckets */
+d159 1
+a159 1
+        FT_UInt    old_index = p + mask;
+d222 1
+a222 1
+        FT_ERROR(( "ftc_node_hash_unlink: unknown node!\n" ));
+d279 1
+a279 1
+      FT_ERROR(( "ftc_node_destroy: invalid node handle\n" ));
+d289 1
+a289 1
+      FT_ERROR(( "ftc_node_destroy: invalid node handle\n" ));
+d308 1
+a308 1
+      FT_ERROR(( "ftc_node_destroy: invalid cache node count! = %d\n",
+d353 1
+a353 1
+      FT_UInt      count;
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006 by                   */
+d49 4
+a52 1
+    FTC_MruNode_Prepend( (FTC_MruNode*)&manager->nodes_list,
+d63 4
+a66 1
+    FTC_MruNode_Remove( (FTC_MruNode*)&manager->nodes_list,
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004 by                               */
+d20 1
+a20 1
+#include FT_CACHE_INTERNAL_MANAGER_H
+d66 2
+d77 2
+d107 1
+d111 1
+a111 1
+          if ( FT_MEM_RENEW_ARRAY( cache->buckets, (mask+1)*2, (mask+1)*4 ) )
+d160 1
+d164 2
+a165 2
+          if ( FT_MEM_RENEW_ARRAY( cache->buckets,
+                                   ( mask + 1 ) * 2, mask + 1 ) )
+d255 5
+a259 1
+  FT_EXPORT_DEF( void )
+d314 1
+a314 1
+  FT_EXPORT_DEF( FT_Error )
+d317 7
+d325 1
+d332 2
+a333 1
+    return ( FT_MEM_NEW_ARRAY( cache->buckets, FTC_HASH_INITIAL_SIZE * 2 ) );
+d337 1
+a337 8
+  FT_LOCAL_DEF( FT_Error )
+  ftc_cache_init( FTC_Cache  cache )
+  {
+    return FTC_Cache_Init( cache );
+  }
+
+
+  FT_EXPORT_DEF( void )
+d375 2
+a376 2
+  FT_EXPORT_DEF( void )
+  FTC_Cache_Done( FTC_Cache  cache )
+d396 1
+a396 1
+  ftc_cache_done( FTC_Cache  cache )
+d398 1
+a398 1
+    FTC_Cache_Done( cache );
+d430 1
+a430 1
+  FT_EXPORT_DEF( FT_Error )
+d439 1
+d441 3
+a443 9
+     *  Try to allocate a new cache node.  Note that in case of
+     *  out-of-memory error (OOM), we'll flush the cache a bit,
+     *  then try again.
+     *
+     *  On each try, the `tries' variable gives the number
+     *  of old nodes we want to flush from the manager's global list
+     *  before the next allocation attempt.  It barely doubles on
+     *  each iteration.
+     *
+d445 7
+a451 1
+    error = cache->clazz.node_new( &node, query, cache );
+d453 8
+a460 1
+      goto FlushCache;
+a461 7
+  AddNode:
+    /* don't assume that the cache has the same number of buckets, since
+     * our allocation request might have triggered global cache flushing
+     */
+    ftc_cache_add( cache, hash, node );
+
+  Exit:
+d464 1
+a465 8
+  FlushCache:
+    node = NULL;
+    if ( error != FT_Err_Out_Of_Memory )
+      goto Exit;
+
+    {
+      FTC_Manager  manager = cache->manager;
+      FT_UInt      count, tries = 1;
+d467 1
+d469 1
+a469 28
+      for (;;)
+      {
+        error = cache->clazz.node_new( &node, query, cache );
+        if ( !error )
+          break;
+
+        node = NULL;
+        if ( error != FT_Err_Out_Of_Memory )
+          goto Exit;
+
+        count = FTC_Manager_FlushN( manager, tries );
+        if ( count == 0 )
+          goto Exit;
+
+        if ( count == tries )
+        {
+          count = tries * 2;
+          if ( count < tries || count > manager->num_nodes )
+            count = manager->num_nodes;
+        }
+        tries = count;
+      }
+    }
+    goto AddNode;
+  }
+
+
+  FT_EXPORT_DEF( FT_Error )
+d527 2
+d530 1
+a530 1
+  FT_EXPORT_DEF( void )
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006, 2007 by             */
+d20 1
+a20 1
+#include "ftcmanag.h"
+d49 1
+a49 4
+    void  *nl = &manager->nodes_list;
+
+
+    FTC_MruNode_Prepend( (FTC_MruNode*)nl,
+d60 1
+a60 4
+    void  *nl = &manager->nodes_list;
+
+
+    FTC_MruNode_Remove( (FTC_MruNode*)nl,
+a65 2
+#ifndef FTC_INLINE
+
+a74 2
+#endif /* !FTC_INLINE */
+
+a102 1
+          FT_Error   error;
+d106 1
+a106 1
+          if ( FT_RENEW_ARRAY( cache->buckets, (mask+1)*2, (mask+1)*4 ) )
+a154 1
+          FT_Error   error;
+d158 2
+a159 2
+          if ( FT_RENEW_ARRAY( cache->buckets,
+                               ( mask + 1 ) * 2, mask + 1 ) )
+d249 1
+a249 5
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+  FT_BASE_DEF( void )
+#else
+  FT_LOCAL_DEF( void )
+#endif
+d304 1
+a304 1
+  FT_LOCAL_DEF( FT_Error )
+a306 7
+    return ftc_cache_init( cache );
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  ftc_cache_init( FTC_Cache  cache )
+  {
+a307 1
+    FT_Error   error;
+d314 8
+a321 2
+    (void)FT_NEW_ARRAY( cache->buckets, FTC_HASH_INITIAL_SIZE * 2 );
+    return error;
+d325 1
+a325 1
+  static void
+d363 2
+a364 2
+  FT_LOCAL_DEF( void )
+  ftc_cache_done( FTC_Cache  cache )
+d384 1
+a384 1
+  FTC_Cache_Done( FTC_Cache  cache )
+d386 1
+a386 1
+    ftc_cache_done( cache );
+d418 1
+a418 1
+  FT_LOCAL_DEF( FT_Error )
+d427 14
+d442 3
+a444 4
+    /*
+     * We use the FTC_CACHE_TRYLOOP macros to support out-of-memory
+     * errors (OOM) correctly, i.e., by flushing the cache progressively
+     * in order to make more room.
+d446 10
+a456 1
+    FTC_CACHE_TRYLOOP( cache )
+d458 17
+a474 3
+      error = cache->clazz.node_new( &node, query, cache );
+    }
+    FTC_CACHE_TRYLOOP_END();
+d476 8
+a483 8
+    if ( error )
+      node = NULL;
+    else
+    {
+     /* don't assume that the cache has the same number of buckets, since
+      * our allocation request might have triggered global cache flushing
+      */
+      ftc_cache_add( cache, hash, node );
+d485 1
+a485 3
+
+    *anode = node;
+    return error;
+d489 1
+a489 3
+#ifndef FTC_INLINE
+
+  FT_LOCAL_DEF( FT_Error )
+a546 2
+#endif /* !FTC_INLINE */
+
+d548 1
+a548 1
+  FT_LOCAL_DEF( void )
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006 by                   */
+d20 1
+a20 1
+#include "ftcmanag.h"
+a65 2
+#ifndef FTC_INLINE
+
+a74 2
+#endif /* !FTC_INLINE */
+
+a102 1
+          FT_Error   error;
+d106 1
+a106 1
+          if ( FT_RENEW_ARRAY( cache->buckets, (mask+1)*2, (mask+1)*4 ) )
+a154 1
+          FT_Error   error;
+d158 2
+a159 2
+          if ( FT_RENEW_ARRAY( cache->buckets,
+                               ( mask + 1 ) * 2, mask + 1 ) )
+d249 1
+a249 5
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+  FT_BASE_DEF( void )
+#else
+  FT_LOCAL_DEF( void )
+#endif
+d304 1
+a304 1
+  FT_LOCAL_DEF( FT_Error )
+a306 7
+    return ftc_cache_init( cache );
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  ftc_cache_init( FTC_Cache  cache )
+  {
+a307 1
+    FT_Error   error;
+d314 8
+a321 2
+    (void)FT_NEW_ARRAY( cache->buckets, FTC_HASH_INITIAL_SIZE * 2 );
+    return error;
+d325 1
+a325 1
+  static void
+d363 2
+a364 2
+  FT_LOCAL_DEF( void )
+  ftc_cache_done( FTC_Cache  cache )
+d384 1
+a384 1
+  FTC_Cache_Done( FTC_Cache  cache )
+d386 1
+a386 1
+    ftc_cache_done( cache );
+d418 1
+a418 1
+  FT_LOCAL_DEF( FT_Error )
+d427 14
+d442 3
+a444 4
+    /*
+     * We use the FTC_CACHE_TRYLOOP macros to support out-of-memory
+     * errors (OOM) correctly, i.e., by flushing the cache progressively
+     * in order to make more room.
+d446 10
+a456 1
+    FTC_CACHE_TRYLOOP( cache )
+d458 17
+a474 3
+      error = cache->clazz.node_new( &node, query, cache );
+    }
+    FTC_CACHE_TRYLOOP_END();
+d476 8
+a483 8
+    if ( error )
+      node = NULL;
+    else
+    {
+     /* don't assume that the cache has the same number of buckets, since
+      * our allocation request might have triggered global cache flushing
+      */
+      ftc_cache_add( cache, hash, node );
+d485 1
+a485 3
+
+    *anode = node;
+    return error;
+d489 1
+a489 3
+#ifndef FTC_INLINE
+
+  FT_LOCAL_DEF( FT_Error )
+a546 2
+#endif /* !FTC_INLINE */
+
+d548 1
+a548 1
+  FT_LOCAL_DEF( void )
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2001, 2002, 2003, 2004, 2005, 2006, 2007, 2009 by       */
+a26 3
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_cache
+
+d49 1
+a49 4
+    void  *nl = &manager->nodes_list;
+
+
+    FTC_MruNode_Prepend( (FTC_MruNode*)nl,
+d60 1
+a60 4
+    void  *nl = &manager->nodes_list;
+
+
+    FTC_MruNode_Remove( (FTC_MruNode*)nl,
+d90 3
+a92 3
+      FT_UFast  p      = cache->p;
+      FT_UFast  mask   = cache->mask;
+      FT_UFast  count  = mask + p + 1;    /* number of buckets */
+d150 1
+a150 1
+        FT_UFast   old_index = p + mask;
+d213 1
+a213 1
+        FT_TRACE0(( "ftc_node_hash_unlink: unknown node\n" ));
+d270 1
+a270 1
+      FT_TRACE0(( "ftc_node_destroy: invalid node handle\n" ));
+d280 1
+a280 1
+      FT_TRACE0(( "ftc_node_destroy: invalid node handle\n" ));
+d299 1
+a299 1
+      FT_TRACE0(( "ftc_node_destroy: invalid cache node count (%d)\n",
+d344 1
+a344 1
+      FT_UFast     count;
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2000-2016 by                                                 */
+d35 1
+a35 1
+  /* this one _must_ be a power of 2! */
+a85 19
+
+  /* get a top bucket for specified hash from cache,
+   * body for FTC_NODE_TOP_FOR_HASH( cache, hash )
+   */
+  FT_LOCAL_DEF( FTC_Node* )
+  ftc_get_top_node_for_hash( FTC_Cache  cache,
+                             FT_Offset  hash )
+  {
+    FTC_Node*  pnode;
+    FT_Offset  idx;
+
+
+    idx = hash & cache->mask;
+    if ( idx < cache->p )
+      idx = hash & ( 2 * cache->mask + 1 );
+    pnode = cache->buckets + idx;
+    return pnode;
+  }
+
+d99 3
+a101 3
+      FT_UFast  p     = cache->p;
+      FT_UFast  mask  = cache->mask;
+      FT_UFast  count = mask + p + 1;    /* number of buckets */
+d120 1
+a120 2
+          if ( FT_RENEW_ARRAY( cache->buckets,
+                               ( mask + 1 ) * 2, ( mask + 1 ) * 4 ) )
+d130 1
+a130 1
+          if ( !node )
+d194 1
+a194 3
+
+      /* otherwise, the hash table is balanced */
+      else
+d205 2
+a206 1
+    FTC_Node  *pnode = FTC_NODE_TOP_FOR_HASH( cache, node0->hash );
+d209 6
+d220 1
+a220 1
+      if ( !node )
+d245 2
+a246 1
+    FTC_Node  *pnode = FTC_NODE_TOP_FOR_HASH( cache, node->hash );
+d249 6
+d264 3
+d268 1
+d287 1
+a287 1
+    if ( !cache )
+d349 1
+a349 1
+    if ( cache && cache->buckets )
+d413 1
+a413 1
+                 FT_Offset  hash,
+d416 2
+a417 2
+    node->hash        = hash;
+    node->cache_index = (FT_UInt16)cache->index;
+d441 1
+a441 1
+                     FT_Offset   hash,
+d459 1
+a459 1
+    FTC_CACHE_TRYLOOP_END( NULL );
+d480 1
+a480 1
+                    FT_Offset   hash,
+d484 1
+d488 1
+a488 2
+    FT_Error   error        = FT_Err_Ok;
+    FT_Bool    list_changed = FALSE;
+d493 2
+a494 2
+    if ( !cache || !anode )
+      return FT_THROW( Invalid_Argument );
+d496 3
+a498 2
+    /* Go to the `top' node of the list sharing same masked hash */
+    bucket = pnode = FTC_NODE_TOP_FOR_HASH( cache, hash );
+d500 2
+a501 2
+    /* Lookup a node with exactly same hash and queried properties.  */
+    /* NOTE: _nodcomp() may change the linked list to reduce memory. */
+d505 1
+a505 1
+      if ( !node )
+d508 1
+a508 2
+      if ( node->hash == hash                           &&
+           compare( node, query, cache, &list_changed ) )
+a513 19
+    if ( list_changed )
+    {
+      /* Update bucket by modified linked list */
+      bucket = pnode = FTC_NODE_TOP_FOR_HASH( cache, hash );
+
+      /* Update pnode by modified linked list */
+      while ( *pnode != node )
+      {
+        if ( !*pnode )
+        {
+          FT_ERROR(( "FTC_Cache_Lookup: oops!!!  node missing\n" ));
+          goto NewNode;
+        }
+        else
+          pnode = &((*pnode)->link);
+      }
+    }
+
+    /* Reorder the list to move the found node to the `top' */
+a529 1
+
+d548 1
+a548 1
+    count = cache->p + cache->mask + 1;
+d555 1
+a555 1
+      for (;;)
+a557 1
+        FT_Bool   list_changed = FALSE;
+d560 1
+a560 1
+        if ( !node )
+d563 1
+a563 2
+        if ( cache->clazz.node_remove_faceid( node, face_id,
+                                              cache, &list_changed ) )
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

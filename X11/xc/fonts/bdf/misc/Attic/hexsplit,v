@@ -1,0 +1,106 @@
+head	1.1;
+access;
+symbols
+	tg-fixedmisc-merge:1.1.0.2;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2012.07.31.21.52.02;	author tg;	state dead;
+branches
+	1.1.2.1;
+next	;
+commitid	10050185383577C622B;
+
+1.1.2.1
+date	2012.07.31.21.52.02;	author tg;	state Exp;
+branches;
+next	;
+commitid	10050185383577C622B;
+
+
+desc
+@@
+
+
+1.1
+log
+@file hexsplit was initially added on branch tg-fixedmisc-merge.
+@
+text
+@@
+
+
+1.1.2.1
+log
+@bunch’a scripts for unifont-5.1.20080914/font/precompiled
+NB: Bron: Debian src:unifont=5.1.20080914-1.1
+@
+text
+@a0 63
+#!/bin/mksh
+# $MirOS$
+#-
+# Split unifont.hex minus blanks.hex and rc-priv.hex (only the known
+# substitution glyph) into unifont.h08 and unifont.h16 while taking
+# *.clst (skip) and character widths into account.
+#
+# Theoretically we should allow ${%s} == -1 for halfwidth,
+# but all occurrences in GNU Unifont are fullwidth, so boo.
+
+set -U
+
+set -A known
+for a in *.clst; do
+	[[ -s $a ]] || continue
+	while read i; do
+		known[0x$i]=1
+	done <"$a"
+done
+
+set -A blanks
+while IFS=: read i data rest; do
+	blanks[0x$i]=$data
+done <../hexsrc/blanks.hex
+
+while IFS=: read i data rest; do
+	[[ $data = FFB9C5EDD5D5D5D5D5D5D5D5EDB991FF ]] && known[0x$i]=1
+done <../hexsrc/rc-priv.hex
+
+exec 4>unifont.h08 5>unifont.h16
+
+typeset -i1 ch
+while IFS=: read i data rest; do
+	if (( known[(ch = 0x$i)] )); then
+		print Skipping known $i
+		continue
+	fi
+	if [[ $data = "${blanks[ch]}" ]]; then
+		print Skipping blank $i
+		continue
+	fi
+	if (( ${#data} == 32 )); then
+		ofd=4
+		if (( ch > 0 )); then
+			s=${ch#1#}
+			if (( ${%s} != 1 && ${%s} != 0 )); then
+				print Ignoring ${%s}-wide halfwidth $i
+				continue
+			fi
+		fi
+	elif (( ${#data} == 64 )); then
+		ofd=5
+		s=${ch#1#}
+		if (( ${%s} != 2 && ${%s} != 0 )); then
+			print Ignoring ${%s}-wide fullwidth $i
+			continue
+		fi
+	else
+		print Unknown width for $i: ${#data}
+		continue
+	fi
+	print -u$ofd $i:$data
+done <unifont.hex | tee hexsplit.log
+@
+

@@ -1,0 +1,1466 @@
+head	1.5;
+access;
+symbols
+	cvs-201711200100:1.1.1.3
+	cvs-201603041800:1.1.1.2
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.11.20.01.23.57;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005A122EB84015709A;
+
+1.4
+date	2017.08.07.20.18.52;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005988C69344442E37;
+
+1.3
+date	2016.03.04.19.42.27;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10056D9E53B4077740C;
+
+1.2
+date	2015.02.19.18.50.21;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10054E63085356E37B6;
+
+1.1
+date	2005.02.05.17.29.49;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.49;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2016.03.04.18.49.12;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	10056D9D8B662032B91;
+
+1.1.1.3
+date	2017.11.20.01.07.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005A122AFA44AA870F;
+
+
+desc
+@@
+
+
+1.5
+log
+@merge; appears to be okay-ish in the testsuite with termwidth = 60;
+@
+text
+@/*	$OpenBSD: process.c,v 1.32 2017/02/22 14:09:09 tom Exp $	*/
+
+/*-
+ * Copyright (c) 2015
+ *	mirabilos <m@@mirbsd.org>
+ * Copyright (c) 1992 Diomidis Spinellis.
+ * Copyright (c) 1992, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Diomidis Spinellis of Imperial College, University of London.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
+
+__SCCSID("@@(#)process.c	8.1 (Berkeley) 6/6/93");
+__RCSID("$MirOS: src/usr.bin/sed/process.c,v 1.3 2016/03/04 19:42:27 tg Exp $");
+
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <regex.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "defs.h"
+#include "extern.h"
+
+static SPACE HS, PS, SS;
+#define	pd		PS.deleted
+#define	ps		PS.space
+#define	psl		PS.len
+#define	psanl		PS.append_newline
+#define	hs		HS.space
+#define	hsl		HS.len
+
+static inline int	 applies(struct s_command *);
+static void		 flush_appends(void);
+static void		 lputs(char *);
+static inline int	 regexec_e(regex_t *, const char *, int, int, size_t,
+			     size_t);
+static void		 regsub(SPACE *, char *, char *);
+static int		 substitute(struct s_command *);
+
+struct s_appends *appends;	/* Array of pointers to strings to append. */
+static size_t appendx;		/* Index into appends array. */
+size_t appendnum;		/* Size of appends array. */
+
+static int lastaddr;		/* Set by applies if last address of a range. */
+static int sdone;		/* If any substitutes since last line input. */
+				/* Iov structure for 'w' commands. */
+static regex_t *defpreg;
+size_t maxnsub;
+regmatch_t *match;
+
+#define OUT() do {\
+	fwrite(ps, 1, psl, outfile);\
+	if (psanl) fputc('\n', outfile);\
+} while (0)
+
+void
+process(void)
+{
+	struct s_command *cp;
+	SPACE tspace;
+	size_t len, oldpsl;
+	char *p;
+
+	for (linenum = 0; mf_fgets(&PS, REPLACE);) {
+		pd = 0;
+top:
+		cp = prog;
+redirect:
+		while (cp != NULL) {
+			if (!applies(cp)) {
+				cp = cp->next;
+				continue;
+			}
+			switch (cp->code) {
+			case '{':
+				cp = cp->u.c;
+				goto redirect;
+			case 'a':
+				if (appendx >= appendnum) {
+					appends = xreallocarray(appends,
+					    appendnum,
+					    2 * sizeof(struct s_appends));
+					appendnum *= 2;
+				}
+				appends[appendx].type = AP_STRING;
+				appends[appendx].s = cp->t;
+				appends[appendx].len = strlen(cp->t);
+				appendx++;
+				break;
+			case 'b':
+				cp = cp->u.c;
+				goto redirect;
+			case 'c':
+				pd = 1;
+				psl = 0;
+				if (cp->a2 == NULL || lastaddr || lastline())
+					(void)fprintf(outfile, "%s", cp->t);
+				break;
+			case 'd':
+				pd = 1;
+				goto new;
+			case 'D':
+				if (pd)
+					goto new;
+				if (psl == 0 ||
+				    (p = memchr(ps, '\n', psl)) == NULL) {
+					pd = 1;
+					goto new;
+				} else {
+					psl -= (p + 1) - ps;
+					memmove(ps, p + 1, psl);
+					goto top;
+				}
+			case 'g':
+				cspace(&PS, hs, hsl, REPLACE);
+				break;
+			case 'G':
+				cspace(&PS, "\n", 1, 0);
+				cspace(&PS, hs, hsl, 0);
+				break;
+			case 'h':
+				cspace(&HS, ps, psl, REPLACE);
+				break;
+			case 'H':
+				cspace(&HS, "\n", 1, 0);
+				cspace(&HS, ps, psl, 0);
+				break;
+			case 'i':
+				(void)fprintf(outfile, "%s", cp->t);
+				break;
+			case 'l':
+				lputs(ps);
+				break;
+			case 'n':
+				if (!nflag && !pd)
+					OUT();
+				flush_appends();
+				if (!mf_fgets(&PS, REPLACE))
+					exit(0);
+				pd = 0;
+				break;
+			case 'N':
+				flush_appends();
+				cspace(&PS, "\n", 1, 0);
+				if (!mf_fgets(&PS, 0))
+					exit(0);
+				break;
+			case 'p':
+				if (pd)
+					break;
+				OUT();
+				break;
+			case 'P':
+				if (pd)
+					break;
+				if ((p = memchr(ps, '\n', psl)) != NULL) {
+					oldpsl = psl;
+					psl = p - ps;
+					psanl = 1;
+					OUT();
+					psl = oldpsl;
+				} else {
+					OUT();
+				}
+				break;
+			case 'q':
+				if (!nflag && !pd)
+					OUT();
+				flush_appends();
+				exit(0);
+			case 'r':
+				if (appendx >= appendnum) {
+					appends = xreallocarray(appends,
+					    appendnum,
+					    2 * sizeof(struct s_appends));
+					appendnum *= 2;
+				}
+				appends[appendx].type = AP_FILE;
+				appends[appendx].s = cp->t;
+				appends[appendx].len = strlen(cp->t);
+				appendx++;
+				break;
+			case 's':
+				sdone |= substitute(cp);
+				break;
+			case 't':
+				if (sdone) {
+					sdone = 0;
+					cp = cp->u.c;
+					goto redirect;
+				}
+				break;
+			case 'w':
+				if (pd)
+					break;
+				if (cp->u.fd == -1 && (cp->u.fd = open(cp->t,
+				    O_WRONLY|O_APPEND|O_CREAT|O_TRUNC,
+				    DEFFILEMODE)) == -1)
+					error(FATAL, "%s: %s",
+					    cp->t, strerror(errno));
+				if ((size_t)write(cp->u.fd, ps, psl) != psl ||
+				    write(cp->u.fd, "\n", 1) != 1)
+					error(FATAL, "%s: %s",
+					    cp->t, strerror(errno));
+				break;
+			case 'x':
+				if (hs == NULL)
+					cspace(&HS, "", 0, REPLACE);
+				tspace = PS;
+				PS = HS;
+				psanl = tspace.append_newline;
+				HS = tspace;
+				break;
+			case 'y':
+				if (pd || psl == 0)
+					break;
+				for (p = ps, len = psl; len--; ++p)
+					*p = cp->u.y[(unsigned char)*p];
+				break;
+			case ':':
+			case '}':
+				break;
+			case '=':
+				(void)fprintf(outfile, "%lu\n", linenum);
+			}
+			cp = cp->next;
+		} /* for all cp */
+
+new:		if (!nflag && !pd)
+			OUT();
+		flush_appends();
+	} /* for all lines */
+}
+
+/*
+ * TRUE if the address passed matches the current program state
+ * (lastline, linenumber, ps).
+ */
+#define	MATCH(a)						\
+	(a)->type == AT_RE ? regexec_e((a)->u.r, ps, 0, 1, 0, psl) :	\
+	    (a)->type == AT_LINE ? linenum == (a)->u.l : lastline()
+
+/*
+ * Return TRUE if the command applies to the current line.  Sets the inrange
+ * flag to process ranges.  Interprets the non-select (``!'') flag.
+ */
+static inline int
+applies(struct s_command *cp)
+{
+	int r;
+
+	lastaddr = 0;
+	if (cp->a1 == NULL && cp->a2 == NULL)
+		r = 1;
+	else if (cp->a2)
+		if (cp->inrange) {
+			if (MATCH(cp->a2)) {
+				cp->inrange = 0;
+				lastaddr = 1;
+			}
+			r = 1;
+		} else if (MATCH(cp->a1)) {
+			/*
+			 * If the second address is a number less than or
+			 * equal to the line number first selected, only
+			 * one line shall be selected.
+			 *	-- POSIX 1003.2
+			 */
+			if (cp->a2->type == AT_LINE &&
+			    linenum >= cp->a2->u.l)
+				lastaddr = 1;
+			else
+				cp->inrange = 1;
+			r = 1;
+		} else
+			r = 0;
+	else
+		r = MATCH(cp->a1);
+	return (cp->nonsel ? !r : r);
+}
+
+/*
+ * Reset all inrange markers.
+ */
+void
+resetranges(void)
+{
+	struct s_command *cp;
+
+	for (cp = prog; cp; cp = cp->code == '{' ? cp->u.c : cp->next)
+		if (cp->a2)
+			cp->inrange = 0;
+}
+
+/*
+ * substitute --
+ *	Do substitutions in the pattern space.  Currently, we build a
+ *	copy of the new pattern space in the substitute space structure
+ *	and then swap them.
+ */
+static int
+substitute(struct s_command *cp)
+{
+	SPACE tspace;
+	regex_t *re;
+	regoff_t slen;
+	int n, lastempty;
+	size_t le = 0;
+	char *s;
+
+	s = ps;
+	re = cp->u.s->re;
+	if (re == NULL) {
+		if (defpreg != NULL && cp->u.s->maxbref > defpreg->re_nsub) {
+			linenum = cp->u.s->linenum;
+			error(COMPILE, "\\%zu not defined in the RE",
+			    cp->u.s->maxbref);
+		}
+	}
+	if (!regexec_e(re, ps, 0, 0, 0, psl))
+		return (0);
+
+	SS.len = 0;				/* Clean substitute space. */
+	slen = psl;
+	n = cp->u.s->n;
+	lastempty = 1;
+
+	do {
+		/* Copy the leading retained string. */
+		if (n <= 1 && (match[0].rm_so > le))
+			cspace(&SS, s, match[0].rm_so - le, APPEND);
+
+		/* Skip zero-length matches right after other matches. */
+		if (lastempty || (match[0].rm_so - le) ||
+		    match[0].rm_so != match[0].rm_eo) {
+			if (n <= 1) {
+				/* Want this match: append replacement. */
+				regsub(&SS, ps, cp->u.s->new);
+				if (n == 1)
+					n = -1;
+			} else {
+				/* Want a later match: append original. */
+				if (match[0].rm_eo - le)
+					cspace(&SS, s, match[0].rm_eo - le,
+					    APPEND);
+				n--;
+			}
+		}
+
+		/* Move past this match. */
+		s = ps + match[0].rm_eo;
+		slen = psl - match[0].rm_eo;
+		le = match[0].rm_eo;
+
+		/*
+		 * After a zero-length match, advance one byte,
+		 * and at the end of the line, terminate.
+		 */
+		if (match[0].rm_so == match[0].rm_eo) {
+			if (*s == '\0' || *s == '\n')
+				slen = -1;
+			else
+				slen--;
+			if (*s != '\0') {
+				cspace(&SS, s++, 1, APPEND);
+				le++;
+			}
+			lastempty = 1;
+		} else
+			lastempty = 0;
+
+	} while (n >= 0 && slen >= 0 &&
+	    regexec_e(re, ps, REG_NOTBOL, 0, le, psl));
+
+	/* Did not find the requested number of matches. */
+	if (n > 0)
+		return (0);
+
+	/* Copy the trailing retained string. */
+	if (slen > 0)
+		cspace(&SS, s, slen, APPEND);
+
+	/*
+	 * Swap the substitute space and the pattern space, and make sure
+	 * that any leftover pointers into stdio memory get lost.
+	 */
+	tspace = PS;
+	PS = SS;
+	psanl = tspace.append_newline;
+	SS = tspace;
+	SS.space = SS.back;
+
+	/* Handle the 'p' flag. */
+	if (cp->u.s->p)
+		OUT();
+
+	/* Handle the 'w' flag. */
+	if (cp->u.s->wfile && !pd) {
+		if (cp->u.s->wfd == -1 && (cp->u.s->wfd = open(cp->u.s->wfile,
+		    O_WRONLY|O_APPEND|O_CREAT|O_TRUNC, DEFFILEMODE)) == -1)
+			error(FATAL, "%s: %s", cp->u.s->wfile, strerror(errno));
+		if ((size_t)write(cp->u.s->wfd, ps, psl) != psl ||
+		    write(cp->u.s->wfd, "\n", 1) != 1)
+			error(FATAL, "%s: %s", cp->u.s->wfile, strerror(errno));
+	}
+	return (1);
+}
+
+/*
+ * Flush append requests.  Always called before reading a line,
+ * therefore it also resets the substitution done (sdone) flag.
+ */
+static void
+flush_appends(void)
+{
+	FILE *f;
+	int count;
+	size_t i;
+	char buf[8 * 1024];
+
+	for (i = 0; i < appendx; i++)
+		switch (appends[i].type) {
+		case AP_STRING:
+			fwrite(appends[i].s, sizeof(char), appends[i].len,
+			    outfile);
+			break;
+		case AP_FILE:
+			/*
+			 * Read files probably shouldn't be cached.  Since
+			 * it's not an error to read a non-existent file,
+			 * it's possible that another program is interacting
+			 * with the sed script through the filesystem.  It
+			 * would be truly bizarre, but possible.  It's probably
+			 * not that big a performance win, anyhow.
+			 */
+			if ((f = fopen(appends[i].s, "r")) == NULL)
+				break;
+			while ((count = fread(buf, sizeof(char), sizeof(buf), f)))
+				(void)fwrite(buf, sizeof(char), count, outfile);
+			(void)fclose(f);
+			break;
+		}
+	if (ferror(outfile))
+		error(FATAL, "%s: %s", outfname, strerror(errno ? errno : EIO));
+	appendx = sdone = 0;
+}
+
+static void
+lputs(char *s)
+{
+	int count;
+	extern int termwidth;
+	const char *escapes;
+	char *p;
+
+	for (count = 0; *s; ++s) {
+		if (count >= termwidth) {
+			(void)fprintf(outfile, "\\\n");
+			count = 0;
+		}
+		if (isascii((unsigned char)*s) && isprint((unsigned char)*s)
+		    && *s != '\\') {
+			(void)fputc(*s, outfile);
+			count++;
+		} else {
+			escapes = "\\\a\b\f\n\r\t\v";
+			if (*s == '\n' && s[1] == '\0') {
+				/* omit trailing newline */
+				break;
+			}
+			(void)fputc('\\', outfile);
+			if ((p = strchr(escapes, *s))) {
+				(void)fputc("\\abfnrtv"[p - escapes], outfile);
+				count += 2;
+			} else {
+				(void)fprintf(outfile, "%03o", *(u_char *)s);
+				count += 4;
+			}
+		}
+	}
+	(void)fputc('$', outfile);
+	(void)fputc('\n', outfile);
+	if (ferror(outfile))
+		error(FATAL, "%s: %s", outfname, strerror(errno ? errno : EIO));
+}
+
+static inline int
+regexec_e(regex_t *preg, const char *string, int eflags,
+    int nomatch, size_t start, size_t stop)
+{
+	int eval;
+
+	if (preg == NULL) {
+		if (defpreg == NULL)
+			error(FATAL, "first RE may not be empty");
+	} else
+		defpreg = preg;
+
+	/* Set anchors */
+	match[0].rm_so = start;
+	match[0].rm_eo = stop;
+
+	eval = regexec(defpreg, string,
+	    nomatch ? 0 : maxnsub + 1, match, eflags | REG_STARTEND);
+	switch (eval) {
+	case 0:
+		return (1);
+	case REG_NOMATCH:
+		return (0);
+	}
+	error(FATAL, "RE error: %s", strregerror(eval, defpreg));
+}
+
+/*
+ * regsub - perform substitutions after a regexp match
+ * Based on a routine by Henry Spencer
+ */
+static void
+regsub(SPACE *sp, char *string, char *src)
+{
+	int len, no;
+	char c, *dst;
+
+#define	NEEDSP(reqlen)							\
+	if (sp->len + (reqlen) + 1 >= sp->blen) {			\
+		size_t newlen = sp->blen + (reqlen) + 1024;		\
+		sp->space = sp->back = xrealloc(sp->back, newlen);	\
+		sp->blen = newlen;					\
+		dst = sp->space + sp->len;				\
+	}
+
+	dst = sp->space + sp->len;
+	while ((c = *src++) != '\0') {
+		if (c == '&')
+			no = 0;
+		else if (c == '\\' && isdigit((unsigned char)*src))
+			no = *src++ - '0';
+		else
+			no = -1;
+		if (no < 0) {		/* Ordinary character. */
+			if (c == '\\' && (*src == '\\' || *src == '&'))
+				c = *src++;
+			NEEDSP(1);
+			*dst++ = c;
+			++sp->len;
+		} else if (match[no].rm_so != -1 && match[no].rm_eo != -1) {
+			len = match[no].rm_eo - match[no].rm_so;
+			NEEDSP(len);
+			memmove(dst, string + match[no].rm_so, len);
+			dst += len;
+			sp->len += len;
+		}
+	}
+	NEEDSP(1);
+	*dst = '\0';
+}
+
+/*
+ * aspace --
+ *	Append the source space to the destination space, allocating new
+ *	space as necessary.
+ */
+void
+cspace(SPACE *sp, const char *p, size_t len, enum e_spflag spflag)
+{
+	size_t tlen;
+
+	/* Make sure SPACE has enough memory and ramp up quickly. */
+	tlen = sp->len + len + 1;
+	if (tlen > sp->blen) {
+		size_t newlen = tlen + 1024;
+		sp->space = sp->back = xrealloc(sp->back, newlen);
+		sp->blen = newlen;
+	}
+
+	if (spflag == REPLACE)
+		sp->len = 0;
+
+	memmove(sp->space + sp->len, p, len);
+
+	sp->space[sp->len += len] = '\0';
+}
+
+/*
+ * Close all cached opened files and report any errors
+ */
+void
+cfclose(struct s_command *cp, struct s_command *end)
+{
+
+	for (; cp != end; cp = cp->next)
+		switch (cp->code) {
+		case 's':
+			if (cp->u.s->wfd != -1 && close(cp->u.s->wfd))
+				error(FATAL,
+				    "%s: %s", cp->u.s->wfile, strerror(errno));
+			cp->u.s->wfd = -1;
+			break;
+		case 'w':
+			if (cp->u.fd != -1 && close(cp->u.fd))
+				error(FATAL, "%s: %s", cp->t, strerror(errno));
+			cp->u.fd = -1;
+			break;
+		case '{':
+			cfclose(cp->u.c, cp->next);
+			break;
+		}
+}
+@
+
+
+1.4
+log
+@filesystem
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: process.c,v 1.27 2015/10/26 14:08:47 mmcc Exp $	*/
+d69 2
+a70 1
+static inline int	 regexec_e(regex_t *, const char *, int, int, size_t);
+a96 1
+	int oldpsanl;
+a191 1
+					oldpsanl = psanl;
+d274 1
+a274 1
+	(a)->type == AT_RE ? regexec_e((a)->u.r, ps, 0, 1, psl) :	\
+d342 1
+d354 1
+a354 1
+	if (!regexec_e(re, s, 0, 0, psl))
+d364 2
+a365 2
+		if (n <= 1 && match[0].rm_so)
+			cspace(&SS, s, match[0].rm_so, APPEND);
+d368 1
+a368 1
+		if (lastempty || match[0].rm_so ||
+d372 1
+a372 1
+				regsub(&SS, s, cp->u.s->new);
+d377 3
+a379 2
+				if (match[0].rm_eo)
+					cspace(&SS, s, match[0].rm_eo, APPEND);
+d385 3
+a387 2
+		s += match[0].rm_eo;
+		slen -= match[0].rm_eo;
+d398 4
+a401 2
+			if (*s != '\0')
+			 	cspace(&SS, s++, 1, APPEND);
+d406 2
+a407 1
+	} while (n >= 0 && slen >= 0 && regexec_e(re, s, REG_NOTBOL, 0, slen));
+d410 1
+a410 1
+	if (n > 1)
+d523 1
+a523 1
+    int nomatch, size_t slen)
+d534 2
+a535 2
+	match[0].rm_so = 0;
+	match[0].rm_eo = slen;
+a545 1
+	/* NOTREACHED */
+d575 2
+a576 2
+ 			if (c == '\\' && (*src == '\\' || *src == '&'))
+ 				c = *src++;
+d578 1
+a578 1
+ 			*dst++ = c;
+d580 1
+a580 1
+ 		} else if (match[no].rm_so != -1 && match[no].rm_eo != -1) {
+@
+
+
+1.3
+log
+@fullmerge
+@
+text
+@d43 1
+a43 1
+__RCSID("$MirOS: src/usr.bin/sed/process.c,v 1.2 2015/02/19 18:50:21 tg Exp $");
+d461 1
+a461 1
+			 * with the sed script through the file system.  It
+@
+
+
+1.2
+log
+@fix ‘l’ command to ignore the trailing \n
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: process.c,v 1.12 2003/11/07 02:58:23 tedu Exp $	*/
+d5 1
+a5 1
+ *	Thorsten "mirabilos" Glaser <tg@@mirbsd.org>
+a39 1
+#include <sys/ioctl.h>
+d43 1
+a43 1
+__RCSID("$MirOS$");
+d62 1
+d74 2
+a75 2
+static int appendx;		/* Index into appends array. */
+int appendnum;			/* Size of appends array. */
+d84 4
+a87 1
+#define OUT(s) { fwrite(s, sizeof(u_char), psl, stdout); }
+d96 1
+d114 3
+a116 3
+					appends = xrealloc(appends,
+					    sizeof(struct s_appends) *
+					    (appendnum * 2));
+d130 2
+a131 2
+				if (cp->a2 == NULL || lastaddr)
+					(void)printf("%s", cp->t);
+d140 1
+a140 1
+				    (p = memchr(ps, '\n', psl - 1)) == NULL) {
+d152 1
+a152 2
+				if (hs == NULL)
+					cspace(&HS, "\n", 1, REPLACE);
+d159 1
+d163 1
+a163 1
+				(void)printf("%s", cp->t);
+d170 1
+a170 1
+					OUT(ps)
+d178 2
+a179 3
+				if (!mf_fgets(&PS, 0)) {
+					if (!nflag && !pd)
+						OUT(ps)
+a180 1
+				}
+d185 1
+a185 1
+				OUT(ps)
+d190 1
+a190 2
+				if (psl != 0 &&
+				    (p = memchr(ps, '\n', psl - 1)) != NULL) {
+d192 7
+a198 1
+					psl = (p + 1) - ps;
+a199 3
+				OUT(ps)
+				if (p != NULL)
+					psl = oldpsl;
+d203 1
+a203 1
+					OUT(ps)
+d207 6
+a212 4
+				if (appendx >= appendnum)
+					appends = xrealloc(appends,
+					    sizeof(struct s_appends) *
+					    (appendnum *= 2));
+d234 1
+a234 1
+					err(FATAL, "%s: %s",
+d236 3
+a238 2
+				if ((size_t)write(cp->u.fd, ps, psl) != psl)
+					err(FATAL, "%s: %s",
+d243 1
+a243 1
+					cspace(&HS, "\n", 1, REPLACE);
+d246 1
+d252 1
+a252 1
+				for (p = ps, len = psl; --len; ++p)
+d259 1
+a259 1
+				(void)printf("%lu\n", linenum);
+d265 1
+a265 1
+			OUT(ps)
+d276 1
+a276 1
+	    (a)->type == AT_LINE ? linenum == (a)->u.l : lastline
+d314 14
+a327 1
+	return (cp->nonsel ? ! r : r);
+d341 1
+a341 1
+	size_t re_off, slen;
+d350 1
+a350 1
+			err(COMPILE, "\\%d not defined in the RE",
+d362 10
+a371 9
+	switch (n) {
+	case 0:					/* Global */
+		do {
+			if (lastempty || match[0].rm_so != match[0].rm_eo) {
+				/* Locate start of replaced string. */
+				re_off = match[0].rm_so;
+				/* Copy leading retained string. */
+				cspace(&SS, s, re_off, APPEND);
+				/* Add in regular expression. */
+d373 2
+a374 7
+			}
+
+			/* Move past this match. */
+			if (match[0].rm_so != match[0].rm_eo) {
+				s += match[0].rm_eo;
+				slen -= match[0].rm_eo;
+				lastempty = 0;
+d376 4
+a379 9
+				if (match[0].rm_so == 0)
+					cspace(&SS, s, match[0].rm_so + 1,
+					    APPEND);
+				else
+					cspace(&SS, s + match[0].rm_so, 1,
+					    APPEND);
+				s += match[0].rm_so + 1;
+				slen -= match[0].rm_so + 1;
+				lastempty = 1;
+a380 11
+		} while (slen > 0 && regexec_e(re, s, REG_NOTBOL, 0, slen));
+		/* Copy trailing retained string. */
+		if (slen > 0)
+			cspace(&SS, s, slen, APPEND);
+		break;
+	default:				/* Nth occurrence */
+		while (--n) {
+			s += match[0].rm_eo;
+			slen -= match[0].rm_eo;
+			if (!regexec_e(re, s, REG_NOTBOL, 0, slen))
+				return (0);
+d382 2
+a383 9
+		/* FALLTHROUGH */
+	case 1:					/* 1st occurrence */
+		/* Locate start of replaced string. */
+		re_off = match[0].rm_so + (s - ps);
+		/* Copy leading retained string. */
+		cspace(&SS, ps, re_off, APPEND);
+		/* Add in regular expression. */
+		regsub(&SS, s, cp->u.s->new);
+		/* Copy trailing retained string. */
+d386 24
+a410 2
+		break;
+	}
+d418 1
+d424 1
+a424 1
+		OUT(ps)
+d430 4
+a433 3
+			err(FATAL, "%s: %s", cp->u.s->wfile, strerror(errno));
+		if ((size_t)write(cp->u.s->wfd, ps, psl) != psl)
+			err(FATAL, "%s: %s", cp->u.s->wfile, strerror(errno));
+d446 2
+a447 1
+	int count, i;
+d450 1
+a450 1
+	for (i = 0; i < appendx; i++) 
+d453 2
+a454 2
+			fwrite(appends[i].s, sizeof(char), appends[i].len, 
+			    stdout);
+d468 1
+a468 1
+				(void)fwrite(buf, sizeof(char), count, stdout);
+d472 2
+a473 2
+	if (ferror(stdout))
+		err(FATAL, "stdout: %s", strerror(errno ? errno : EIO));
+d481 2
+a483 13
+	const char *escapes;
+	struct winsize win;
+	static int termwidth = -1;
+
+	if (termwidth == -1) {
+		if ((p = getenv("COLUMNS")))
+			termwidth = atoi(p);
+		else if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &win) == 0 &&
+		    win.ws_col > 0)
+			termwidth = win.ws_col;
+		else
+			termwidth = 60;
+	}
+d485 1
+a485 1
+	for (count = 0; *s; ++s) { 
+d487 1
+a487 1
+			(void)printf("\\\n");
+d490 3
+a492 2
+		if (isascii(*s) && isprint(*s) && *s != '\\') {
+			(void)putchar(*s);
+d500 1
+a500 1
+			(void)putchar('\\');
+d502 1
+a502 1
+				(void)putchar("\\abfnrtv"[p - escapes]);
+d505 1
+a505 1
+				(void)printf("%03o", *(u_char *)s);
+d510 4
+a513 4
+	(void)putchar('$');
+	(void)putchar('\n');
+	if (ferror(stdout))
+		err(FATAL, "stdout: %s", strerror(errno ? errno : EIO));
+d521 1
+a521 1
+	
+d524 1
+a524 1
+			err(FATAL, "first RE may not be empty");
+d528 1
+a528 3
+	/* Set anchors, discounting trailing newline (if any). */
+	if (slen > 0 && string[slen - 1] == '\n')
+		slen--;
+d531 1
+a531 1
+	
+d534 1
+a534 1
+	switch(eval) {
+d540 1
+a540 1
+	err(FATAL, "RE error: %s", strregerror(eval, defpreg));
+d566 1
+a566 1
+		else if (c == '\\' && isdigit(*src))
+d594 1
+a594 1
+cspace(SPACE *sp, char *p, size_t len, enum e_spflag spflag)
+d622 1
+a622 1
+		switch(cp->code) {
+d625 1
+a625 1
+				err(FATAL,
+d631 1
+a631 1
+				err(FATAL, "%s: %s", cp->t, strerror(errno));
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d4 2
+a37 5
+#ifndef lint
+/* from: static char sccsid[] = "@@(#)process.c	8.1 (Berkeley) 6/6/93"; */
+static char *rcsid = "$OpenBSD: process.c,v 1.12 2003/11/07 02:58:23 tedu Exp $";
+#endif /* not lint */
+
+d43 3
+d230 1
+a230 1
+				if (write(cp->u.fd, ps, psl) != psl)
+d414 1
+a414 1
+		if (write(cp->u.s->wfd, ps, psl) != psl)
+d462 2
+a463 1
+	char *escapes, *p;
+d467 1
+a467 1
+	if (termwidth == -1)
+d475 1
+d487 4
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import newer sed(1) from OpenBSD, hoping for bugfixes
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: process.c,v 1.27 2015/10/26 14:08:47 mmcc Exp $	*/
+d36 5
+d43 1
+a62 1
+#define	psanl		PS.append_newline
+d75 1
+a75 1
+size_t appendnum;		/* Size of appends array. */
+d84 1
+a84 4
+#define OUT() do {\
+	fwrite(ps, 1, psl, outfile);\
+	if (psanl) fputc('\n', outfile);\
+} while (0)
+a92 1
+	int oldpsanl;
+d110 3
+a112 3
+					appends = xreallocarray(appends,
+					    appendnum,
+					    2 * sizeof(struct s_appends));
+d126 2
+a127 2
+				if (cp->a2 == NULL || lastaddr || lastline())
+					(void)fprintf(outfile, "%s", cp->t);
+d136 1
+a136 1
+				    (p = memchr(ps, '\n', psl)) == NULL) {
+d148 2
+a149 1
+				cspace(&PS, "\n", 1, 0);
+a155 1
+				cspace(&HS, "\n", 1, 0);
+d159 1
+a159 1
+				(void)fprintf(outfile, "%s", cp->t);
+d166 1
+a166 1
+					OUT();
+d174 3
+a176 2
+				cspace(&PS, "\n", 1, 0);
+				if (!mf_fgets(&PS, 0))
+d178 1
+d183 1
+a183 1
+				OUT();
+d188 2
+a189 1
+				if ((p = memchr(ps, '\n', psl)) != NULL) {
+d191 4
+a194 4
+					oldpsanl = psanl;
+					psl = p - ps;
+					psanl = 1;
+					OUT();
+a195 3
+				} else {
+					OUT();
+				}
+d199 1
+a199 1
+					OUT();
+d203 4
+a206 6
+				if (appendx >= appendnum) {
+					appends = xreallocarray(appends,
+					    appendnum,
+					    2 * sizeof(struct s_appends));
+					appendnum *= 2;
+				}
+d228 1
+a228 1
+					error(FATAL, "%s: %s",
+d230 2
+a231 3
+				if (write(cp->u.fd, ps, psl) != psl ||
+				    write(cp->u.fd, "\n", 1) != 1)
+					error(FATAL, "%s: %s",
+d236 1
+a236 1
+					cspace(&HS, "", 0, REPLACE);
+a238 1
+				psanl = tspace.append_newline;
+d244 1
+a244 1
+				for (p = ps, len = psl; len--; ++p)
+d251 1
+a251 1
+				(void)fprintf(outfile, "%lu\n", linenum);
+d257 1
+a257 1
+			OUT();
+d268 1
+a268 1
+	    (a)->type == AT_LINE ? linenum == (a)->u.l : lastline()
+d306 1
+a306 14
+	return (cp->nonsel ? !r : r);
+}
+
+/*
+ * Reset all inrange markers.
+ */
+void
+resetranges(void)
+{
+	struct s_command *cp;
+
+	for (cp = prog; cp; cp = cp->code == '{' ? cp->u.c : cp->next)
+		if (cp->a2)
+			cp->inrange = 0;
+d320 1
+a320 1
+	regoff_t slen;
+d329 1
+a329 1
+			error(COMPILE, "\\%d not defined in the RE",
+d341 9
+a349 10
+	do {
+		/* Copy the leading retained string. */
+		if (n <= 1 && match[0].rm_so)
+			cspace(&SS, s, match[0].rm_so, APPEND);
+
+		/* Skip zero-length matches right after other matches. */
+		if (lastempty || match[0].rm_so ||
+		    match[0].rm_so != match[0].rm_eo) {
+			if (n <= 1) {
+				/* Want this match: append replacement. */
+d351 7
+a357 2
+				if (n == 1)
+					n = -1;
+d359 9
+a367 4
+				/* Want a later match: append original. */
+				if (match[0].rm_eo)
+					cspace(&SS, s, match[0].rm_eo, APPEND);
+				n--;
+d369 11
+d381 9
+a389 2
+
+		/* Move past this match. */
+a391 24
+
+		/*
+		 * After a zero-length match, advance one byte,
+		 * and at the end of the line, terminate.
+		 */
+		if (match[0].rm_so == match[0].rm_eo) {
+			if (*s == '\0' || *s == '\n')
+				slen = -1;
+			else
+				slen--;
+			if (*s != '\0')
+			 	cspace(&SS, s++, 1, APPEND);
+			lastempty = 1;
+		} else
+			lastempty = 0;
+
+	} while (n >= 0 && slen >= 0 && regexec_e(re, s, REG_NOTBOL, 0, slen));
+
+	/* Did not find the requested number of matches. */
+	if (n > 1)
+		return (0);
+
+	/* Copy the trailing retained string. */
+	if (slen > 0)
+d393 2
+a401 1
+	psanl = tspace.append_newline;
+d407 1
+a407 1
+		OUT();
+d413 3
+a415 4
+			error(FATAL, "%s: %s", cp->u.s->wfile, strerror(errno));
+		if (write(cp->u.s->wfd, ps, psl) != psl ||
+		    write(cp->u.s->wfd, "\n", 1) != 1)
+			error(FATAL, "%s: %s", cp->u.s->wfile, strerror(errno));
+d431 1
+a431 1
+	for (i = 0; i < appendx; i++)
+d434 2
+a435 2
+			fwrite(appends[i].s, sizeof(char), appends[i].len,
+			    outfile);
+d449 1
+a449 1
+				(void)fwrite(buf, sizeof(char), count, outfile);
+d453 2
+a454 2
+	if (ferror(outfile))
+		error(FATAL, "%s: %s", outfname, strerror(errno ? errno : EIO));
+d462 12
+a473 3
+	extern int termwidth;
+	const char *escapes;
+	char *p;
+d475 1
+a475 1
+	for (count = 0; *s; ++s) {
+d477 1
+a477 1
+			(void)fprintf(outfile, "\\\n");
+d480 2
+a481 3
+		if (isascii((unsigned char)*s) && isprint((unsigned char)*s)
+		    && *s != '\\') {
+			(void)fputc(*s, outfile);
+a482 4
+		} else if (*s == '\n') {
+			(void)fputc('$', outfile);
+			(void)fputc('\n', outfile);
+			count = 0;
+d484 2
+a485 2
+			escapes = "\\\a\b\f\r\t\v";
+			(void)fputc('\\', outfile);
+d487 1
+a487 1
+				(void)fputc("\\abfrtv"[p - escapes], outfile);
+d490 1
+a490 1
+				(void)fprintf(outfile, "%03o", *(u_char *)s);
+d495 4
+a498 4
+	(void)fputc('$', outfile);
+	(void)fputc('\n', outfile);
+	if (ferror(outfile))
+		error(FATAL, "%s: %s", outfname, strerror(errno ? errno : EIO));
+d506 1
+a506 1
+
+d509 1
+a509 1
+			error(FATAL, "first RE may not be empty");
+d513 3
+a515 1
+	/* Set anchors */
+d518 1
+a518 1
+
+d521 1
+a521 1
+	switch (eval) {
+d527 1
+a527 1
+	error(FATAL, "RE error: %s", strregerror(eval, defpreg));
+d553 1
+a553 1
+		else if (c == '\\' && isdigit((unsigned char)*src))
+d581 1
+a581 1
+cspace(SPACE *sp, const char *p, size_t len, enum e_spflag spflag)
+d609 1
+a609 1
+		switch (cp->code) {
+d612 1
+a612 1
+				error(FATAL,
+d618 1
+a618 1
+				error(FATAL, "%s: %s", cp->t, strerror(errno));
+@
+
+
+1.1.1.3
+log
+@update sed(1) from OpenBSD
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: process.c,v 1.32 2017/02/22 14:09:09 tom Exp $	*/
+d64 1
+a64 2
+static inline int	 regexec_e(regex_t *, const char *, int, int, size_t,
+			     size_t);
+d91 1
+d187 1
+d270 1
+a270 1
+	(a)->type == AT_RE ? regexec_e((a)->u.r, ps, 0, 1, 0, psl) :	\
+a337 1
+	size_t le = 0;
+d349 1
+a349 1
+	if (!regexec_e(re, ps, 0, 0, 0, psl))
+d359 2
+a360 2
+		if (n <= 1 && (match[0].rm_so > le))
+			cspace(&SS, s, match[0].rm_so - le, APPEND);
+d363 1
+a363 1
+		if (lastempty || (match[0].rm_so - le) ||
+d367 1
+a367 1
+				regsub(&SS, ps, cp->u.s->new);
+d372 2
+a373 3
+				if (match[0].rm_eo - le)
+					cspace(&SS, s, match[0].rm_eo - le,
+					    APPEND);
+d379 2
+a380 3
+		s = ps + match[0].rm_eo;
+		slen = psl - match[0].rm_eo;
+		le = match[0].rm_eo;
+d391 2
+a392 4
+			if (*s != '\0') {
+				cspace(&SS, s++, 1, APPEND);
+				le++;
+			}
+d397 1
+a397 2
+	} while (n >= 0 && slen >= 0 &&
+	    regexec_e(re, ps, REG_NOTBOL, 0, le, psl));
+d400 1
+a400 1
+	if (n > 0)
+d512 1
+a512 1
+    int nomatch, size_t start, size_t stop)
+d523 2
+a524 2
+	match[0].rm_so = start;
+	match[0].rm_eo = stop;
+d535 1
+d565 2
+a566 2
+			if (c == '\\' && (*src == '\\' || *src == '&'))
+				c = *src++;
+d568 1
+a568 1
+			*dst++ = c;
+d570 1
+a570 1
+		} else if (match[no].rm_so != -1 && match[no].rm_eo != -1) {
+@
+
+

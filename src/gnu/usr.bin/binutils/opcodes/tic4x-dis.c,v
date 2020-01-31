@@ -1,0 +1,1314 @@
+head	1.1;
+branch	1.1.101;
+access;
+symbols
+	MIRBSD_10:1.1.101.3.0.4
+	MIRBSD_10_BASE:1.1.101.3
+	MIRBSD_9_BASE:1.1.101.3
+	MIRBSD_8:1.1.101.3.0.2
+	MIRBSD_8_BASE:1.1.101.3
+	binutils-20050707:1.1.101.3
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.02.05.00.19.23;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.02.05.00.19.23;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.05.14.16.52.09;	author tg;	state Exp;
+branches;
+next	1.1.101.3;
+commitid	3a6242862a097542;
+
+1.1.101.3
+date	2005.07.07.15.31.51;	author tg;	state Exp;
+branches;
+next	;
+commitid	598542cd4ac1fb58;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* Print instructions for the Texas TMS320C[34]X, for GDB and GNU Binutils.
+
+   Copyright 2002, 2003 Free Software Foundation, Inc.
+
+   Contributed by Michael P. Hayes (m.hayes@@elec.canterbury.ac.nz)
+   
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+
+#include <math.h>
+#include "libiberty.h"
+#include "dis-asm.h"
+#include "opcode/tic4x.h"
+
+#define TIC4X_DEBUG 0
+
+#define TIC4X_HASH_SIZE   11   /* 11 (bits) and above should give unique entries.  */
+#define TIC4X_SPESOP_SIZE 8    /* Max 8. ops for special instructions */
+
+typedef enum
+  {
+    IMMED_SINT,
+    IMMED_SUINT,
+    IMMED_SFLOAT,
+    IMMED_INT,
+    IMMED_UINT,
+    IMMED_FLOAT
+  }
+immed_t;
+
+typedef enum
+  {
+    INDIRECT_SHORT,
+    INDIRECT_LONG,
+    INDIRECT_TIC4X
+  }
+indirect_t;
+
+static int tic4x_version = 0;
+static int tic4x_dp = 0;
+
+static int tic4x_pc_offset
+  PARAMS ((unsigned int));
+static int tic4x_print_char
+  PARAMS ((struct disassemble_info *, char));
+static int tic4x_print_str
+  PARAMS ((struct disassemble_info *, char *));
+static int tic4x_print_register
+  PARAMS ((struct disassemble_info *, unsigned long));
+static int tic4x_print_addr
+  PARAMS ((struct disassemble_info *, unsigned long));
+static int tic4x_print_relative
+  PARAMS ((struct disassemble_info *, unsigned long, long, unsigned long));
+void tic4x_print_ftoa
+  PARAMS ((unsigned int, FILE *, fprintf_ftype));
+static int tic4x_print_direct
+  PARAMS ((struct disassemble_info *, unsigned long));
+static int tic4x_print_immed
+  PARAMS ((struct disassemble_info *, immed_t, unsigned long));
+static int tic4x_print_cond
+  PARAMS ((struct disassemble_info *, unsigned int));
+static int tic4x_print_indirect
+  PARAMS ((struct disassemble_info *, indirect_t, unsigned long));
+static int tic4x_print_op
+  PARAMS ((struct disassemble_info *, unsigned long, tic4x_inst_t *, unsigned long));
+static void tic4x_hash_opcode_special
+  PARAMS ((tic4x_inst_t **, const tic4x_inst_t *));
+static void tic4x_hash_opcode
+  PARAMS ((tic4x_inst_t **, tic4x_inst_t **, const tic4x_inst_t *, unsigned long));
+static int tic4x_disassemble
+  PARAMS ((unsigned long, unsigned long, struct disassemble_info *));
+int print_insn_tic4x
+  PARAMS ((bfd_vma, struct disassemble_info *));
+
+
+static int
+tic4x_pc_offset (op)
+     unsigned int op;
+{
+  /* Determine the PC offset for a C[34]x instruction.
+     This could be simplified using some boolean algebra
+     but at the expense of readability.  */
+  switch (op >> 24)
+    {
+    case 0x60:	/* br */
+    case 0x62:	/* call  (C4x) */
+    case 0x64:	/* rptb  (C4x) */
+      return 1;
+    case 0x61: 	/* brd */
+    case 0x63: 	/* laj */
+    case 0x65:	/* rptbd (C4x) */
+      return 3;
+    case 0x66: 	/* swi */
+    case 0x67:
+      return 0;
+    default:
+      break;
+    }
+  
+  switch ((op & 0xffe00000) >> 20)
+    {
+    case 0x6a0:	/* bB */
+    case 0x720: /* callB */
+    case 0x740: /* trapB */
+      return 1;
+      
+    case 0x6a2: /* bBd */
+    case 0x6a6: /* bBat */
+    case 0x6aa: /* bBaf */
+    case 0x722:	/* lajB */
+    case 0x748: /* latB */
+    case 0x798: /* rptbd */
+      return 3;
+      
+    default:
+      break;
+    }
+  
+  switch ((op & 0xfe200000) >> 20)
+    {
+    case 0x6e0:	/* dbB */
+      return 1;
+      
+    case 0x6e2:	/* dbBd */
+      return 3;
+      
+    default:
+      break;
+    }
+  
+  return 0;
+}
+
+static int
+tic4x_print_char (info, ch)
+     struct disassemble_info * info;
+     char ch;
+{
+  if (info != NULL)
+    (*info->fprintf_func) (info->stream, "%c", ch);
+  return 1;
+}
+
+static int
+tic4x_print_str (info, str)
+     struct disassemble_info *info;
+     char *str;
+{
+  if (info != NULL)
+    (*info->fprintf_func) (info->stream, "%s", str);
+  return 1;
+}
+
+static int
+tic4x_print_register (info, regno)
+     struct disassemble_info *info;
+     unsigned long regno;
+{
+  static tic4x_register_t **registertable = NULL;
+  unsigned int i;
+  
+  if (registertable == NULL)
+    {
+      registertable = (tic4x_register_t **)
+	xmalloc (sizeof (tic4x_register_t *) * REG_TABLE_SIZE);
+      for (i = 0; i < tic3x_num_registers; i++)
+	registertable[tic3x_registers[i].regno] = (void *)&tic3x_registers[i];
+      if (IS_CPU_TIC4X (tic4x_version))
+	{
+	  /* Add C4x additional registers, overwriting
+	     any C3x registers if necessary.  */
+	  for (i = 0; i < tic4x_num_registers; i++)
+	    registertable[tic4x_registers[i].regno] = (void *)&tic4x_registers[i];
+	}
+    }
+  if ((int) regno > (IS_CPU_TIC4X (tic4x_version) ? TIC4X_REG_MAX : TIC3X_REG_MAX))
+    return 0;
+  if (info != NULL)
+    (*info->fprintf_func) (info->stream, "%s", registertable[regno]->name);
+  return 1;
+}
+
+static int
+tic4x_print_addr (info, addr)
+     struct disassemble_info *info;
+     unsigned long addr;
+{
+  if (info != NULL)
+    (*info->print_address_func)(addr, info);
+  return 1;
+}
+
+static int
+tic4x_print_relative (info, pc, offset, opcode)
+     struct disassemble_info *info;
+     unsigned long pc;
+     long offset;
+     unsigned long opcode;
+{
+  return tic4x_print_addr (info, pc + offset + tic4x_pc_offset (opcode));
+}
+
+static int
+tic4x_print_direct (info, arg)
+     struct disassemble_info *info;
+     unsigned long arg;
+{
+  if (info != NULL)
+    {
+      (*info->fprintf_func) (info->stream, "@@");
+      tic4x_print_addr (info, arg + (tic4x_dp << 16));
+    }
+  return 1;
+}
+
+/* FIXME: make the floating point stuff not rely on host
+   floating point arithmetic.  */
+void
+tic4x_print_ftoa (val, stream, pfunc)
+     unsigned int val;
+     FILE *stream;
+     fprintf_ftype pfunc;
+{
+  int e;
+  int s;
+  int f;
+  double num = 0.0;
+  
+  e = EXTRS (val, 31, 24);	/* exponent */
+  if (e != -128)
+    {
+      s = EXTRU (val, 23, 23);	/* sign bit */
+      f = EXTRU (val, 22, 0);	/* mantissa */
+      if (s)
+	f += -2 * (1 << 23);
+      else
+	f += (1 << 23);
+      num = f / (double)(1 << 23);
+      num = ldexp (num, e);
+    }    
+  (*pfunc)(stream, "%.9g", num);
+}
+
+static int
+tic4x_print_immed (info, type, arg)
+     struct disassemble_info *info;
+     immed_t type;
+     unsigned long arg;
+{
+  int s;
+  int f;
+  int e;
+  double num = 0.0;
+  
+  if (info == NULL)
+    return 1;
+  switch (type)
+    {
+    case IMMED_SINT:
+    case IMMED_INT:
+      (*info->fprintf_func) (info->stream, "%d", (long)arg);
+      break;
+      
+    case IMMED_SUINT:
+    case IMMED_UINT:
+      (*info->fprintf_func) (info->stream, "%u", arg);
+      break;
+      
+    case IMMED_SFLOAT:
+      e = EXTRS (arg, 15, 12);
+      if (e != -8)
+	{
+	  s = EXTRU (arg, 11, 11);
+	  f = EXTRU (arg, 10, 0);
+	  if (s)
+	    f += -2 * (1 << 11);
+	  else
+	    f += (1 << 11);
+	  num = f / (double)(1 << 11);
+	  num = ldexp (num, e);
+	}
+      (*info->fprintf_func) (info->stream, "%f", num);
+      break;
+    case IMMED_FLOAT:
+      e = EXTRS (arg, 31, 24);
+      if (e != -128)
+	{
+	  s = EXTRU (arg, 23, 23);
+	  f = EXTRU (arg, 22, 0);
+	  if (s)
+	    f += -2 * (1 << 23);
+	  else
+	    f += (1 << 23);
+	  num = f / (double)(1 << 23);
+	  num = ldexp (num, e);
+	}
+      (*info->fprintf_func) (info->stream, "%f", num);
+      break;
+    }
+  return 1;
+}
+
+static int
+tic4x_print_cond (info, cond)
+     struct disassemble_info *info;
+     unsigned int cond;
+{
+  static tic4x_cond_t **condtable = NULL;
+  unsigned int i;
+  
+  if (condtable == NULL)
+    {
+      condtable = (tic4x_cond_t **)xmalloc (sizeof (tic4x_cond_t *) * 32);
+      for (i = 0; i < tic4x_num_conds; i++)
+	condtable[tic4x_conds[i].cond] = (void *)&tic4x_conds[i];
+    }
+  if (cond > 31 || condtable[cond] == NULL)
+    return 0;
+  if (info != NULL)
+    (*info->fprintf_func) (info->stream, "%s", condtable[cond]->name);
+  return 1;
+}
+
+static int
+tic4x_print_indirect (info, type, arg)
+     struct disassemble_info *info;
+     indirect_t type;
+     unsigned long arg;
+{
+  unsigned int aregno;
+  unsigned int modn;
+  unsigned int disp;
+  char *a;
+
+  aregno = 0;
+  modn = 0;
+  disp = 1;
+  switch(type)
+    {
+    case INDIRECT_TIC4X:		/* *+ARn(disp) */
+      disp = EXTRU (arg, 7, 3);
+      aregno = EXTRU (arg, 2, 0) + REG_AR0;
+      modn = 0;
+      break;
+    case INDIRECT_SHORT:
+      disp = 1;
+      aregno = EXTRU (arg, 2, 0) + REG_AR0;
+      modn = EXTRU (arg, 7, 3);
+      break;
+    case INDIRECT_LONG:
+      disp = EXTRU (arg, 7, 0);
+      aregno = EXTRU (arg, 10, 8) + REG_AR0;
+      modn = EXTRU (arg, 15, 11);
+      if (modn > 7 && disp != 0)
+	return 0;
+      break;
+    default:
+        (*info->fprintf_func)(info->stream, "# internal error: Unknown indirect type %d", type);
+        return 0;
+    }
+  if (modn > TIC3X_MODN_MAX)
+    return 0;
+  a = tic4x_indirects[modn].name;
+  while (*a)
+    {
+      switch (*a)
+	{
+	case 'a':
+	  tic4x_print_register (info, aregno);
+	  break;
+	case 'd':
+	  tic4x_print_immed (info, IMMED_UINT, disp);
+	  break;
+	case 'y':
+	  tic4x_print_str (info, "ir0");
+	  break;
+	case 'z':
+	  tic4x_print_str (info, "ir1");
+	  break;
+	default:
+	  tic4x_print_char (info, *a);
+	  break;
+	}
+      a++;
+    }
+  return 1;
+}
+
+static int
+tic4x_print_op (info, instruction, p, pc)
+     struct disassemble_info *info;
+     unsigned long instruction;
+     tic4x_inst_t *p;
+     unsigned long pc;
+{
+  int val;
+  char *s;
+  char *parallel = NULL;
+
+  /* Print instruction name.  */
+  s = p->name;
+  while (*s && parallel == NULL)
+    {
+      switch (*s)
+	{
+	case 'B':
+	  if (! tic4x_print_cond (info, EXTRU (instruction, 20, 16)))
+	    return 0;
+	  break;
+	case 'C':
+	  if (! tic4x_print_cond (info, EXTRU (instruction, 27, 23)))
+	    return 0;
+	  break;
+	case '_':
+	  parallel = s + 1;	/* Skip past `_' in name */
+	  break;
+	default:
+	  tic4x_print_char (info, *s);
+	  break;
+	}
+      s++;
+    }
+  
+  /* Print arguments.  */
+  s = p->args;
+  if (*s)
+    tic4x_print_char (info, ' ');
+
+  while (*s)
+    {
+      switch (*s)
+	{
+	case '*': /* indirect 0--15 */
+	  if (! tic4x_print_indirect (info, INDIRECT_LONG,
+				    EXTRU (instruction, 15, 0)))
+	    return 0;
+	  break;
+
+	case '#': /* only used for ldp, ldpk */
+	  tic4x_print_immed (info, IMMED_UINT, EXTRU (instruction, 15, 0));
+	  break;
+
+	case '@@': /* direct 0--15 */
+	  tic4x_print_direct (info, EXTRU (instruction, 15, 0));
+	  break;
+
+	case 'A': /* address register 24--22 */
+	  if (! tic4x_print_register (info, EXTRU (instruction, 24, 22) +
+				    REG_AR0))
+	    return 0;
+	  break;
+
+	case 'B': /* 24-bit unsigned int immediate br(d)/call/rptb
+		     address 0--23.  */
+	  if (IS_CPU_TIC4X (tic4x_version))
+	    tic4x_print_relative (info, pc, EXTRS (instruction, 23, 0),
+				p->opcode);
+	  else
+	    tic4x_print_addr (info, EXTRU (instruction, 23, 0));
+	  break;
+
+	case 'C': /* indirect (short C4x) 0--7 */
+	  if (! IS_CPU_TIC4X (tic4x_version))
+	    return 0;
+	  if (! tic4x_print_indirect (info, INDIRECT_TIC4X,
+				    EXTRU (instruction, 7, 0)))
+	    return 0;
+	  break;
+
+	case 'D':
+	  /* Cockup if get here...  */
+	  break;
+
+	case 'E': /* register 0--7 */
+        case 'e':
+	  if (! tic4x_print_register (info, EXTRU (instruction, 7, 0)))
+	    return 0;
+	  break;
+
+	case 'F': /* 16-bit float immediate 0--15 */
+	  tic4x_print_immed (info, IMMED_SFLOAT,
+			   EXTRU (instruction, 15, 0));
+	  break;
+
+        case 'i': /* Extended indirect 0--7 */
+          if ( EXTRU (instruction, 7, 5) == 7 )
+            {
+              if( !tic4x_print_register (info, EXTRU (instruction, 4, 0)) )
+                return 0;
+              break;
+            }
+          /* Fallthrough */
+
+	case 'I': /* indirect (short) 0--7 */
+	  if (! tic4x_print_indirect (info, INDIRECT_SHORT,
+				    EXTRU (instruction, 7, 0)))
+	    return 0;
+	  break;
+
+        case 'j': /* Extended indirect 8--15 */
+          if ( EXTRU (instruction, 15, 13) == 7 )
+            {
+              if( !tic4x_print_register (info, EXTRU (instruction, 12, 8)) )
+                return 0;
+              break;
+            }
+
+	case 'J': /* indirect (short) 8--15 */
+	  if (! tic4x_print_indirect (info, INDIRECT_SHORT,
+				    EXTRU (instruction, 15, 8)))
+	    return 0;
+	  break;
+
+	case 'G': /* register 8--15 */
+        case 'g':
+	  if (! tic4x_print_register (info, EXTRU (instruction, 15, 8)))
+	    return 0;
+	  break;
+
+	case 'H': /* register 16--18 */
+	  if (! tic4x_print_register (info, EXTRU (instruction, 18, 16)))
+	    return 0;
+	  break;
+
+	case 'K': /* register 19--21 */
+	  if (! tic4x_print_register (info, EXTRU (instruction, 21, 19)))
+	    return 0;
+	  break;
+
+	case 'L': /* register 22--24 */
+	  if (! tic4x_print_register (info, EXTRU (instruction, 24, 22)))
+	    return 0;
+	  break;
+
+	case 'M': /* register 22--22 */
+	  tic4x_print_register (info, EXTRU (instruction, 22, 22) + REG_R2);
+	  break;
+
+	case 'N': /* register 23--23 */
+	  tic4x_print_register (info, EXTRU (instruction, 23, 23) + REG_R0);
+	  break;
+
+	case 'O': /* indirect (short C4x) 8--15 */
+	  if (! IS_CPU_TIC4X (tic4x_version))
+	    return 0;
+	  if (! tic4x_print_indirect (info, INDIRECT_TIC4X,
+				    EXTRU (instruction, 15, 8)))
+	    return 0;
+	  break;
+
+	case 'P': /* displacement 0--15 (used by Bcond and BcondD) */
+	  tic4x_print_relative (info, pc, EXTRS (instruction, 15, 0),
+			      p->opcode);
+	  break;
+
+	case 'Q': /* register 0--15 */
+        case 'q':
+	  if (! tic4x_print_register (info, EXTRU (instruction, 15, 0)))
+	    return 0;
+	  break;
+
+	case 'R': /* register 16--20 */
+        case 'r':
+	  if (! tic4x_print_register (info, EXTRU (instruction, 20, 16)))
+	    return 0;
+	  break;
+
+	case 'S': /* 16-bit signed immediate 0--15 */
+	  tic4x_print_immed (info, IMMED_SINT,
+			   EXTRS (instruction, 15, 0));
+	  break;
+
+	case 'T': /* 5-bit signed immediate 16--20  (C4x stik) */
+	  if (! IS_CPU_TIC4X (tic4x_version))
+	    return 0;
+	  if (! tic4x_print_immed (info, IMMED_SUINT,
+				 EXTRU (instruction, 20, 16)))
+	    return 0;
+	  break;
+
+	case 'U': /* 16-bit unsigned int immediate 0--15 */
+	  tic4x_print_immed (info, IMMED_SUINT, EXTRU (instruction, 15, 0));
+	  break;
+
+	case 'V': /* 5/9-bit unsigned vector 0--4/8 */
+	  tic4x_print_immed (info, IMMED_SUINT,
+			   IS_CPU_TIC4X (tic4x_version) ? 
+			   EXTRU (instruction, 8, 0) :
+			   EXTRU (instruction, 4, 0) & ~0x20);
+	  break;
+
+	case 'W': /* 8-bit signed immediate 0--7 */
+	  if (! IS_CPU_TIC4X (tic4x_version))
+	    return 0;
+	  tic4x_print_immed (info, IMMED_SINT, EXTRS (instruction, 7, 0));
+	  break;
+
+	case 'X': /* expansion register 4--0 */
+	  val = EXTRU (instruction, 4, 0) + REG_IVTP;
+	  if (val < REG_IVTP || val > REG_TVTP)
+	    return 0;
+	  if (! tic4x_print_register (info, val))
+	    return 0;
+	  break;
+
+	case 'Y': /* address register 16--20 */
+	  val = EXTRU (instruction, 20, 16);
+	  if (val < REG_AR0 || val > REG_SP)
+	    return 0;
+	  if (! tic4x_print_register (info, val))
+	    return 0;
+	  break;
+
+	case 'Z': /* expansion register 16--20 */
+	  val = EXTRU (instruction, 20, 16) + REG_IVTP;
+	  if (val < REG_IVTP || val > REG_TVTP)
+	    return 0;
+	  if (! tic4x_print_register (info, val))
+	    return 0;
+	  break;
+
+	case '|':		/* Parallel instruction */
+	  tic4x_print_str (info, " || ");
+	  tic4x_print_str (info, parallel);
+	  tic4x_print_char (info, ' ');
+	  break;
+
+	case ';':
+	  tic4x_print_char (info, ',');
+	  break;
+
+	default:
+	  tic4x_print_char (info, *s);
+	  break;
+	}
+      s++;
+    }
+  return 1;
+}
+
+static void
+tic4x_hash_opcode_special (optable_special, inst)
+     tic4x_inst_t **optable_special;
+     const tic4x_inst_t *inst;
+{
+  int i;
+
+  for( i=0; i<TIC4X_SPESOP_SIZE; i++ )
+    if( optable_special[i] != NULL
+        && optable_special[i]->opcode == inst->opcode )
+      {
+        /* Collision (we have it already) - overwrite */
+        optable_special[i] = (void *)inst;
+        return;
+      }
+
+  for( i=0; i<TIC4X_SPESOP_SIZE; i++ )
+    if( optable_special[i] == NULL )
+      {
+        /* Add the new opcode */
+        optable_special[i] = (void *)inst;
+        return;
+      }
+
+  /* This should never occur. This happens if the number of special
+     instructions exceeds TIC4X_SPESOP_SIZE. Please increase the variable
+     of this variable */
+#if TIC4X_DEBUG
+  printf("optable_special[] is full, please increase TIC4X_SPESOP_SIZE!\n");
+#endif
+}
+
+static void
+tic4x_hash_opcode (optable, optable_special, inst, tic4x_oplevel)
+     tic4x_inst_t **optable;
+     tic4x_inst_t **optable_special;
+     const tic4x_inst_t *inst;
+     const unsigned long tic4x_oplevel;
+{
+  int j;
+  int opcode = inst->opcode >> (32 - TIC4X_HASH_SIZE);
+  int opmask = inst->opmask >> (32 - TIC4X_HASH_SIZE);
+  
+  /* Use a TIC4X_HASH_SIZE bit index as a hash index.  We should
+     have unique entries so there's no point having a linked list
+     for each entry? */
+  for (j = opcode; j < opmask; j++)
+    if ( (j & opmask) == opcode
+         && inst->oplevel & tic4x_oplevel )
+      {
+#if TIC4X_DEBUG
+	/* We should only have collisions for synonyms like
+	   ldp for ldi.  */
+	if (optable[j] != NULL)
+	  printf("Collision at index %d, %s and %s\n",
+		 j, optable[j]->name, inst->name);
+#endif
+        /* Catch those ops that collide with others already inside the
+           hash, and have a opmask greater than the one we use in the
+           hash. Store them in a special-list, that will handle full
+           32-bit INSN, not only the first 11-bit (or so). */
+        if ( optable[j] != NULL
+             && inst->opmask & ~(opmask << (32 - TIC4X_HASH_SIZE)) )
+          {
+            /* Add the instruction already on the list */
+            tic4x_hash_opcode_special(optable_special, optable[j]);
+
+            /* Add the new instruction */
+            tic4x_hash_opcode_special(optable_special, inst);
+          }
+
+        optable[j] = (void *)inst;
+      }
+}
+
+/* Disassemble the instruction in 'instruction'.
+   'pc' should be the address of this instruction, it will
+   be used to print the target address if this is a relative jump or call
+   the disassembled instruction is written to 'info'.
+   The function returns the length of this instruction in words.  */
+
+static int
+tic4x_disassemble (pc, instruction, info)
+     unsigned long pc;
+     unsigned long instruction;
+     struct disassemble_info *info;
+{
+  static tic4x_inst_t **optable = NULL;
+  static tic4x_inst_t **optable_special = NULL;
+  tic4x_inst_t *p;
+  int i;
+  unsigned long tic4x_oplevel;
+  
+  tic4x_version = info->mach;
+
+  tic4x_oplevel  = (IS_CPU_TIC4X (tic4x_version)) ? OP_C4X : 0;
+  tic4x_oplevel |= OP_C3X|OP_LPWR|OP_IDLE2|OP_ENH;
+  
+  if (optable == NULL)
+    {
+      optable = (tic4x_inst_t **)
+	xcalloc (sizeof (tic4x_inst_t *), (1 << TIC4X_HASH_SIZE));
+
+      optable_special = (tic4x_inst_t **)
+        xcalloc (sizeof (tic4x_inst_t *), TIC4X_SPESOP_SIZE );
+
+      /* Install opcodes in reverse order so that preferred
+	 forms overwrite synonyms.  */
+      for (i = tic4x_num_insts - 1; i >= 0; i--)
+        tic4x_hash_opcode (optable, optable_special, &tic4x_insts[i], tic4x_oplevel);
+
+      /* We now need to remove the insn that are special from the
+         "normal" optable, to make the disasm search this extra list
+         for them.
+      */
+      for (i=0; i<TIC4X_SPESOP_SIZE; i++)
+        if ( optable_special[i] != NULL )
+          optable[optable_special[i]->opcode >> (32 - TIC4X_HASH_SIZE)] = NULL;
+    }
+  
+  /* See if we can pick up any loading of the DP register...  */
+  if ((instruction >> 16) == 0x5070 || (instruction >> 16) == 0x1f70)
+    tic4x_dp = EXTRU (instruction, 15, 0);
+
+  p = optable[instruction >> (32 - TIC4X_HASH_SIZE)];
+  if ( p != NULL )
+    {
+      if ( ((instruction & p->opmask) == p->opcode)
+           && tic4x_print_op (NULL, instruction, p, pc) )
+        tic4x_print_op (info, instruction, p, pc);
+      else
+        (*info->fprintf_func) (info->stream, "%08x", instruction);
+    }
+  else
+    {
+      for (i = 0; i<TIC4X_SPESOP_SIZE; i++)
+        if (optable_special[i] != NULL
+            && optable_special[i]->opcode == instruction )
+          {
+            (*info->fprintf_func)(info->stream, "%s", optable_special[i]->name);
+            break;
+          }
+      if (i==TIC4X_SPESOP_SIZE)
+        (*info->fprintf_func) (info->stream, "%08x", instruction);
+    }
+
+  /* Return size of insn in words.  */
+  return 1;	
+}
+
+/* The entry point from objdump and gdb.  */
+int
+print_insn_tic4x (memaddr, info)
+     bfd_vma memaddr;
+     struct disassemble_info *info;
+{
+  int status;
+  unsigned long pc;
+  unsigned long op;
+  bfd_byte buffer[4];
+  
+  status = (*info->read_memory_func) (memaddr, buffer, 4, info);
+  if (status != 0)
+    {
+      (*info->memory_error_func) (status, memaddr, info);
+      return -1;
+    }
+  
+  pc = memaddr;
+  op = bfd_getl32 (buffer);
+  info->bytes_per_line = 4;
+  info->bytes_per_chunk = 4;
+  info->octets_per_byte = 4;
+  info->display_endian = BFD_ENDIAN_LITTLE;
+  return tic4x_disassemble (pc, op, info) * 4;
+}
+@
+
+
+1.1.101.1
+log
+@GNU binutils (CVS snapshot)
+@
+text
+@@
+
+
+1.1.101.2
+log
+@GNU binutils, -current (mainline) snapshot as of today,
+with the usual bunch of files removed
+@
+text
+@d19 1
+a19 1
+   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.  */
+@
+
+
+1.1.101.3
+log
+@GNU binutils and debugger as of today
+@
+text
+@d3 1
+a3 1
+   Copyright 2002, 2003, 2005 Free Software Foundation, Inc.
+d6 1
+a6 1
+
+d19 1
+a19 2
+   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+   MA 02110-1301, USA.  */
+d29 1
+a29 1
+#define TIC4X_SPESOP_SIZE 8    /* Max 8. ops for special instructions.  */
+d32 8
+a39 8
+{
+  IMMED_SINT,
+  IMMED_SUINT,
+  IMMED_SFLOAT,
+  IMMED_INT,
+  IMMED_UINT,
+  IMMED_FLOAT
+}
+d43 5
+a47 5
+{
+  INDIRECT_SHORT,
+  INDIRECT_LONG,
+  INDIRECT_TIC4X
+}
+d53 34
+d88 2
+a89 1
+tic4x_pc_offset (unsigned int op)
+d110 1
+a110 1
+
+d117 1
+a117 1
+
+d125 1
+a125 1
+
+d129 1
+a129 1
+
+d134 1
+a134 1
+
+d137 1
+a137 1
+
+d141 1
+a141 1
+
+d146 3
+a148 1
+tic4x_print_char (struct disassemble_info * info, char ch)
+d156 3
+a158 1
+tic4x_print_str (struct disassemble_info *info, char *str)
+d166 3
+a168 1
+tic4x_print_register (struct disassemble_info *info, unsigned long regno)
+d170 1
+a170 1
+  static tic4x_register_t ** registertable = NULL;
+d172 1
+a172 1
+
+d175 2
+a176 1
+      registertable = xmalloc (sizeof (tic4x_register_t *) * REG_TABLE_SIZE);
+d178 1
+a178 1
+	registertable[tic3x_registers[i].regno] = (tic4x_register_t *) (tic3x_registers + i);
+d184 1
+a184 2
+	    registertable[tic4x_registers[i].regno] =
+	      (tic4x_register_t *)(tic4x_registers + i);
+d195 3
+a197 1
+tic4x_print_addr (struct disassemble_info *info, unsigned long addr)
+d205 5
+a209 4
+tic4x_print_relative (struct disassemble_info *info,
+		      unsigned long pc,
+		      long offset,
+		      unsigned long opcode)
+d215 3
+a217 1
+tic4x_print_direct (struct disassemble_info *info, unsigned long arg)
+d226 1
+a226 1
+#if 0
+d229 5
+a233 3
+
+static void
+tic4x_print_ftoa (unsigned int val, FILE *stream, fprintf_ftype pfunc)
+d239 2
+a240 2
+
+  e = EXTRS (val, 31, 24);	/* Exponent.  */
+d243 2
+a244 2
+      s = EXTRU (val, 23, 23);	/* Sign bit.  */
+      f = EXTRU (val, 22, 0);	/* Mantissa.  */
+d251 1
+a251 1
+    }
+a253 1
+#endif
+d256 4
+a259 3
+tic4x_print_immed (struct disassemble_info *info,
+		   immed_t type,
+		   unsigned long arg)
+d265 1
+a265 1
+
+d272 1
+a272 1
+      (*info->fprintf_func) (info->stream, "%d", (long) arg);
+d274 1
+a274 1
+
+d279 1
+a279 1
+
+d315 3
+a317 1
+tic4x_print_cond (struct disassemble_info *info, unsigned int cond)
+d321 1
+a321 1
+
+d324 1
+a324 1
+      condtable = xmalloc (sizeof (tic4x_cond_t *) * 32);
+d326 1
+a326 1
+	condtable[tic4x_conds[i].cond] = (tic4x_cond_t *)(tic4x_conds + i);
+d336 4
+a339 3
+tic4x_print_indirect (struct disassemble_info *info,
+		      indirect_t type,
+		      unsigned long arg)
+d401 5
+a405 4
+tic4x_print_op (struct disassemble_info *info,
+		unsigned long instruction,
+		tic4x_inst_t *p,
+		unsigned long pc)
+d426 1
+a426 1
+	  parallel = s + 1;	/* Skip past `_' in name.  */
+d434 1
+a434 1
+
+d444 1
+a444 1
+	case '*': /* Indirect 0--15.  */
+d446 1
+a446 1
+				      EXTRU (instruction, 15, 0)))
+d450 1
+a450 1
+	case '#': /* Only used for ldp, ldpk.  */
+d454 1
+a454 1
+	case '@@': /* Direct 0--15.  */
+d458 1
+a458 1
+	case 'A': /* Address register 24--22.  */
+d460 1
+a460 1
+				      REG_AR0))
+d468 1
+a468 1
+				  p->opcode);
+d473 1
+a473 1
+	case 'C': /* Indirect (short C4x) 0--7.  */
+d477 1
+a477 1
+				      EXTRU (instruction, 7, 0)))
+d485 1
+a485 1
+	case 'E': /* Register 0--7.  */
+d491 1
+a491 1
+	case 'F': /* 16-bit float immediate 0--15.  */
+d493 1
+a493 1
+			     EXTRU (instruction, 15, 0));
+d496 2
+a497 2
+        case 'i': /* Extended indirect 0--7.  */
+          if (EXTRU (instruction, 7, 5) == 7)
+d499 1
+a499 1
+              if (!tic4x_print_register (info, EXTRU (instruction, 4, 0)))
+d505 1
+a505 1
+	case 'I': /* Indirect (short) 0--7.  */
+d507 1
+a507 1
+				      EXTRU (instruction, 7, 0)))
+d512 1
+a512 1
+          if (EXTRU (instruction, 15, 13) == 7)
+d514 1
+a514 1
+              if (! tic4x_print_register (info, EXTRU (instruction, 12, 8)))
+d519 1
+a519 1
+	case 'J': /* Indirect (short) 8--15.  */
+d521 1
+a521 1
+				      EXTRU (instruction, 15, 8)))
+d525 1
+a525 1
+	case 'G': /* Register 8--15.  */
+d531 1
+a531 1
+	case 'H': /* Register 16--18.  */
+d536 1
+a536 1
+	case 'K': /* Register 19--21.  */
+d541 1
+a541 1
+	case 'L': /* Register 22--24.  */
+d546 1
+a546 1
+	case 'M': /* Register 22--22.  */
+d550 1
+a550 1
+	case 'N': /* Register 23--23.  */
+d554 1
+a554 1
+	case 'O': /* Indirect (short C4x) 8--15.  */
+d558 1
+a558 1
+				      EXTRU (instruction, 15, 8)))
+d562 1
+a562 1
+	case 'P': /* Displacement 0--15 (used by Bcond and BcondD).  */
+d564 1
+a564 1
+				p->opcode);
+d567 1
+a567 1
+	case 'Q': /* Register 0--15.  */
+d573 1
+a573 1
+	case 'R': /* Register 16--20.  */
+d579 1
+a579 1
+	case 'S': /* 16-bit signed immediate 0--15.  */
+d581 1
+a581 1
+			     EXTRS (instruction, 15, 0));
+d584 1
+a584 1
+	case 'T': /* 5-bit signed immediate 16--20  (C4x stik).  */
+d588 1
+a588 1
+				   EXTRU (instruction, 20, 16)))
+d592 1
+a592 1
+	case 'U': /* 16-bit unsigned int immediate 0--15.  */
+d596 1
+a596 1
+	case 'V': /* 5/9-bit unsigned vector 0--4/8.  */
+d598 3
+a600 3
+			     IS_CPU_TIC4X (tic4x_version) ?
+			     EXTRU (instruction, 8, 0) :
+			     EXTRU (instruction, 4, 0) & ~0x20);
+d603 1
+a603 1
+	case 'W': /* 8-bit signed immediate 0--7.  */
+d609 1
+a609 1
+	case 'X': /* Expansion register 4--0.  */
+d617 1
+a617 1
+	case 'Y': /* Address register 16--20.  */
+d625 1
+a625 1
+	case 'Z': /* Expansion register 16--20.  */
+d633 1
+a633 1
+	case '|':	/* Parallel instruction.  */
+d653 3
+a655 2
+tic4x_hash_opcode_special (tic4x_inst_t **optable_special,
+			   const tic4x_inst_t *inst)
+d659 3
+a661 3
+  for (i = 0;i < TIC4X_SPESOP_SIZE; i++)
+    if (optable_special[i] != NULL
+        && optable_special[i]->opcode == inst->opcode)
+d663 2
+a664 2
+        /* Collision (we have it already) - overwrite.  */
+        optable_special[i] = (tic4x_inst_t *) inst;
+d668 2
+a669 2
+  for (i = 0; i < TIC4X_SPESOP_SIZE; i++)
+    if (optable_special[i] == NULL)
+d671 2
+a672 2
+        /* Add the new opcode.  */
+        optable_special[i] = (tic4x_inst_t *) inst;
+d680 1
+a680 1
+  printf ("optable_special[] is full, please increase TIC4X_SPESOP_SIZE!\n");
+d685 5
+a689 4
+tic4x_hash_opcode (tic4x_inst_t **optable,
+		   tic4x_inst_t **optable_special,
+		   const tic4x_inst_t *inst,
+		   const unsigned long tic4x_oplevel)
+d694 1
+a694 1
+
+d697 1
+a697 1
+     for each entry?  */
+d699 2
+a700 2
+    if ((j & opmask) == opcode
+         && inst->oplevel & tic4x_oplevel)
+d706 2
+a707 2
+	  printf ("Collision at index %d, %s and %s\n",
+		  j, optable[j]->name, inst->name);
+d713 2
+a714 2
+        if (optable[j] != NULL
+	    && inst->opmask & ~(opmask << (32 - TIC4X_HASH_SIZE)))
+d716 2
+a717 2
+            /* Add the instruction already on the list.  */
+            tic4x_hash_opcode_special (optable_special, optable[j]);
+d719 2
+a720 2
+            /* Add the new instruction.  */
+            tic4x_hash_opcode_special (optable_special, inst);
+d723 1
+a723 1
+        optable[j] = (tic4x_inst_t *) inst;
+d734 4
+a737 3
+tic4x_disassemble (unsigned long pc,
+		   unsigned long instruction,
+		   struct disassemble_info *info)
+d744 1
+a744 1
+
+d748 2
+a749 2
+  tic4x_oplevel |= OP_C3X | OP_LPWR | OP_IDLE2 | OP_ENH;
+
+d752 2
+a753 1
+      optable = xcalloc (sizeof (tic4x_inst_t *), (1 << TIC4X_HASH_SIZE));
+d755 2
+a756 1
+      optable_special = xcalloc (sizeof (tic4x_inst_t *), TIC4X_SPESOP_SIZE);
+d761 1
+a761 2
+        tic4x_hash_opcode (optable, optable_special, &tic4x_insts[i],
+			   tic4x_oplevel);
+d765 4
+a768 3
+         for them.  */
+      for (i = 0; i < TIC4X_SPESOP_SIZE; i++)
+        if (optable_special[i] != NULL)
+d771 1
+a771 1
+
+d777 1
+a777 1
+  if (p != NULL)
+d779 2
+a780 2
+      if (((instruction & p->opmask) == p->opcode)
+           && tic4x_print_op (NULL, instruction, p, pc))
+d789 1
+a789 1
+            && optable_special[i]->opcode == instruction)
+d794 1
+a794 1
+      if (i == TIC4X_SPESOP_SIZE)
+d799 1
+a799 1
+  return 1;
+d804 3
+a806 1
+print_insn_tic4x (bfd_vma memaddr, struct disassemble_info *info)
+d812 1
+a812 1
+
+d819 1
+a819 1
+
+@
+
+

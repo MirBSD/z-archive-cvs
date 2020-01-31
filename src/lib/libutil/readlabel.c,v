@@ -1,0 +1,227 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	MIRBSD_10:1.1.1.2.0.4
+	MIRBSD_10_BASE:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.02.05.17.26.15;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.26.15;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.56.30;	author tg;	state Exp;
+branches;
+next	;
+commitid	560042e0092f571e;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*	$OpenBSD: readlabel.c,v 1.7 2002/02/21 16:22:23 deraadt Exp $	*/
+
+/*
+ * Copyright (c) 1996, Jason Downs.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR(S) ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR(S) BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+#include <stdio.h>
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <paths.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/dkio.h>
+#define DKTYPENAMES
+#include <sys/disklabel.h>
+#include <sys/ioctl.h>
+#include <sys/param.h>
+#include <sys/stat.h>
+
+#include "util.h"
+
+/*
+ * Try to get a disklabel for the specified device, and return mount_xxx
+ * style filesystem type name for the specified partition.
+ */
+
+char *readlabelfs(device, verbose)
+	char *device;
+	int verbose;
+{
+	char rpath[MAXPATHLEN];
+	char part, *type;
+	struct stat sbuf;
+	struct disklabel dk;
+	int fd;
+
+	/* Assuming device is of the form /dev/??p, build a raw partition. */
+	if (stat(device, &sbuf) < 0) {
+		if (verbose)
+			warn("%s", device);
+		return(NULL);
+	}
+	switch(sbuf.st_mode & S_IFMT) {
+	case S_IFCHR:
+		/* Ok... already a raw device.  Hmm. */
+		strncpy(rpath, device, sizeof(rpath));
+		rpath[sizeof(rpath) - 1] = '\0';
+
+		/* Change partition name. */
+		part = rpath[strlen(rpath) - 1];
+		rpath[strlen(rpath) - 1] = 'a' + getrawpartition();
+		break;
+	case S_IFBLK:
+		if (strlen(device) > sizeof(_PATH_DEV) - 1) {
+			snprintf(rpath, sizeof(rpath), "%sr%s", _PATH_DEV,
+			    &device[sizeof(_PATH_DEV) - 1]);
+
+			/* Change partition name. */
+			part = rpath[strlen(rpath) - 1];
+			rpath[strlen(rpath) - 1] = 'a' + getrawpartition();
+			break;
+		}
+	default:
+		if (verbose)
+			warnx("%s: not a device node", device);
+		return(NULL);
+	}
+
+	/* If rpath doesn't exist, change that partition back. */
+	fd = open(rpath, O_RDONLY);
+	if (fd < 0) {
+		if (errno == ENOENT) {
+			rpath[strlen(rpath) - 1] = part;
+
+			fd = open(rpath, O_RDONLY);
+			if (fd < 0) {
+				if (verbose)
+					warn("%s", rpath);
+				return(NULL);
+			}
+		} else {
+				if (verbose)
+					warn("%s", rpath);
+				return(NULL);
+		}
+	}
+	if (ioctl(fd, DIOCGDINFO, &dk) < 0) {
+		if (verbose)
+			warn("%s: couldn't read disklabel", rpath);
+		close(fd);
+		return(NULL);
+	}
+	close(fd);
+
+	if (dk.d_partitions[part - 'a'].p_fstype > FSMAXTYPES) {
+		if (verbose)
+			warnx("%s: bad filesystem type in label", rpath);
+		return(NULL);
+	}
+
+	type = fstypesnames[dk.d_partitions[part - 'a'].p_fstype];
+	return((type[0] == '\0') ? NULL : type);
+}
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: readlabel.c,v 1.9 2004/09/18 19:24:14 deraadt Exp $	*/
+d49 4
+a52 2
+char *
+readlabelfs(char *device, int verbose)
+a54 1
+	struct disklabel dk;
+d57 1
+d64 1
+a64 1
+		return (NULL);
+d66 1
+a66 1
+	switch (sbuf.st_mode & S_IFMT) {
+d80 1
+a85 1
+		/* FALLTHROUGH */
+d89 1
+a89 1
+		return (NULL);
+d102 1
+a102 1
+				return (NULL);
+d105 3
+a107 3
+			if (verbose)
+				warn("%s", rpath);
+			return (NULL);
+d114 1
+a114 1
+		return (NULL);
+d121 1
+a121 1
+		return (NULL);
+d125 1
+a125 1
+	return ((type[0] == '\0') ? NULL : type);
+@
+

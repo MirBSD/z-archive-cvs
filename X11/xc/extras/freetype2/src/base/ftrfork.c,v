@@ -1,0 +1,2403 @@
+head	1.6;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.04.15.19.21.26;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.19.47.43;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520152445E05B912;
+
+1.4
+date	2008.06.12.20.54.33;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.04.53;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.44;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.27;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.39.03;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.06;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.02;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftrfork.c                                                              */
+/*                                                                         */
+/*    Embedded resource forks accessor (body).                             */
+/*                                                                         */
+/*  Copyright 2004-2016 by                                                 */
+/*  Masatake YAMATO and Redhat K.K.                                        */
+/*                                                                         */
+/*  FT_Raccess_Get_HeaderInfo() and raccess_guess_darwin_hfsplus() are     */
+/*  derived from ftobjs.c.                                                 */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+/***************************************************************************/
+/* Development of the code in this file is support of                      */
+/* Information-technology Promotion Agency, Japan.                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+#include FT_INTERNAL_STREAM_H
+#include FT_INTERNAL_RFORK_H
+#include "basepic.h"
+#include "ftbase.h"
+
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_raccess
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*************************************************************************/
+  /****                                                                 ****/
+  /****                                                                 ****/
+  /****               Resource fork directory access                    ****/
+  /****                                                                 ****/
+  /****                                                                 ****/
+  /*************************************************************************/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  FT_BASE_DEF( FT_Error )
+  FT_Raccess_Get_HeaderInfo( FT_Library  library,
+                             FT_Stream   stream,
+                             FT_Long     rfork_offset,
+                             FT_Long    *map_offset,
+                             FT_Long    *rdata_pos )
+  {
+    FT_Error       error;
+    unsigned char  head[16], head2[16];
+    FT_Long        map_pos, map_len, rdata_len;
+    int            allzeros, allmatch, i;
+    FT_Long        type_list;
+
+    FT_UNUSED( library );
+
+
+    error = FT_Stream_Seek( stream, (FT_ULong)rfork_offset );
+    if ( error )
+      return error;
+
+    error = FT_Stream_Read( stream, (FT_Byte*)head, 16 );
+    if ( error )
+      return error;
+
+    /* ensure positive values */
+    if ( head[0]  >= 0x80 ||
+         head[4]  >= 0x80 ||
+         head[8]  >= 0x80 ||
+         head[12] >= 0x80 )
+      return FT_THROW( Unknown_File_Format );
+
+    *rdata_pos = ( head[ 0] << 24 ) |
+                 ( head[ 1] << 16 ) |
+                 ( head[ 2] <<  8 ) |
+                   head[ 3];
+    map_pos    = ( head[ 4] << 24 ) |
+                 ( head[ 5] << 16 ) |
+                 ( head[ 6] <<  8 ) |
+                   head[ 7];
+    rdata_len  = ( head[ 8] << 24 ) |
+                 ( head[ 9] << 16 ) |
+                 ( head[10] <<  8 ) |
+                   head[11];
+    map_len    = ( head[12] << 24 ) |
+                 ( head[13] << 16 ) |
+                 ( head[14] <<  8 ) |
+                   head[15];
+
+    /* the map must not be empty */
+    if ( !map_pos )
+      return FT_THROW( Unknown_File_Format );
+
+    /* check whether rdata and map overlap */
+    if ( *rdata_pos < map_pos )
+    {
+      if ( *rdata_pos > map_pos - rdata_len )
+        return FT_THROW( Unknown_File_Format );
+    }
+    else
+    {
+      if ( map_pos > *rdata_pos - map_len )
+        return FT_THROW( Unknown_File_Format );
+    }
+
+    /* check whether end of rdata or map exceeds stream size */
+    if ( FT_LONG_MAX - rdata_len < *rdata_pos                               ||
+         FT_LONG_MAX - map_len < map_pos                                    ||
+
+         FT_LONG_MAX - ( *rdata_pos + rdata_len ) < rfork_offset            ||
+         FT_LONG_MAX - ( map_pos + map_len ) < rfork_offset                 ||
+
+         (FT_ULong)( rfork_offset + *rdata_pos + rdata_len ) > stream->size ||
+         (FT_ULong)( rfork_offset + map_pos + map_len ) > stream->size      )
+      return FT_THROW( Unknown_File_Format );
+
+    *rdata_pos += rfork_offset;
+    map_pos    += rfork_offset;
+
+    error = FT_Stream_Seek( stream, (FT_ULong)map_pos );
+    if ( error )
+      return error;
+
+    head2[15] = (FT_Byte)( head[15] + 1 );       /* make it be different */
+
+    error = FT_Stream_Read( stream, (FT_Byte*)head2, 16 );
+    if ( error )
+      return error;
+
+    allzeros = 1;
+    allmatch = 1;
+    for ( i = 0; i < 16; i++ )
+    {
+      if ( head2[i] != 0 )
+        allzeros = 0;
+      if ( head2[i] != head[i] )
+        allmatch = 0;
+    }
+    if ( !allzeros && !allmatch )
+      return FT_THROW( Unknown_File_Format );
+
+    /* If we have reached this point then it is probably a mac resource */
+    /* file.  Now, does it contain any interesting resources?           */
+
+    (void)FT_STREAM_SKIP( 4        /* skip handle to next resource map */
+                          + 2      /* skip file resource number */
+                          + 2 );   /* skip attributes */
+
+    if ( FT_READ_SHORT( type_list ) )
+      return error;
+    if ( type_list < 0 )
+      return FT_THROW( Unknown_File_Format );
+
+    error = FT_Stream_Seek( stream, (FT_ULong)( map_pos + type_list ) );
+    if ( error )
+      return error;
+
+    *map_offset = map_pos + type_list;
+    return FT_Err_Ok;
+  }
+
+
+  static int
+  ft_raccess_sort_ref_by_id( FT_RFork_Ref*  a,
+                             FT_RFork_Ref*  b )
+  {
+    if ( a->res_id < b->res_id )
+      return -1;
+    else if ( a->res_id > b->res_id )
+      return 1;
+    else
+      return 0;
+  }
+
+
+  FT_BASE_DEF( FT_Error )
+  FT_Raccess_Get_DataOffsets( FT_Library  library,
+                              FT_Stream   stream,
+                              FT_Long     map_offset,
+                              FT_Long     rdata_pos,
+                              FT_Long     tag,
+                              FT_Bool     sort_by_res_id,
+                              FT_Long   **offsets,
+                              FT_Long    *count )
+  {
+    FT_Error      error;
+    int           i, j, cnt, subcnt;
+    FT_Long       tag_internal, rpos;
+    FT_Memory     memory = library->memory;
+    FT_Long       temp;
+    FT_Long       *offsets_internal = NULL;
+    FT_RFork_Ref  *ref = NULL;
+
+
+    FT_TRACE3(( "\n" ));
+    error = FT_Stream_Seek( stream, (FT_ULong)map_offset );
+    if ( error )
+      return error;
+
+    if ( FT_READ_SHORT( cnt ) )
+      return error;
+    cnt++;
+
+    /* `rpos' is a signed 16bit integer offset to resource records; the    */
+    /* size of a resource record is 12 bytes.  The map header is 28 bytes, */
+    /* and a type list needs 10 bytes or more.  If we assume that the name */
+    /* list is empty and we have only a single entry in the type list,     */
+    /* there can be at most                                                */
+    /*                                                                     */
+    /*   (32768 - 28 - 10) / 12 = 2727                                     */
+    /*                                                                     */
+    /* resources.                                                          */
+    /*                                                                     */
+    /* A type list starts with a two-byte counter, followed by 10-byte     */
+    /* type records.  Assuming that there are no resources, the number of  */
+    /* type records can be at most                                         */
+    /*                                                                     */
+    /*   (32768 - 28 - 2) / 8 = 4079                                       */
+    /*                                                                     */
+    if ( cnt > 4079 )
+      return FT_THROW( Invalid_Table );
+
+    for ( i = 0; i < cnt; i++ )
+    {
+      if ( FT_READ_LONG( tag_internal ) ||
+           FT_READ_SHORT( subcnt )      ||
+           FT_READ_SHORT( rpos )        )
+        return error;
+
+      FT_TRACE2(( "Resource tags: %c%c%c%c\n",
+                  (char)( 0xFF & ( tag_internal >> 24 ) ),
+                  (char)( 0xFF & ( tag_internal >> 16 ) ),
+                  (char)( 0xFF & ( tag_internal >>  8 ) ),
+                  (char)( 0xFF & ( tag_internal >>  0 ) ) ));
+      FT_TRACE3(( "             : subcount=%d, suboffset=0x%04x\n",
+                  subcnt, rpos ));
+
+      if ( tag_internal == tag )
+      {
+        *count = subcnt + 1;
+        rpos  += map_offset;
+
+        /* a zero count might be valid in the resource specification, */
+        /* however, it is completely useless to us                    */
+        if ( *count < 1 || *count > 2727 )
+          return FT_THROW( Invalid_Table );
+
+        error = FT_Stream_Seek( stream, (FT_ULong)rpos );
+        if ( error )
+          return error;
+
+        if ( FT_NEW_ARRAY( ref, *count ) )
+          return error;
+
+        for ( j = 0; j < *count; j++ )
+        {
+          if ( FT_READ_SHORT( ref[j].res_id ) )
+            goto Exit;
+          if ( FT_STREAM_SKIP( 2 ) )  /* resource name offset */
+            goto Exit;
+          if ( FT_READ_LONG( temp ) ) /* attributes (8bit), offset (24bit) */
+            goto Exit;
+          if ( FT_STREAM_SKIP( 4 ) )  /* mbz */
+            goto Exit;
+
+          if ( ref[j].res_id < 0 || temp < 0 )
+          {
+            error = FT_THROW( Invalid_Table );
+            goto Exit;
+          }
+
+          ref[j].offset = temp & 0xFFFFFFL;
+
+          FT_TRACE3(( "             [%d]:"
+                      " resource_id=0x%04x, offset=0x%08x\n",
+                      j, ref[j].res_id, ref[j].offset ));
+        }
+
+        if ( sort_by_res_id )
+        {
+          ft_qsort( ref,
+                    (size_t)*count,
+                    sizeof ( FT_RFork_Ref ),
+                    ( int(*)(const void*,
+                             const void*) )ft_raccess_sort_ref_by_id );
+
+          FT_TRACE3(( "             -- sort resources by their ids --\n" ));
+
+          for ( j = 0; j < *count; j++ )
+            FT_TRACE3(( "             [%d]:"
+                        " resource_id=0x%04x, offset=0x%08x\n",
+                        j, ref[j].res_id, ref[j].offset ));
+        }
+
+        if ( FT_NEW_ARRAY( offsets_internal, *count ) )
+          goto Exit;
+
+        /* XXX: duplicated reference ID,
+         *      gap between reference IDs are acceptable?
+         *      further investigation on Apple implementation is needed.
+         */
+        for ( j = 0; j < *count; j++ )
+          offsets_internal[j] = rdata_pos + ref[j].offset;
+
+        *offsets = offsets_internal;
+        error    = FT_Err_Ok;
+
+      Exit:
+        FT_FREE( ref );
+        return error;
+      }
+    }
+
+    return FT_THROW( Cannot_Open_Resource );
+  }
+
+
+#ifdef FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*************************************************************************/
+  /****                                                                 ****/
+  /****                                                                 ****/
+  /****                     Guessing functions                          ****/
+  /****                                                                 ****/
+  /****            When you add a new guessing function,                ****/
+  /****           update FT_RACCESS_N_RULES in ftrfork.h.               ****/
+  /****                                                                 ****/
+  /*************************************************************************/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  static FT_Error
+  raccess_guess_apple_double( FT_Library  library,
+                              FT_Stream   stream,
+                              char       *base_file_name,
+                              char      **result_file_name,
+                              FT_Long    *result_offset );
+
+  static FT_Error
+  raccess_guess_apple_single( FT_Library  library,
+                              FT_Stream   stream,
+                              char       *base_file_name,
+                              char      **result_file_name,
+                              FT_Long    *result_offset );
+
+  static FT_Error
+  raccess_guess_darwin_ufs_export( FT_Library  library,
+                                   FT_Stream   stream,
+                                   char       *base_file_name,
+                                   char      **result_file_name,
+                                   FT_Long    *result_offset );
+
+  static FT_Error
+  raccess_guess_darwin_newvfs( FT_Library  library,
+                               FT_Stream   stream,
+                               char       *base_file_name,
+                               char      **result_file_name,
+                               FT_Long    *result_offset );
+
+  static FT_Error
+  raccess_guess_darwin_hfsplus( FT_Library  library,
+                                FT_Stream   stream,
+                                char       *base_file_name,
+                                char      **result_file_name,
+                                FT_Long    *result_offset );
+
+  static FT_Error
+  raccess_guess_vfat( FT_Library  library,
+                      FT_Stream   stream,
+                      char       *base_file_name,
+                      char      **result_file_name,
+                      FT_Long    *result_offset );
+
+  static FT_Error
+  raccess_guess_linux_cap( FT_Library  library,
+                           FT_Stream   stream,
+                           char       *base_file_name,
+                           char      **result_file_name,
+                           FT_Long    *result_offset );
+
+  static FT_Error
+  raccess_guess_linux_double( FT_Library  library,
+                              FT_Stream   stream,
+                              char       *base_file_name,
+                              char      **result_file_name,
+                              FT_Long    *result_offset );
+
+  static FT_Error
+  raccess_guess_linux_netatalk( FT_Library  library,
+                                FT_Stream   stream,
+                                char       *base_file_name,
+                                char      **result_file_name,
+                                FT_Long    *result_offset );
+
+
+  CONST_FT_RFORK_RULE_ARRAY_BEGIN(ft_raccess_guess_table,
+                                  ft_raccess_guess_rec)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(apple_double,      apple_double)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(apple_single,      apple_single)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(darwin_ufs_export, darwin_ufs_export)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(darwin_newvfs,     darwin_newvfs)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(darwin_hfsplus,    darwin_hfsplus)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(vfat,              vfat)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(linux_cap,         linux_cap)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(linux_double,      linux_double)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(linux_netatalk,    linux_netatalk)
+  CONST_FT_RFORK_RULE_ARRAY_END
+
+
+  /*************************************************************************/
+  /****                                                                 ****/
+  /****                       Helper functions                          ****/
+  /****                                                                 ****/
+  /*************************************************************************/
+
+  static FT_Error
+  raccess_guess_apple_generic( FT_Library  library,
+                               FT_Stream   stream,
+                               char       *base_file_name,
+                               FT_Int32    magic,
+                               FT_Long    *result_offset );
+
+  static FT_Error
+  raccess_guess_linux_double_from_file_name( FT_Library  library,
+                                             char *      file_name,
+                                             FT_Long    *result_offset );
+
+  static char *
+  raccess_make_file_name( FT_Memory    memory,
+                          const char  *original_name,
+                          const char  *insertion );
+
+  FT_BASE_DEF( void )
+  FT_Raccess_Guess( FT_Library  library,
+                    FT_Stream   stream,
+                    char*       base_name,
+                    char      **new_names,
+                    FT_Long    *offsets,
+                    FT_Error   *errors )
+  {
+    FT_Int  i;
+
+
+    for ( i = 0; i < FT_RACCESS_N_RULES; i++ )
+    {
+      new_names[i] = NULL;
+      if ( NULL != stream )
+        errors[i] = FT_Stream_Seek( stream, 0 );
+      else
+        errors[i] = FT_Err_Ok;
+
+      if ( errors[i] )
+        continue;
+
+      errors[i] = (FT_RACCESS_GUESS_TABLE_GET[i].func)( library,
+                                                 stream, base_name,
+                                                 &(new_names[i]),
+                                                 &(offsets[i]) );
+    }
+
+    return;
+  }
+
+
+#ifndef FT_MACINTOSH
+  static FT_RFork_Rule
+  raccess_get_rule_type_from_rule_index( FT_Library  library,
+                                         FT_UInt     rule_index )
+  {
+    FT_UNUSED( library );
+
+    if ( rule_index >= FT_RACCESS_N_RULES )
+      return FT_RFork_Rule_invalid;
+
+    return FT_RACCESS_GUESS_TABLE_GET[rule_index].type;
+  }
+
+
+  /*
+   * For this function, refer ftbase.h.
+   */
+  FT_LOCAL_DEF( FT_Bool )
+  ft_raccess_rule_by_darwin_vfs( FT_Library  library,
+                                 FT_UInt     rule_index )
+  {
+    switch( raccess_get_rule_type_from_rule_index( library, rule_index ) )
+    {
+      case FT_RFork_Rule_darwin_newvfs:
+      case FT_RFork_Rule_darwin_hfsplus:
+        return TRUE;
+
+      default:
+        return FALSE;
+    }
+  }
+#endif
+
+
+  static FT_Error
+  raccess_guess_apple_double( FT_Library  library,
+                              FT_Stream   stream,
+                              char       *base_file_name,
+                              char      **result_file_name,
+                              FT_Long    *result_offset )
+  {
+    FT_Int32  magic = ( 0x00 << 24 ) |
+                      ( 0x05 << 16 ) |
+                      ( 0x16 <<  8 ) |
+                        0x07;
+
+
+    *result_file_name = NULL;
+    if ( NULL == stream )
+      return FT_THROW( Cannot_Open_Stream );
+
+    return raccess_guess_apple_generic( library, stream, base_file_name,
+                                        magic, result_offset );
+  }
+
+
+  static FT_Error
+  raccess_guess_apple_single( FT_Library  library,
+                              FT_Stream   stream,
+                              char       *base_file_name,
+                              char      **result_file_name,
+                              FT_Long    *result_offset )
+  {
+    FT_Int32  magic = ( 0x00 << 24 ) |
+                      ( 0x05 << 16 ) |
+                      ( 0x16 <<  8 ) |
+                        0x00;
+
+
+    *result_file_name = NULL;
+    if ( NULL == stream )
+      return FT_THROW( Cannot_Open_Stream );
+
+    return raccess_guess_apple_generic( library, stream, base_file_name,
+                                        magic, result_offset );
+  }
+
+
+  static FT_Error
+  raccess_guess_darwin_ufs_export( FT_Library  library,
+                                   FT_Stream   stream,
+                                   char       *base_file_name,
+                                   char      **result_file_name,
+                                   FT_Long    *result_offset )
+  {
+    char*      newpath;
+    FT_Error   error;
+    FT_Memory  memory;
+
+    FT_UNUSED( stream );
+
+
+    memory  = library->memory;
+    newpath = raccess_make_file_name( memory, base_file_name, "._" );
+    if ( !newpath )
+      return FT_THROW( Out_Of_Memory );
+
+    error = raccess_guess_linux_double_from_file_name( library, newpath,
+                                                       result_offset );
+    if ( !error )
+      *result_file_name = newpath;
+    else
+      FT_FREE( newpath );
+
+    return error;
+  }
+
+
+  static FT_Error
+  raccess_guess_darwin_hfsplus( FT_Library  library,
+                                FT_Stream   stream,
+                                char       *base_file_name,
+                                char      **result_file_name,
+                                FT_Long    *result_offset )
+  {
+    /*
+      Only meaningful on systems with hfs+ drivers (or Macs).
+     */
+    FT_Error   error;
+    char*      newpath = NULL;
+    FT_Memory  memory;
+    FT_Long    base_file_len = (FT_Long)ft_strlen( base_file_name );
+
+    FT_UNUSED( stream );
+
+
+    memory = library->memory;
+
+    if ( base_file_len + 6 > FT_INT_MAX )
+      return FT_THROW( Array_Too_Large );
+
+    if ( FT_ALLOC( newpath, base_file_len + 6 ) )
+      return error;
+
+    FT_MEM_COPY( newpath, base_file_name, base_file_len );
+    FT_MEM_COPY( newpath + base_file_len, "/rsrc", 6 );
+
+    *result_file_name = newpath;
+    *result_offset    = 0;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Error
+  raccess_guess_darwin_newvfs( FT_Library  library,
+                               FT_Stream   stream,
+                               char       *base_file_name,
+                               char      **result_file_name,
+                               FT_Long    *result_offset )
+  {
+    /*
+      Only meaningful on systems with Mac OS X (> 10.1).
+     */
+    FT_Error   error;
+    char*      newpath = NULL;
+    FT_Memory  memory;
+    FT_Long    base_file_len = (FT_Long)ft_strlen( base_file_name );
+
+    FT_UNUSED( stream );
+
+
+    memory = library->memory;
+
+    if ( base_file_len + 18 > FT_INT_MAX )
+      return FT_THROW( Array_Too_Large );
+
+    if ( FT_ALLOC( newpath, base_file_len + 18 ) )
+      return error;
+
+    FT_MEM_COPY( newpath, base_file_name, base_file_len );
+    FT_MEM_COPY( newpath + base_file_len, "/..namedfork/rsrc", 18 );
+
+    *result_file_name = newpath;
+    *result_offset    = 0;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Error
+  raccess_guess_vfat( FT_Library  library,
+                      FT_Stream   stream,
+                      char       *base_file_name,
+                      char      **result_file_name,
+                      FT_Long    *result_offset )
+  {
+    char*      newpath;
+    FT_Memory  memory;
+
+    FT_UNUSED( stream );
+
+
+    memory = library->memory;
+
+    newpath = raccess_make_file_name( memory, base_file_name,
+                                      "resource.frk/" );
+    if ( !newpath )
+      return FT_THROW( Out_Of_Memory );
+
+    *result_file_name = newpath;
+    *result_offset    = 0;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Error
+  raccess_guess_linux_cap( FT_Library  library,
+                           FT_Stream   stream,
+                           char       *base_file_name,
+                           char      **result_file_name,
+                           FT_Long    *result_offset )
+  {
+    char*      newpath;
+    FT_Memory  memory;
+
+    FT_UNUSED( stream );
+
+
+    memory = library->memory;
+
+    newpath = raccess_make_file_name( memory, base_file_name, ".resource/" );
+    if ( !newpath )
+      return FT_THROW( Out_Of_Memory );
+
+    *result_file_name = newpath;
+    *result_offset    = 0;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Error
+  raccess_guess_linux_double( FT_Library  library,
+                              FT_Stream   stream,
+                              char       *base_file_name,
+                              char      **result_file_name,
+                              FT_Long    *result_offset )
+  {
+    char*      newpath;
+    FT_Error   error;
+    FT_Memory  memory;
+
+    FT_UNUSED( stream );
+
+
+    memory = library->memory;
+
+    newpath = raccess_make_file_name( memory, base_file_name, "%" );
+    if ( !newpath )
+      return FT_THROW( Out_Of_Memory );
+
+    error = raccess_guess_linux_double_from_file_name( library, newpath,
+                                                       result_offset );
+    if ( !error )
+      *result_file_name = newpath;
+    else
+      FT_FREE( newpath );
+
+    return error;
+  }
+
+
+  static FT_Error
+  raccess_guess_linux_netatalk( FT_Library  library,
+                                FT_Stream   stream,
+                                char       *base_file_name,
+                                char      **result_file_name,
+                                FT_Long    *result_offset )
+  {
+    char*      newpath;
+    FT_Error   error;
+    FT_Memory  memory;
+
+    FT_UNUSED( stream );
+
+
+    memory = library->memory;
+
+    newpath = raccess_make_file_name( memory, base_file_name,
+                                      ".AppleDouble/" );
+    if ( !newpath )
+      return FT_THROW( Out_Of_Memory );
+
+    error = raccess_guess_linux_double_from_file_name( library, newpath,
+                                                       result_offset );
+    if ( !error )
+      *result_file_name = newpath;
+    else
+      FT_FREE( newpath );
+
+    return error;
+  }
+
+
+  static FT_Error
+  raccess_guess_apple_generic( FT_Library  library,
+                               FT_Stream   stream,
+                               char       *base_file_name,
+                               FT_Int32    magic,
+                               FT_Long    *result_offset )
+  {
+    FT_Int32   magic_from_stream;
+    FT_Error   error;
+    FT_Int32   version_number = 0;
+    FT_UShort  n_of_entries;
+
+    int        i;
+    FT_Int32   entry_id, entry_offset, entry_length = 0;
+
+    const FT_Int32  resource_fork_entry_id = 0x2;
+
+    FT_UNUSED( library );
+    FT_UNUSED( base_file_name );
+    FT_UNUSED( version_number );
+    FT_UNUSED( entry_length   );
+
+
+    if ( FT_READ_LONG( magic_from_stream ) )
+      return error;
+    if ( magic_from_stream != magic )
+      return FT_THROW( Unknown_File_Format );
+
+    if ( FT_READ_LONG( version_number ) )
+      return error;
+
+    /* filler */
+    error = FT_Stream_Skip( stream, 16 );
+    if ( error )
+      return error;
+
+    if ( FT_READ_USHORT( n_of_entries ) )
+      return error;
+    if ( n_of_entries == 0 )
+      return FT_THROW( Unknown_File_Format );
+
+    for ( i = 0; i < n_of_entries; i++ )
+    {
+      if ( FT_READ_LONG( entry_id ) )
+        return error;
+      if ( entry_id == resource_fork_entry_id )
+      {
+        if ( FT_READ_LONG( entry_offset ) ||
+             FT_READ_LONG( entry_length ) )
+          continue;
+        *result_offset = entry_offset;
+
+        return FT_Err_Ok;
+      }
+      else
+      {
+        error = FT_Stream_Skip( stream, 4 + 4 );    /* offset + length */
+        if ( error )
+          return error;
+      }
+    }
+
+    return FT_THROW( Unknown_File_Format );
+  }
+
+
+  static FT_Error
+  raccess_guess_linux_double_from_file_name( FT_Library  library,
+                                             char       *file_name,
+                                             FT_Long    *result_offset )
+  {
+    FT_Open_Args  args2;
+    FT_Stream     stream2;
+    char *        nouse = NULL;
+    FT_Error      error;
+
+
+    args2.flags    = FT_OPEN_PATHNAME;
+    args2.pathname = file_name;
+    error = FT_Stream_New( library, &args2, &stream2 );
+    if ( error )
+      return error;
+
+    error = raccess_guess_apple_double( library, stream2, file_name,
+                                        &nouse, result_offset );
+
+    FT_Stream_Free( stream2, 0 );
+
+    return error;
+  }
+
+
+  static char*
+  raccess_make_file_name( FT_Memory    memory,
+                          const char  *original_name,
+                          const char  *insertion )
+  {
+    char*        new_name = NULL;
+    const char*  tmp;
+    const char*  slash;
+    size_t       new_length;
+    FT_Error     error = FT_Err_Ok;
+
+    FT_UNUSED( error );
+
+
+    new_length = ft_strlen( original_name ) + ft_strlen( insertion );
+    if ( FT_ALLOC( new_name, new_length + 1 ) )
+      return NULL;
+
+    tmp = ft_strrchr( original_name, '/' );
+    if ( tmp )
+    {
+      ft_strncpy( new_name,
+                  original_name,
+                  (size_t)( tmp - original_name + 1 ) );
+      new_name[tmp - original_name + 1] = '\0';
+      slash = tmp + 1;
+    }
+    else
+    {
+      slash       = original_name;
+      new_name[0] = '\0';
+    }
+
+    ft_strcat( new_name, insertion );
+    ft_strcat( new_name, slash );
+
+    return new_name;
+  }
+
+
+#else   /* !FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK */
+
+
+  /*************************************************************************/
+  /*                  Dummy function; just sets errors                     */
+  /*************************************************************************/
+
+  FT_BASE_DEF( void )
+  FT_Raccess_Guess( FT_Library  library,
+                    FT_Stream   stream,
+                    char       *base_name,
+                    char      **new_names,
+                    FT_Long    *offsets,
+                    FT_Error   *errors )
+  {
+    FT_Int  i;
+
+    FT_UNUSED( library );
+    FT_UNUSED( stream );
+    FT_UNUSED( base_name );
+
+
+    for ( i = 0; i < FT_RACCESS_N_RULES; i++ )
+    {
+      new_names[i] = NULL;
+      offsets[i]   = 0;
+      errors[i]    = FT_ERR( Unimplemented_Feature );
+    }
+  }
+
+
+#endif  /* !FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK */
+
+
+/* END */
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006, 2007, 2008, 2009 by                        */
+d31 2
+a32 1
+
+d59 1
+a59 1
+    FT_Long        map_pos, rdata_len;
+d66 1
+a66 1
+    error = FT_Stream_Seek( stream, rfork_offset );
+d70 1
+a70 1
+    error = FT_Stream_Read( stream, (FT_Byte *)head, 16 );
+d74 43
+a116 12
+    *rdata_pos = rfork_offset + ( ( head[0] << 24 ) |
+                                  ( head[1] << 16 ) |
+                                  ( head[2] <<  8 ) |
+                                    head[3]         );
+    map_pos    = rfork_offset + ( ( head[4] << 24 ) |
+                                  ( head[5] << 16 ) |
+                                  ( head[6] <<  8 ) |
+                                    head[7]         );
+    rdata_len = ( head[ 8] << 24 ) |
+                ( head[ 9] << 16 ) |
+                ( head[10] <<  8 ) |
+                  head[11];
+d118 2
+a119 1
+    /* map_len = head[12] .. head[15] */
+d121 3
+a123 2
+    if ( *rdata_pos + rdata_len != map_pos || map_pos == rfork_offset )
+      return FT_Err_Unknown_File_Format;
+d125 4
+a128 1
+    error = FT_Stream_Seek( stream, map_pos );
+d140 1
+a140 1
+    for ( i = 0; i < 16; ++i )
+d148 1
+a148 1
+      return FT_Err_Unknown_File_Format;
+d152 1
+a152 2
+    /* Skip handle to next resource map, the file resource number, and  */
+    /* attributes.                                                      */
+d157 1
+a157 1
+    if ( FT_READ_USHORT( type_list ) )
+d159 2
+a160 2
+    if ( type_list == -1 )
+      return FT_Err_Unknown_File_Format;
+d162 1
+a162 1
+    error = FT_Stream_Seek( stream, map_pos + type_list );
+d190 1
+d199 2
+a200 2
+    FT_Long       *offsets_internal;
+    FT_RFork_Ref  *ref;
+d203 2
+a204 1
+    error = FT_Stream_Seek( stream, map_offset );
+d208 1
+a208 1
+    if ( FT_READ_USHORT( cnt ) )
+d212 20
+a231 1
+    for ( i = 0; i < cnt; ++i )
+d234 2
+a235 2
+           FT_READ_USHORT( subcnt )     ||
+           FT_READ_USHORT( rpos )       )
+d239 6
+a244 4
+                  (char)( 0xff & ( tag_internal >> 24 ) ),
+                  (char)( 0xff & ( tag_internal >> 16 ) ),
+                  (char)( 0xff & ( tag_internal >>  8 ) ),
+                  (char)( 0xff & ( tag_internal >>  0 ) ) ));
+d251 6
+a256 1
+        error = FT_Stream_Seek( stream, rpos );
+d263 1
+a263 1
+        for ( j = 0; j < *count; ++j )
+d265 1
+a265 1
+          if ( FT_READ_USHORT( ref[j].res_id ) )
+d267 1
+a267 1
+          if ( FT_STREAM_SKIP( 2 ) ) /* resource name */
+d269 1
+a269 1
+          if ( FT_READ_LONG( temp ) )
+d271 1
+a271 1
+          if ( FT_STREAM_SKIP( 4 ) ) /* mbz */
+d274 6
+d281 4
+d287 15
+a301 3
+        ft_qsort( ref, *count, sizeof ( FT_RFork_Ref ),
+                  ( int(*)(const void*, const void*) )
+                  ft_raccess_sort_ref_by_id );
+d310 1
+a310 1
+        for ( j = 0; j < *count; ++j )
+d322 1
+a322 1
+    return FT_Err_Cannot_Open_Resource;
+a341 8
+  typedef FT_Error
+  (*raccess_guess_func)( FT_Library  library,
+                         FT_Stream   stream,
+                         char       *base_file_name,
+                         char      **result_file_name,
+                         FT_Long    *result_offset );
+
+
+d406 14
+a442 1
+
+d451 1
+a451 1
+    FT_Long  i;
+a453 13
+    raccess_guess_func  funcs[FT_RACCESS_N_RULES] =
+    {
+      raccess_guess_apple_double,
+      raccess_guess_apple_single,
+      raccess_guess_darwin_ufs_export,
+      raccess_guess_darwin_newvfs,
+      raccess_guess_darwin_hfsplus,
+      raccess_guess_vfat,
+      raccess_guess_linux_cap,
+      raccess_guess_linux_double,
+      raccess_guess_linux_netatalk,
+    };
+
+d463 1
+a463 1
+        continue ;
+d465 4
+a468 2
+      errors[i] = (funcs[i])( library, stream, base_name,
+                              &(new_names[i]), &(offsets[i]) );
+d475 34
+d524 1
+a524 1
+      return FT_Err_Cannot_Open_Stream;
+d546 1
+a546 1
+      return FT_Err_Cannot_Open_Stream;
+d570 1
+a570 1
+      return FT_Err_Out_Of_Memory;
+d594 1
+a594 1
+    char*      newpath;
+d596 1
+a596 1
+    FT_Long    base_file_len = ft_strlen( base_file_name );
+d604 1
+a604 1
+      return FT_Err_Array_Too_Large;
+d630 1
+a630 1
+    char*      newpath;
+d632 1
+a632 1
+    FT_Long    base_file_len = ft_strlen( base_file_name );
+d640 1
+a640 1
+      return FT_Err_Array_Too_Large;
+d673 1
+a673 1
+      return FT_Err_Out_Of_Memory;
+d699 1
+a699 1
+      return FT_Err_Out_Of_Memory;
+d726 1
+a726 1
+      return FT_Err_Out_Of_Memory;
+d758 1
+a758 1
+      return FT_Err_Out_Of_Memory;
+d784 1
+a784 1
+    FT_UInt32  entry_id, entry_offset, entry_length = 0;
+d786 1
+a786 1
+    const FT_UInt32  resource_fork_entry_id = 0x2;
+d797 1
+a797 1
+      return FT_Err_Unknown_File_Format;
+d810 1
+a810 1
+      return FT_Err_Unknown_File_Format;
+d833 1
+a833 1
+    return FT_Err_Unknown_File_Format;
+d868 1
+a868 1
+    char*        new_name;
+d884 3
+a886 1
+      ft_strncpy( new_name, original_name, tmp - original_name + 1 );
+d918 1
+a918 1
+    int  i;
+d929 1
+a929 1
+      errors[i]    = FT_Err_Unimplemented_Feature;
+@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006, 2007 by                                    */
+a24 1
+/* $XFree86: xc/extras/freetype2/src/base/ftrfork.c,v 1.2 2004/06/09 18:52:02 tsi Exp $ */
+d402 4
+a405 1
+    FT_Int32  magic = ( 0x00 << 24 | 0x05 << 16 | 0x16 << 8 | 0x07 );
+d424 4
+a427 1
+    FT_Int32  magic = (0x00 << 24 | 0x05 << 16 | 0x16 << 8 | 0x00);
+a687 2
+    FT_UNUSED( version_number );
+
+a708 2
+	FT_UNUSED( entry_length );
+
+d712 4
+a715 1
+        FT_Stream_Skip( stream, 4 + 4 );    /* offset + length */
+d717 1
+d755 1
+a755 1
+    char*        tmp;
+d757 1
+a757 1
+    unsigned     new_length;
+a766 2
+    FT_UNUSED( error );
+
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006 by                                          */
+d136 13
+d158 7
+a164 6
+    FT_Error   error;
+    int        i, j, cnt, subcnt;
+    FT_Long    tag_internal, rpos;
+    FT_Memory  memory = library->memory;
+    FT_Long    temp;
+    FT_Long    *offsets_internal;
+d197 1
+a197 1
+        if ( FT_NEW_ARRAY( offsets_internal, *count ) )
+d202 8
+a209 2
+          (void)FT_STREAM_SKIP( 2 ); /* resource id */
+          (void)FT_STREAM_SKIP( 2 ); /* rsource name */
+d211 2
+a212 5
+          if ( FT_READ_LONG( temp ) )
+          {
+            FT_FREE( offsets_internal );
+            return error;
+          }
+d214 3
+a216 1
+          offsets_internal[j] = rdata_pos + ( temp & 0xFFFFFFL );
+d218 9
+a226 2
+          (void)FT_STREAM_SKIP( 4 ); /* mbz */
+        }
+d229 1
+d231 3
+a233 1
+        return FT_Err_Ok;
+d260 1
+a260 1
+                         char *      base_file_name,
+d268 1
+a268 1
+                              char *      base_file_name,
+d275 1
+a275 1
+                              char *      base_file_name,
+d282 1
+a282 1
+                                   char *      base_file_name,
+d287 7
+d296 1
+a296 1
+                                char *      base_file_name,
+d303 1
+a303 1
+                      char *      base_file_name,
+d310 1
+a310 1
+                           char *      base_file_name,
+d317 1
+a317 1
+                              char *      base_file_name,
+d324 1
+a324 1
+                                char *      base_file_name,
+d338 1
+a338 1
+                               char *      base_file_name,
+d369 1
+d380 5
+a384 1
+      errors[i] = FT_Stream_Seek( stream, 0 );
+d399 1
+a399 1
+                              char *      base_file_name,
+d407 3
+d418 1
+a418 1
+                              char *      base_file_name,
+d426 3
+d437 1
+a437 1
+                                   char *      base_file_name,
+d467 1
+a467 1
+                                char *      base_file_name,
+d484 1
+a484 1
+    if ( base_file_len > FT_INT_MAX )
+d501 36
+d539 1
+a539 1
+                      char *      base_file_name,
+d566 1
+a566 1
+                           char *      base_file_name,
+d592 1
+a592 1
+                              char *      base_file_name,
+d623 1
+a623 1
+                                char *      base_file_name,
+d655 1
+a655 1
+                               char *      base_file_name,
+d720 1
+a720 1
+                                             char *      file_name,
+d794 1
+a794 1
+                    char*       base_name,
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d655 1
+a655 1
+    FT_Stream_Close( stream2 );
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004 by                                                      */
+d183 1
+a183 1
+        if ( FT_ALLOC( offsets_internal, *count * sizeof( FT_Long ) ) )
+d430 1
+d437 4
+a440 2
+    if ( FT_ALLOC( newpath,
+                   ft_strlen( base_file_name ) + ft_strlen( "/rsrc" ) + 1 ) )
+d443 3
+a445 2
+    ft_strcpy( newpath, base_file_name );
+    ft_strcat( newpath, "/rsrc" );
+d447 2
+a448 1
+    *result_offset = 0;
+d578 1
+a578 1
+    FT_Int32   version_number;
+d582 1
+a582 1
+    FT_UInt32  entry_id, entry_offset, entry_length;
+d588 2
+d592 1
+a592 1
+    if ( FT_READ_LONG ( magic_from_stream ) )
+d645 1
+d670 4
+a673 1
+    FT_ULong     error;
+d718 4
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006 by                                          */
+d25 1
+d183 1
+a183 1
+        if ( FT_NEW_ARRAY( offsets_internal, *count ) )
+a429 1
+    FT_Long    base_file_len = ft_strlen( base_file_name );
+d436 2
+a437 4
+    if ( base_file_len > FT_INT_MAX )
+      return FT_Err_Array_Too_Large;
+
+    if ( FT_ALLOC( newpath, base_file_len + 6 ) )
+d440 2
+a441 3
+    FT_MEM_COPY( newpath, base_file_name, base_file_len );
+    FT_MEM_COPY( newpath + base_file_len, "/rsrc", 6 );
+
+d443 1
+a443 2
+    *result_offset    = 0;
+
+d573 1
+a573 1
+    FT_Int32   version_number = 0;
+d577 1
+a577 1
+    FT_UInt32  entry_id, entry_offset, entry_length = 0;
+a582 2
+    FT_UNUSED( version_number );
+    FT_UNUSED( entry_length   );
+d585 1
+a585 1
+    if ( FT_READ_LONG( magic_from_stream ) )
+d593 2
+d616 2
+a637 1
+
+d647 1
+a647 1
+    FT_Stream_Free( stream2, 0 );
+d662 1
+a662 4
+    FT_Error     error = FT_Err_Ok;
+
+    FT_UNUSED( error );
+
+d668 2
+a706 4
+    FT_UNUSED( library );
+    FT_UNUSED( stream );
+    FT_UNUSED( base_name );
+
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006, 2007 by                                    */
+a134 13
+  static int
+  ft_raccess_sort_ref_by_id( FT_RFork_Ref*  a,
+                             FT_RFork_Ref*  b )
+  {
+    if ( a->res_id < b->res_id )
+      return -1;
+    else if ( a->res_id > b->res_id )
+      return 1;
+    else
+      return 0;
+  }
+
+
+d144 6
+a149 7
+    FT_Error      error;
+    int           i, j, cnt, subcnt;
+    FT_Long       tag_internal, rpos;
+    FT_Memory     memory = library->memory;
+    FT_Long       temp;
+    FT_Long       *offsets_internal;
+    FT_RFork_Ref  *ref;
+d182 1
+a182 1
+        if ( FT_NEW_ARRAY( ref, *count ) )
+d187 3
+a189 4
+          if ( FT_READ_USHORT( ref[j].res_id ) )
+            goto Exit;
+          if ( FT_STREAM_SKIP( 2 ) ) /* resource name */
+            goto Exit;
+d191 6
+a196 3
+            goto Exit;
+          if ( FT_STREAM_SKIP( 4 ) ) /* mbz */
+            goto Exit;
+d198 1
+a198 1
+          ref[j].offset = temp & 0xFFFFFFL;
+a200 14
+        ft_qsort( ref, *count, sizeof ( FT_RFork_Ref ),
+                  ( int(*)(const void*, const void*) )
+                  ft_raccess_sort_ref_by_id );
+
+        if ( FT_NEW_ARRAY( offsets_internal, *count ) )
+          goto Exit;
+
+        /* XXX: duplicated reference ID,
+         *      gap between reference IDs are acceptable?
+         *      further investigation on Apple implementation is needed.
+         */
+        for ( j = 0; j < *count; ++j )
+          offsets_internal[j] = rdata_pos + ref[j].offset;
+
+a201 1
+        error    = FT_Err_Ok;
+d203 1
+a203 3
+      Exit:
+        FT_FREE( ref );
+        return error;
+d230 1
+a230 1
+                         char       *base_file_name,
+d238 1
+a238 1
+                              char       *base_file_name,
+d245 1
+a245 1
+                              char       *base_file_name,
+d252 1
+a252 1
+                                   char       *base_file_name,
+a256 7
+  raccess_guess_darwin_newvfs( FT_Library  library,
+                               FT_Stream   stream,
+                               char       *base_file_name,
+                               char      **result_file_name,
+                               FT_Long    *result_offset );
+
+  static FT_Error
+d259 1
+a259 1
+                                char       *base_file_name,
+d266 1
+a266 1
+                      char       *base_file_name,
+d273 1
+a273 1
+                           char       *base_file_name,
+d280 1
+a280 1
+                              char       *base_file_name,
+d287 1
+a287 1
+                                char       *base_file_name,
+d301 1
+a301 1
+                               char       *base_file_name,
+a331 1
+      raccess_guess_darwin_newvfs,
+d342 1
+a342 5
+      if ( NULL != stream )
+        errors[i] = FT_Stream_Seek( stream, 0 );
+      else
+        errors[i] = FT_Err_Ok;
+
+d357 1
+a357 1
+                              char       *base_file_name,
+a364 3
+    if ( NULL == stream )
+      return FT_Err_Cannot_Open_Stream;
+
+d373 1
+a373 1
+                              char       *base_file_name,
+a380 3
+    if ( NULL == stream )
+      return FT_Err_Cannot_Open_Stream;
+
+d389 1
+a389 1
+                                   char       *base_file_name,
+d419 1
+a419 1
+                                char       *base_file_name,
+d436 1
+a436 1
+    if ( base_file_len + 6 > FT_INT_MAX )
+a452 36
+  raccess_guess_darwin_newvfs( FT_Library  library,
+                               FT_Stream   stream,
+                               char       *base_file_name,
+                               char      **result_file_name,
+                               FT_Long    *result_offset )
+  {
+    /*
+      Only meaningful on systems with Mac OS X (> 10.1).
+     */
+    FT_Error   error;
+    char*      newpath;
+    FT_Memory  memory;
+    FT_Long    base_file_len = ft_strlen( base_file_name );
+
+    FT_UNUSED( stream );
+
+
+    memory = library->memory;
+
+    if ( base_file_len + 18 > FT_INT_MAX )
+      return FT_Err_Array_Too_Large;
+
+    if ( FT_ALLOC( newpath, base_file_len + 18 ) )
+      return error;
+
+    FT_MEM_COPY( newpath, base_file_name, base_file_len );
+    FT_MEM_COPY( newpath + base_file_len, "/..namedfork/rsrc", 18 );
+
+    *result_file_name = newpath;
+    *result_offset    = 0;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Error
+d455 1
+a455 1
+                      char       *base_file_name,
+d482 1
+a482 1
+                           char       *base_file_name,
+d508 1
+a508 1
+                              char       *base_file_name,
+d539 1
+a539 1
+                                char       *base_file_name,
+d571 1
+a571 1
+                               char       *base_file_name,
+d632 1
+a632 1
+                                             char       *file_name,
+d704 1
+a704 1
+                    char       *base_name,
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@d25 1
+d593 2
+d616 2
+a632 1
+    FT_Memory     memory;
+a637 3
+
+    memory = library->memory;
+
+d668 2
+@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006 by                                          */
+d182 1
+a182 1
+        if ( FT_NEW_ARRAY( offsets_internal, *count ) )
+a428 1
+    FT_Long    base_file_len = ft_strlen( base_file_name );
+d435 2
+a436 4
+    if ( base_file_len > FT_INT_MAX )
+      return FT_Err_Array_Too_Large;
+
+    if ( FT_ALLOC( newpath, base_file_len + 6 ) )
+d439 2
+a440 3
+    FT_MEM_COPY( newpath, base_file_name, base_file_len );
+    FT_MEM_COPY( newpath + base_file_len, "/rsrc", 6 );
+
+d442 1
+a442 2
+    *result_offset    = 0;
+
+d572 1
+a572 1
+    FT_Int32   version_number = 0;
+d576 1
+a576 1
+    FT_UInt32  entry_id, entry_offset, entry_length = 0;
+a581 2
+    FT_UNUSED( version_number );
+    FT_UNUSED( entry_length   );
+d584 1
+a584 1
+    if ( FT_READ_LONG( magic_from_stream ) )
+d628 1
+d635 2
+d661 1
+a661 4
+    FT_Error     error = FT_Err_Ok;
+
+    FT_UNUSED( error );
+
+a703 4
+    FT_UNUSED( library );
+    FT_UNUSED( stream );
+    FT_UNUSED( base_name );
+
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006, 2007, 2008, 2009 by                        */
+a134 13
+  static int
+  ft_raccess_sort_ref_by_id( FT_RFork_Ref*  a,
+                             FT_RFork_Ref*  b )
+  {
+    if ( a->res_id < b->res_id )
+      return -1;
+    else if ( a->res_id > b->res_id )
+      return 1;
+    else
+      return 0;
+  }
+
+
+d144 6
+a149 7
+    FT_Error      error;
+    int           i, j, cnt, subcnt;
+    FT_Long       tag_internal, rpos;
+    FT_Memory     memory = library->memory;
+    FT_Long       temp;
+    FT_Long       *offsets_internal;
+    FT_RFork_Ref  *ref;
+d182 1
+a182 1
+        if ( FT_NEW_ARRAY( ref, *count ) )
+d187 3
+a189 4
+          if ( FT_READ_USHORT( ref[j].res_id ) )
+            goto Exit;
+          if ( FT_STREAM_SKIP( 2 ) ) /* resource name */
+            goto Exit;
+d191 4
+a194 3
+            goto Exit;
+          if ( FT_STREAM_SKIP( 4 ) ) /* mbz */
+            goto Exit;
+d196 3
+a198 1
+          ref[j].offset = temp & 0xFFFFFFL;
+a200 14
+        ft_qsort( ref, *count, sizeof ( FT_RFork_Ref ),
+                  ( int(*)(const void*, const void*) )
+                  ft_raccess_sort_ref_by_id );
+
+        if ( FT_NEW_ARRAY( offsets_internal, *count ) )
+          goto Exit;
+
+        /* XXX: duplicated reference ID,
+         *      gap between reference IDs are acceptable?
+         *      further investigation on Apple implementation is needed.
+         */
+        for ( j = 0; j < *count; ++j )
+          offsets_internal[j] = rdata_pos + ref[j].offset;
+
+a201 1
+        error    = FT_Err_Ok;
+d203 1
+a203 3
+      Exit:
+        FT_FREE( ref );
+        return error;
+d230 1
+a230 1
+                         char       *base_file_name,
+d238 1
+a238 1
+                              char       *base_file_name,
+d245 1
+a245 1
+                              char       *base_file_name,
+d252 1
+a252 1
+                                   char       *base_file_name,
+a256 7
+  raccess_guess_darwin_newvfs( FT_Library  library,
+                               FT_Stream   stream,
+                               char       *base_file_name,
+                               char      **result_file_name,
+                               FT_Long    *result_offset );
+
+  static FT_Error
+d259 1
+a259 1
+                                char       *base_file_name,
+d266 1
+a266 1
+                      char       *base_file_name,
+d273 1
+a273 1
+                           char       *base_file_name,
+d280 1
+a280 1
+                              char       *base_file_name,
+d287 1
+a287 1
+                                char       *base_file_name,
+d301 1
+a301 1
+                               char       *base_file_name,
+a331 1
+      raccess_guess_darwin_newvfs,
+d342 1
+a342 5
+      if ( NULL != stream )
+        errors[i] = FT_Stream_Seek( stream, 0 );
+      else
+        errors[i] = FT_Err_Ok;
+
+d357 1
+a357 1
+                              char       *base_file_name,
+d361 1
+a361 4
+    FT_Int32  magic = ( 0x00 << 24 ) |
+                      ( 0x05 << 16 ) |
+                      ( 0x16 <<  8 ) |
+                        0x07;
+a364 3
+    if ( NULL == stream )
+      return FT_Err_Cannot_Open_Stream;
+
+d373 1
+a373 1
+                              char       *base_file_name,
+d377 1
+a377 4
+    FT_Int32  magic = ( 0x00 << 24 ) |
+                      ( 0x05 << 16 ) |
+                      ( 0x16 <<  8 ) |
+                        0x00;
+a380 3
+    if ( NULL == stream )
+      return FT_Err_Cannot_Open_Stream;
+
+d389 1
+a389 1
+                                   char       *base_file_name,
+d419 1
+a419 1
+                                char       *base_file_name,
+d436 1
+a436 1
+    if ( base_file_len + 6 > FT_INT_MAX )
+a452 36
+  raccess_guess_darwin_newvfs( FT_Library  library,
+                               FT_Stream   stream,
+                               char       *base_file_name,
+                               char      **result_file_name,
+                               FT_Long    *result_offset )
+  {
+    /*
+      Only meaningful on systems with Mac OS X (> 10.1).
+     */
+    FT_Error   error;
+    char*      newpath;
+    FT_Memory  memory;
+    FT_Long    base_file_len = ft_strlen( base_file_name );
+
+    FT_UNUSED( stream );
+
+
+    memory = library->memory;
+
+    if ( base_file_len + 18 > FT_INT_MAX )
+      return FT_Err_Array_Too_Large;
+
+    if ( FT_ALLOC( newpath, base_file_len + 18 ) )
+      return error;
+
+    FT_MEM_COPY( newpath, base_file_name, base_file_len );
+    FT_MEM_COPY( newpath + base_file_len, "/..namedfork/rsrc", 18 );
+
+    *result_file_name = newpath;
+    *result_offset    = 0;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Error
+d455 1
+a455 1
+                      char       *base_file_name,
+d482 1
+a482 1
+                           char       *base_file_name,
+d508 1
+a508 1
+                              char       *base_file_name,
+d539 1
+a539 1
+                                char       *base_file_name,
+d571 1
+a571 1
+                               char       *base_file_name,
+d623 1
+a623 4
+      {
+        error = FT_Stream_Skip( stream, 4 + 4 );    /* offset + length */
+        if ( error )
+          return error;
+a624 1
+    }
+d632 1
+a632 1
+                                             char       *file_name,
+d650 1
+a650 1
+    FT_Stream_Free( stream2, 0 );
+d662 1
+a662 1
+    const char*  tmp;
+d664 1
+a664 1
+    size_t       new_length;
+d704 1
+a704 1
+                    char       *base_name,
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004-2016 by                                                 */
+d31 1
+a31 2
+#include "basepic.h"
+#include "ftbase.h"
+d58 1
+a58 1
+    FT_Long        map_pos, map_len, rdata_len;
+d65 1
+a65 1
+    error = FT_Stream_Seek( stream, (FT_ULong)rfork_offset );
+d69 1
+a69 1
+    error = FT_Stream_Read( stream, (FT_Byte*)head, 16 );
+d73 12
+a84 43
+    /* ensure positive values */
+    if ( head[0]  >= 0x80 ||
+         head[4]  >= 0x80 ||
+         head[8]  >= 0x80 ||
+         head[12] >= 0x80 )
+      return FT_THROW( Unknown_File_Format );
+
+    *rdata_pos = ( head[ 0] << 24 ) |
+                 ( head[ 1] << 16 ) |
+                 ( head[ 2] <<  8 ) |
+                   head[ 3];
+    map_pos    = ( head[ 4] << 24 ) |
+                 ( head[ 5] << 16 ) |
+                 ( head[ 6] <<  8 ) |
+                   head[ 7];
+    rdata_len  = ( head[ 8] << 24 ) |
+                 ( head[ 9] << 16 ) |
+                 ( head[10] <<  8 ) |
+                   head[11];
+    map_len    = ( head[12] << 24 ) |
+                 ( head[13] << 16 ) |
+                 ( head[14] <<  8 ) |
+                   head[15];
+
+    /* the map must not be empty */
+    if ( !map_pos )
+      return FT_THROW( Unknown_File_Format );
+
+    /* check whether rdata and map overlap */
+    if ( *rdata_pos < map_pos )
+    {
+      if ( *rdata_pos > map_pos - rdata_len )
+        return FT_THROW( Unknown_File_Format );
+    }
+    else
+    {
+      if ( map_pos > *rdata_pos - map_len )
+        return FT_THROW( Unknown_File_Format );
+    }
+
+    /* check whether end of rdata or map exceeds stream size */
+    if ( FT_LONG_MAX - rdata_len < *rdata_pos                               ||
+         FT_LONG_MAX - map_len < map_pos                                    ||
+d86 1
+a86 2
+         FT_LONG_MAX - ( *rdata_pos + rdata_len ) < rfork_offset            ||
+         FT_LONG_MAX - ( map_pos + map_len ) < rfork_offset                 ||
+d88 2
+a89 3
+         (FT_ULong)( rfork_offset + *rdata_pos + rdata_len ) > stream->size ||
+         (FT_ULong)( rfork_offset + map_pos + map_len ) > stream->size      )
+      return FT_THROW( Unknown_File_Format );
+d91 1
+a91 4
+    *rdata_pos += rfork_offset;
+    map_pos    += rfork_offset;
+
+    error = FT_Stream_Seek( stream, (FT_ULong)map_pos );
+d103 1
+a103 1
+    for ( i = 0; i < 16; i++ )
+d111 1
+a111 1
+      return FT_THROW( Unknown_File_Format );
+d115 2
+a116 1
+
+d121 1
+a121 1
+    if ( FT_READ_SHORT( type_list ) )
+d123 2
+a124 2
+    if ( type_list < 0 )
+      return FT_THROW( Unknown_File_Format );
+d126 1
+a126 1
+    error = FT_Stream_Seek( stream, (FT_ULong)( map_pos + type_list ) );
+a153 1
+                              FT_Bool     sort_by_res_id,
+d162 2
+a163 2
+    FT_Long       *offsets_internal = NULL;
+    FT_RFork_Ref  *ref = NULL;
+d166 1
+a166 2
+    FT_TRACE3(( "\n" ));
+    error = FT_Stream_Seek( stream, (FT_ULong)map_offset );
+d170 1
+a170 1
+    if ( FT_READ_SHORT( cnt ) )
+d174 1
+a174 20
+    /* `rpos' is a signed 16bit integer offset to resource records; the    */
+    /* size of a resource record is 12 bytes.  The map header is 28 bytes, */
+    /* and a type list needs 10 bytes or more.  If we assume that the name */
+    /* list is empty and we have only a single entry in the type list,     */
+    /* there can be at most                                                */
+    /*                                                                     */
+    /*   (32768 - 28 - 10) / 12 = 2727                                     */
+    /*                                                                     */
+    /* resources.                                                          */
+    /*                                                                     */
+    /* A type list starts with a two-byte counter, followed by 10-byte     */
+    /* type records.  Assuming that there are no resources, the number of  */
+    /* type records can be at most                                         */
+    /*                                                                     */
+    /*   (32768 - 28 - 2) / 8 = 4079                                       */
+    /*                                                                     */
+    if ( cnt > 4079 )
+      return FT_THROW( Invalid_Table );
+
+    for ( i = 0; i < cnt; i++ )
+d177 2
+a178 2
+           FT_READ_SHORT( subcnt )      ||
+           FT_READ_SHORT( rpos )        )
+d182 4
+a185 6
+                  (char)( 0xFF & ( tag_internal >> 24 ) ),
+                  (char)( 0xFF & ( tag_internal >> 16 ) ),
+                  (char)( 0xFF & ( tag_internal >>  8 ) ),
+                  (char)( 0xFF & ( tag_internal >>  0 ) ) ));
+      FT_TRACE3(( "             : subcount=%d, suboffset=0x%04x\n",
+                  subcnt, rpos ));
+d192 1
+a192 6
+        /* a zero count might be valid in the resource specification, */
+        /* however, it is completely useless to us                    */
+        if ( *count < 1 || *count > 2727 )
+          return FT_THROW( Invalid_Table );
+
+        error = FT_Stream_Seek( stream, (FT_ULong)rpos );
+d199 1
+a199 1
+        for ( j = 0; j < *count; j++ )
+d201 1
+a201 1
+          if ( FT_READ_SHORT( ref[j].res_id ) )
+d203 1
+a203 1
+          if ( FT_STREAM_SKIP( 2 ) )  /* resource name offset */
+d205 1
+a205 1
+          if ( FT_READ_LONG( temp ) ) /* attributes (8bit), offset (24bit) */
+d207 1
+a207 1
+          if ( FT_STREAM_SKIP( 4 ) )  /* mbz */
+a209 6
+          if ( ref[j].res_id < 0 || temp < 0 )
+          {
+            error = FT_THROW( Invalid_Table );
+            goto Exit;
+          }
+
+a210 4
+
+          FT_TRACE3(( "             [%d]:"
+                      " resource_id=0x%04x, offset=0x%08x\n",
+                      j, ref[j].res_id, ref[j].offset ));
+d213 3
+a215 15
+        if ( sort_by_res_id )
+        {
+          ft_qsort( ref,
+                    (size_t)*count,
+                    sizeof ( FT_RFork_Ref ),
+                    ( int(*)(const void*,
+                             const void*) )ft_raccess_sort_ref_by_id );
+
+          FT_TRACE3(( "             -- sort resources by their ids --\n" ));
+
+          for ( j = 0; j < *count; j++ )
+            FT_TRACE3(( "             [%d]:"
+                        " resource_id=0x%04x, offset=0x%08x\n",
+                        j, ref[j].res_id, ref[j].offset ));
+        }
+d224 1
+a224 1
+        for ( j = 0; j < *count; j++ )
+d236 1
+a236 1
+    return FT_THROW( Cannot_Open_Resource );
+d256 8
+a327 14
+  CONST_FT_RFORK_RULE_ARRAY_BEGIN(ft_raccess_guess_table,
+                                  ft_raccess_guess_rec)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(apple_double,      apple_double)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(apple_single,      apple_single)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(darwin_ufs_export, darwin_ufs_export)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(darwin_newvfs,     darwin_newvfs)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(darwin_hfsplus,    darwin_hfsplus)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(vfat,              vfat)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(linux_cap,         linux_cap)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(linux_double,      linux_double)
+  CONST_FT_RFORK_RULE_ARRAY_ENTRY(linux_netatalk,    linux_netatalk)
+  CONST_FT_RFORK_RULE_ARRAY_END
+
+
+d351 1
+d360 1
+a360 1
+    FT_Int  i;
+d363 13
+d385 1
+a385 1
+        continue;
+d387 2
+a388 4
+      errors[i] = (FT_RACCESS_GUESS_TABLE_GET[i].func)( library,
+                                                 stream, base_name,
+                                                 &(new_names[i]),
+                                                 &(offsets[i]) );
+a394 34
+#ifndef FT_MACINTOSH
+  static FT_RFork_Rule
+  raccess_get_rule_type_from_rule_index( FT_Library  library,
+                                         FT_UInt     rule_index )
+  {
+    FT_UNUSED( library );
+
+    if ( rule_index >= FT_RACCESS_N_RULES )
+      return FT_RFork_Rule_invalid;
+
+    return FT_RACCESS_GUESS_TABLE_GET[rule_index].type;
+  }
+
+
+  /*
+   * For this function, refer ftbase.h.
+   */
+  FT_LOCAL_DEF( FT_Bool )
+  ft_raccess_rule_by_darwin_vfs( FT_Library  library,
+                                 FT_UInt     rule_index )
+  {
+    switch( raccess_get_rule_type_from_rule_index( library, rule_index ) )
+    {
+      case FT_RFork_Rule_darwin_newvfs:
+      case FT_RFork_Rule_darwin_hfsplus:
+        return TRUE;
+
+      default:
+        return FALSE;
+    }
+  }
+#endif
+
+
+d410 1
+a410 1
+      return FT_THROW( Cannot_Open_Stream );
+d432 1
+a432 1
+      return FT_THROW( Cannot_Open_Stream );
+d456 1
+a456 1
+      return FT_THROW( Out_Of_Memory );
+d480 1
+a480 1
+    char*      newpath = NULL;
+d482 1
+a482 1
+    FT_Long    base_file_len = (FT_Long)ft_strlen( base_file_name );
+d490 1
+a490 1
+      return FT_THROW( Array_Too_Large );
+d516 1
+a516 1
+    char*      newpath = NULL;
+d518 1
+a518 1
+    FT_Long    base_file_len = (FT_Long)ft_strlen( base_file_name );
+d526 1
+a526 1
+      return FT_THROW( Array_Too_Large );
+d559 1
+a559 1
+      return FT_THROW( Out_Of_Memory );
+d585 1
+a585 1
+      return FT_THROW( Out_Of_Memory );
+d612 1
+a612 1
+      return FT_THROW( Out_Of_Memory );
+d644 1
+a644 1
+      return FT_THROW( Out_Of_Memory );
+d670 1
+a670 1
+    FT_Int32   entry_id, entry_offset, entry_length = 0;
+d672 1
+a672 1
+    const FT_Int32  resource_fork_entry_id = 0x2;
+d683 1
+a683 1
+      return FT_THROW( Unknown_File_Format );
+d696 1
+a696 1
+      return FT_THROW( Unknown_File_Format );
+d719 1
+a719 1
+    return FT_THROW( Unknown_File_Format );
+d754 1
+a754 1
+    char*        new_name = NULL;
+d770 1
+a770 3
+      ft_strncpy( new_name,
+                  original_name,
+                  (size_t)( tmp - original_name + 1 ) );
+d802 1
+a802 1
+    FT_Int  i;
+d813 1
+a813 1
+      errors[i]    = FT_ERR( Unimplemented_Feature );
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

@@ -1,0 +1,147 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2016.02.08.19.18.04;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10056B8E9EE581D9C16;
+
+1.2
+date	2010.12.12.16.17.52;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004D04F58606E45CA6;
+
+1.1
+date	2009.11.15.00.56.51;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004AFF51B34C0B7F1A;
+
+
+desc
+@@
+
+
+1.3
+log
+@update (part 2)
+@
+text
+@#!/bin/mksh
+# $MirOS: ports/essentials/ca-certificates/mntner/der2nss,v 1.2 2010/12/12 16:17:52 tg Exp $
+#-
+# Copyright (c) 2009, 2010, 2016
+#	mirabilos <m@@mirbsd.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un-
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person's immediate fault when using the work as intended.
+#-
+# To be run with libnss3-tools installed
+#
+# Requirements:
+#	./der/*.[0-9]	→ certs (DER format)
+#	./dsc/*		→ descriptions (we assume every one has one!)
+#	./tdb/*		→ trust (optional)
+# We also assume certs with the same hash have the same description
+# and trust (this is not necessarily true, but WFM for now).
+
+[[ -d der/. ]] || exit 1
+[[ -d dsc/. ]] || exit 1
+[[ -d tdb/. ]] || exit 1
+[[ -d nss/. ]] && exit 1
+mkdir nss
+[[ -d nss/. ]] || exit 1
+
+nl='
+'
+for a in der/*; do
+	bn=${a#*/}
+	d=$(<dsc/${bn%.*})
+	# convert to old NSS format with sed(1); cf. nss/lib/util/pkcs11n.h
+	nss-addbuiltin -n "「$bn」 $d" -t "CT,CT,CT" -i der/$bn | sed \
+	    -e 's/CKT_NSS_NOT_TRUSTED/CKT_NETSCAPE_VALID/g' \
+	    -e 's/CKT_NSS_MUST_VERIFY_TRUST/CKT_NETSCAPE_TRUST_UNKNOWN/g' \
+	    -e 's/\(CK[OT]_\)NSS_/\1NETSCAPE_/g' >nss/$bn
+	[[ -s tdb/${bn%.*} ]] || continue
+	tSA=; tEP=; tCS=
+	while IFS= read -r line; do
+		case $line {
+		(CKA_TRUST_SERVER_AUTH*)
+			tSA=$line ;;
+		(CKA_TRUST_EMAIL_PROTECTION*)
+			tEP=$line ;;
+		(CKA_TRUST_CODE_SIGNING*)
+			tCS=$line ;;
+		}
+	done <tdb/${bn%.*}
+	es=
+	[[ -n $tSA ]] && es=$es"/^CKA_TRUST_SERVER_AUTH/c$nl$tSA$nl.$nl"
+	[[ -n $tEP ]] && es=$es"/^CKA_TRUST_EMAIL_PROTECTION/c$nl$tEP$nl.$nl"
+	[[ -n $tCS ]] && es=$es"/^CKA_TRUST_CODE_SIGNING/c$nl$tCS$nl.$nl"
+	[[ -n $es ]] && ed -s nss/$bn <<<"${es}wq"
+done
+@
+
+
+1.2
+log
+@update from MirBSD sources, new keytool can do ECC too, sync notes
+also put certdata.{txt,c} here for easier access
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/essentials/ca-certificates/mntner/der2nss,v 1.1 2009/11/15 00:56:51 tg Exp $
+d4 2
+a5 2
+# Copyright (c) 2009, 2010
+#	Thorsten Glaser <tg@@mirbsd.org>
+d22 1
+a22 1
+# To be run on fwrt-www:SID/~
+d43 5
+a47 3
+	LD_LIBRARY_PATH=/home/tg/ns/nss-3.11.3/mozilla/dist/Linux2.6_x86_glibc_PTH_DBG.OBJ/lib \
+	    /home/tg/ns/nss-3.11.3/mozilla/dist/Linux2.6_x86_glibc_PTH_DBG.OBJ/bin/addbuiltin \
+	    -n "「$bn」 $d" -t "CTg,CTg,CTg" -i der/$bn >nss/$bn
+@
+
+
+1.1
+log
+@regenerate
+• trust levels: default to CTg,CTg,CTg; force g; keep trustlevels from
+  original nssckbi (certdata.txt,v 1.56)
+• descriptions: merge theirs with ours and fix
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $
+d4 1
+a4 1
+# Copyright (c) 2009
+d22 1
+a22 1
+# To be run on fwrt-www:LENNY/~
+d31 7
+@
+

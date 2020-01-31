@@ -1,0 +1,290 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2012.02.11.19.29.58;	author tg;	state dead;
+branches;
+next	1.4;
+commitid	1004F36C11F02848ED5;
+
+1.4
+date	2010.09.15.20.57.01;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004C9132F41004B31C;
+
+1.3
+date	2007.03.10.23.53.49;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10045F344D65465EF23;
+
+1.2
+date	2007.02.01.23.29.35;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045C277DE68C59215;
+
+1.1
+date	2006.10.02.05.59.17;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004520AAAB453C7791;
+
+
+desc
+@@
+
+
+1.5
+log
+@update the CVS package in MirPorts (to match base and Debian)
+
+• since the Debian cvs source package was taken over by this one,
+  reverse things and use the Debian *.diff.gz to get our patches
+  from ;-) saves tracking things in CVS thrice
+• since the Debian cvs binary package contains PDF documentation
+  generated from something with our patches, ship it instead of
+  the one from the vanilla CVS distfile
+• ship cvs-switchroot(1) from Debian, which is just a fancy name
+  for mircvs://src/scripts/mnt-cvsroot and has a manpage
+• move stuff from PREFIX/share/cvs to PREFIX/share/doc/cvs as is proper
+• fix regression testsuite on MirBSD as much as possible (same as base)
+@
+text
+@$MirOS: ports/devel/cvs/patches/patch-src_import_c,v 1.4 2010/09/15 20:57:01 tg Exp $
+--- src/import.c.orig	Sun Sep  4 00:27:22 2005
++++ src/import.c	Wed Sep 15 19:36:15 2010
+@@@@ -25,6 +25,8 @@@@
+ #include "lstat.h"
+ #include "save-cwd.h"
+ 
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_import_c,v 1.4 2010/09/15 20:57:01 tg Exp $");
++
+ static char *get_comment (const char *user);
+ static int add_rev (char *message, RCSNode *rcs, char *vfile,
+ 			  char *vers);
+@@@@ -238,6 +240,23 @@@@ import (int argc, char **argv)
+ 	regfree (&pat);
+     }
+ 
++    /*
++     * If you use even vendor branches, something evil[TM] can happen.
++     */
++    {
++	regex_t pat;
++	assert (!regcomp (&pat, "^[1-9][0-9]*\\.[1-9][0-9]*\\.[0-9]*[13579]$",
++			  REG_EXTENDED));
++	if (regexec (&pat, vbranch, 0, NULL, 0))
++	{
++	    error (0, 0,
++		   "warning: you are using an even vendor branch, which can\n"
++		   "lead to problems: '%s'.  Use for example: '1.1.3' or '1.1.5'.",
++		   vbranch);
++	}
++	regfree (&pat);
++    }
++
+     /* Set vhead to the branch's parent.  */
+     vhead = xstrdup (vbranch);
+     cp = strrchr (vhead, '.');
+@@@@ -311,6 +330,7 @@@@ import (int argc, char **argv)
+ 	free (vhead);
+ 	send_to_server ("import\012", 0);
+ 	err += get_responses_and_close ();
++	logmsg_cleanup(err);
+ 	return err;
+     }
+ #endif
+@@@@ -436,6 +456,7 @@@@ import (int argc, char **argv)
+     free (vbranch);
+     free (vhead);
+ 
++    logmsg_cleanup(err);
+     return err;
+ }
+ 
+@@@@ -595,7 +616,7 @@@@ process_import_file (char *message, char
+ 		/* Attempt to make the Attic directory, in case it
+ 		   does not exist.  */
+ 		(void) sprintf (rcs, "%s/%s", repository, CVSATTIC);
+-		if (CVS_MKDIR (rcs, 0777 ) != 0 && errno != EEXIST)
++		if (noexec == 0 && CVS_MKDIR (rcs, 0777 ) != 0 && errno != EEXIST)
+ 		    error (1, errno, "cannot make directory `%s'", rcs);
+ 
+ 		/* Note that the above clobbered the path name, so we
+@@@@ -1253,7 +1274,7 @@@@ add_rcs_file (const char *message, const
+ 	(void) time (&now);
+     ftm = gmtime (&now);
+     (void) sprintf (altdate1, DATEFORM,
+-		    ftm->tm_year + (ftm->tm_year < 100 ? 0 : 1900),
++		    (long)ftm->tm_year + (ftm->tm_year < 100 ? 0L : 1900L),
+ 		    ftm->tm_mon + 1, ftm->tm_mday, ftm->tm_hour,
+ 		    ftm->tm_min, ftm->tm_sec);
+     author = getcaller ();
+@
+
+
+1.4
+log
+@WIP port (will be worked on more, commit for safety)
+
+Some changes, in this order:
+• re-sync with MirOS base cvs
+• reduce diff against upstream
+• apply cvs-datetime.patch from Arkadiusz Miskiewicz <arekm>
+  via Concurrent Versions System - Bugs: bug #21523, can't parse date/time: =UTC when commiting file (workaround/fix attached)
+• apply (only those considered somewhat sane) patches from Debian cvs_1:1.12.13-12
+  – 11_check_method_crash
+  – 12_rcs2log_POSIX_sort
+  – 14_ext_expansion
+  – 15_PATH_MAX_check
+  – 20_readdir_errno
+  – 21_getcwd_chroot
+  – 25_import-n-X
+  – 51_newlines_in_commit_template (partially)
+  – 55_keyword_alphanumerics (modified)
+  – 62_cvsrc_whitespace
+  – 65_login_cvspass_message
+  – 69_ext_allowroot (modified)
+  – 71_cvsbug_tmpfix
+  – 81_fix_-l (modified)
+  – 85_normalize_correct_roots
+  – 86_server_wrapper (modified)
+  – 93_homedir (modified)
+  – 95_flag_conflicted_copies
+  – 96_manpage_fixes (partially)
+  – 97_cvs.info.typo (partially)
+  – 98_fix_sparc_sigbus.diff
+• document Debian’s changes in the Texinfo manual
+• modify mkman.pl to produce more correct looking output
+• point to texinfo HTML document from HTML manpage
+• fix fseeko configure.in test
+• correct bugs in Debian’s changes
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_import_c,v 1.3 2007/03/10 23:53:49 tg Exp $");
+@
+
+
+1.3
+log
+@sync the cvs port and the cvs in the base system;
+RCSID stuff like in commitid 10045F33CB2157CFEAE
+@
+text
+@d1 3
+a3 20
+$MirOS: ports/devel/cvs/patches/patch-src_import_c,v 1.2 2007/02/01 23:29:35 tg Exp $
+--- src/import.c.orig	Sat Mar 10 23:14:20 2007
++++ src/import.c	Sat Mar 10 23:14:14 2007
+@@@@ -6,13 +6,13 @@@@
+  *
+  * Portions Copyright (C) 1992, Brian Berliner and Jeff Polk
+  * Portions Copyright (C) 1989-1992, Brian Berliner
+- * 
++ *
+  * You may distribute under the terms of the GNU General Public License as
+  * specified in the README file that comes with the CVS source distribution.
+- * 
++ *
+  * "import" checks in the vendor release located in the current directory into
+  * the CVS source repository.  The CVS vendor branch support is utilized.
+- * 
++ *
+  * At least three arguments are expected to follow the options:
+  *	repository	Where the source belongs relative to the CVSROOT
+  *	VendorTag	Vendor's major tag
+d8 1
+a8 1
++__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/import.c,v 1.7 2007/02/01 23:24:27 tg Exp $");
+d27 2
+a28 2
++"warning: you are using an even vendor branch, which can\n"
++"lead to problems: '%s'.  Use for example: '1.1.3' or '1.1.5'.",
+d53 9
+a61 18
+@@@@ -587,7 +608,7 @@@@ process_import_file (char *message, char
+ 	       created in the attic!  */
+ 	    if (!killnew)
+ 	        free (attic_name);
+-	    else 
++	    else
+ 	    {
+ 		free (rcs);
+ 		rcs = attic_name;
+@@@@ -693,7 +714,7 @@@@ update_rcs_file (char *message, char *vf
+ 	 * this revision with the import file; if they match exactly, there
+ 	 * is no need to install the new import file as a new revision to the
+ 	 * branch.  Just tag the revision with the new import tags.
+-	 * 
++	 *
+ 	 * This is to try to cut down the number of "C" conflict messages for
+ 	 * locally modified import source files.
+ 	 */
+a70 9
+@@@@ -1693,7 +1714,7 @@@@ add_log (int ch, char *fname)
+  * This is the recursive function that walks the argument directory looking
+  * for sub-directories that have CVS administration files in them and updates
+  * them recursively.
+- * 
++ *
+  * Note that we do not follow symbolic links here, which is a feature!
+  */
+ static int
+@
+
+
+1.2
+log
+@bring in bsiegert@@'s "wtf don't eat my fscking log messages!" patch
+@
+text
+@d1 30
+a30 4
+$MirOS: ports/devel/cvs/patches/patch-src_import_c,v 1.1 2006/10/02 05:59:17 tg Exp $
+--- src/import.c.orig	Sun Sep  4 00:27:22 2005
++++ src/import.c	Thu Feb  1 23:27:09 2007
+@@@@ -238,6 +238,23 @@@@ import (int argc, char **argv)
+d54 1
+a54 1
+@@@@ -311,6 +328,7 @@@@ import (int argc, char **argv)
+d62 1
+a62 1
+@@@@ -436,6 +454,7 @@@@ import (int argc, char **argv)
+d70 19
+a88 1
+@@@@ -1253,7 +1272,7 @@@@ add_rcs_file (const char *message, const
+d93 1
+a93 1
++		    (int)ftm->tm_year + (ftm->tm_year < 100 ? 0 : 1900),
+d97 9
+@
+
+
+1.1
+log
+@add cvs port, compiles fine and warning-free on MirOS-current;
+other OSes not tested, older MirOS may have issues (mktime, regex/wctype)
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 1
+a3 1
++++ src/import.c	Mon Oct  2 04:40:37 2006
+d28 17
+a44 1
+@@@@ -1253,7 +1270,7 @@@@ add_rcs_file (const char *message, const
+@
+

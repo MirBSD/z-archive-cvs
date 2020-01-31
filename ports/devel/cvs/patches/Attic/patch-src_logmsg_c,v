@@ -1,0 +1,609 @@
+head	1.7;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.7
+date	2012.02.11.19.29.58;	author tg;	state dead;
+branches;
+next	1.6;
+commitid	1004F36C11F02848ED5;
+
+1.6
+date	2010.09.16.00.13.45;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004C9161392E1EE70E;
+
+1.5
+date	2010.09.15.20.57.01;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004C9132F41004B31C;
+
+1.4
+date	2008.10.04.23.13.23;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10048E7F825748E2BDC;
+
+1.3
+date	2007.03.10.23.53.50;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10045F344D65465EF23;
+
+1.2
+date	2007.02.01.23.29.36;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045C277DE68C59215;
+
+1.1
+date	2006.10.02.05.59.17;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004520AAAB453C7791;
+
+
+desc
+@@
+
+
+1.7
+log
+@update the CVS package in MirPorts (to match base and Debian)
+
+• since the Debian cvs source package was taken over by this one,
+  reverse things and use the Debian *.diff.gz to get our patches
+  from ;-) saves tracking things in CVS thrice
+• since the Debian cvs binary package contains PDF documentation
+  generated from something with our patches, ship it instead of
+  the one from the vanilla CVS distfile
+• ship cvs-switchroot(1) from Debian, which is just a fancy name
+  for mircvs://src/scripts/mnt-cvsroot and has a manpage
+• move stuff from PREFIX/share/cvs to PREFIX/share/doc/cvs as is proper
+• fix regression testsuite on MirBSD as much as possible (same as base)
+@
+text
+@$MirOS: ports/devel/cvs/patches/patch-src_logmsg_c,v 1.6 2010/09/16 00:13:45 tg Exp $
+--- src/logmsg.c.orig	Sun Sep  4 00:27:22 2005
++++ src/logmsg.c	Thu Sep 16 00:12:16 2010
+@@@@ -15,6 +15,8 @@@@
+ #include "cvs.h"
+ #include "getline.h"
+ 
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_logmsg_c,v 1.6 2010/09/16 00:13:45 tg Exp $");
++
+ static int find_type (Node * p, void *closure);
+ static int fmt_proc (Node * p, void *closure);
+ static int logfile_write (const char *repository, const char *filter,
+@@@@ -31,6 +33,8 @@@@ static int verifymsg_proc (const char *r
+ static FILE *fp;
+ static Ctype type;
+ 
++char *LogMsgFile = NULL;
++
+ struct verifymsg_proc_data
+ {
+     /* The name of the temp file storing the log message to be verified.  This
+@@@@ -201,6 +205,7 @@@@ do_editor (const char *dir, char **messa
+     char *fname;
+     struct stat pre_stbuf, post_stbuf;
+     int retcode = 0;
++    int finish = 0;
+ 
+     assert (!current_parsed_root->isremote != !repository);
+ 
+@@@@ -224,6 +229,10 @@@@ do_editor (const char *dir, char **messa
+ 	    (*messagep)[strlen (*messagep) - 1] != '\n')
+ 	    (void) fprintf (fp, "\n");
+     }
++    else
++	(void) fputc ('\n', fp);
++    if (finish)
++	goto finish_off;
+ 
+     if (repository != NULL)
+ 	/* tack templates on if necessary */
+@@@@ -267,6 +276,9 @@@@ do_editor (const char *dir, char **messa
+     (void) fprintf (fp,
+   "%s----------------------------------------------------------------------\n",
+ 		    CVSEDITPREFIX);
++    if (readonlyfs)
++      (void) fprintf (fp, "%sATTENTION: read-only mode selected!\n",
++		      CVSEDITPREFIX);
+     (void) fprintf (fp,
+   "%sEnter Log.  Lines beginning with `%.*s' are removed automatically\n%s\n",
+ 		    CVSEDITPREFIX, CVSEDITPREFIXLEN, CVSEDITPREFIX,
+@@@@ -280,28 +292,38 @@@@ do_editor (const char *dir, char **messa
+   "%s----------------------------------------------------------------------\n",
+ 		    CVSEDITPREFIX);
+ 
++ finish_off:
+     /* finish off the temp file */
+     if (fclose (fp) == EOF)
+         error (1, errno, "%s", fname);
+-    if (stat (fname, &pre_stbuf) == -1)
++    if (LogMsgFile)
++    {
++	if (unlink_file (LogMsgFile) < 0)
++	    error (0, errno, "warning: cannot remove temp file %s", LogMsgFile);
++	free (LogMsgFile);
++    }
++    LogMsgFile = fname;
++    if (finish)
++	return;
++    if (stat (LogMsgFile, &pre_stbuf) == -1)
+ 	pre_stbuf.st_mtime = 0;
+ 
+     /* run the editor */
+     run_setup (Editor);
+-    run_add_arg (fname);
++    run_add_arg (LogMsgFile);
+     if ((retcode = run_exec (RUN_TTY, RUN_TTY, RUN_TTY,
+ 			     RUN_NORMAL | RUN_SIGIGNORE)) != 0)
+ 	error (0, retcode == -1 ? errno : 0, "warning: editor session failed");
+ 
+     /* put the entire message back into the *messagep variable */
+ 
+-    fp = xfopen (fname, "r");
++    fp = xfopen (LogMsgFile, "r");
+ 
+     if (*messagep)
+ 	free (*messagep);
+ 
+-    if (stat (fname, &post_stbuf) != 0)
+-	    error (1, errno, "cannot find size of temp file %s", fname);
++    if (stat (LogMsgFile, &post_stbuf) != 0)
++	    error (1, errno, "cannot find size of temp file %s", LogMsgFile);
+ 
+     if (post_stbuf.st_size == 0)
+ 	*messagep = NULL;
+@@@@ -326,7 +348,7 @@@@ do_editor (const char *dir, char **messa
+ 	    if (line_length == -1)
+ 	    {
+ 		if (ferror (fp))
+-		    error (0, errno, "warning: cannot read %s", fname);
++		    error (0, errno, "warning: cannot read %s", LogMsgFile);
+ 		break;
+ 	    }
+ 	    if (strncmp (line, CVSEDITPREFIX, CVSEDITPREFIXLEN) == 0)
+@@@@ -339,7 +361,7 @@@@ do_editor (const char *dir, char **messa
+ 	}
+     }
+     if (fclose (fp) < 0)
+-	error (0, errno, "warning: cannot close %s", fname);
++	error (0, errno, "warning: cannot close %s", LogMsgFile);
+ 
+     /* canonicalize emply messages */
+     if (*messagep != NULL &&
+@@@@ -349,7 +371,11 @@@@ do_editor (const char *dir, char **messa
+ 	*messagep = NULL;
+     }
+ 
+-    if (pre_stbuf.st_mtime == post_stbuf.st_mtime || *messagep == NULL)
++    if (pre_stbuf.st_mtime == post_stbuf.st_mtime || 
++        *messagep == NULL ||
++        (*messagep)[0] == '\0' ||
++        strcmp (*messagep, "\n") == 0 ||
++        strcmp (*messagep, "\n\n") == 0)
+     {
+ 	for (;;)
+ 	{
+@@@@ -361,9 +387,11 @@@@ do_editor (const char *dir, char **messa
+ 	    if (line_length < 0)
+ 	    {
+ 		error (0, errno, "cannot read from stdin");
+-		if (unlink_file (fname) < 0)
++		if (unlink_file (LogMsgFile) < 0)
+ 		    error (0, errno,
+-			   "warning: cannot remove temp file %s", fname);
++			   "warning: cannot remove temp file %s", LogMsgFile);
++		free (LogMsgFile);
++		LogMsgFile = NULL;
+ 		error (1, 0, "aborting");
+ 	    }
+ 	    else if (line_length == 0
+@@@@ -371,8 +399,10 @@@@ do_editor (const char *dir, char **messa
+ 		break;
+ 	    if (*line == 'a' || *line == 'A')
+ 		{
+-		    if (unlink_file (fname) < 0)
+-			error (0, errno, "warning: cannot remove temp file %s", fname);
++		    if (unlink_file (LogMsgFile) < 0)
++			error (0, errno, "warning: cannot remove temp file %s", LogMsgFile);
++		    free (LogMsgFile);
++		    LogMsgFile = NULL;
+ 		    error (1, 0, "aborted by user");
+ 		}
+ 	    if (*line == 'e' || *line == 'E')
+@@@@ -387,15 +417,14 @@@@ do_editor (const char *dir, char **messa
+     }
+     if (line)
+ 	free (line);
+-    if (unlink_file (fname) < 0)
+-	error (0, errno, "warning: cannot remove temp file %s", fname);
+-    free (fname);
++    finish = 1;
++    goto again;
+ }
+ 
+ /* Runs the user-defined verification script as part of the commit or import 
+    process.  This verification is meant to be run whether or not the user 
+    included the -m attribute.  unlike the do_editor function, this is 
+-   independant of the running of an editor for getting a message.
++   independent of the running of an editor for getting a message.
+  */
+ void
+ do_verify (char **messagep, const char *repository, List *changes)
+@@@@ -785,6 +814,7 @@@@ logfile_write (const char *repository, c
+        `%s' is left as an exercise for the reader. */
+ 
+     /* %c = cvs_cmd_name
++     * %I = commit ID
+      * %p = shortrepos
+      * %r = repository
+      * %{sVv} = file name, old revision (precommit), new revision (postcommit)
+@@@@ -800,6 +830,7 @@@@ logfile_write (const char *repository, c
+ #endif /* SUPPORT_OLD_INFO_FMT_STRINGS */
+ 	                      filter,
+ 	                      "c", "s", cvs_cmd_name,
++			      "I", "s", global_session_id,
+ #ifdef SERVER_SUPPORT
+ 	                      "R", "s", referrer ? referrer->original : "NONE",
+ #endif /* SERVER_SUPPORT */
+@@@@ -922,6 +953,7 @@@@ verifymsg_proc (const char *repository, 
+ #endif /* SUPPORT_OLD_INFO_FMT_STRINGS */
+                                        script,
+ 				       "c", "s", cvs_cmd_name,
++				       "I", "s", global_session_id,
+ #ifdef SERVER_SUPPORT
+ 				       "R", "s", referrer
+ 				       ? referrer->original : "NONE",
+@@@@ -974,4 +1006,21 @@@@ verifymsg_proc (const char *repository, 
+      */
+     return abs (run_exec (RUN_TTY, RUN_TTY, RUN_TTY,
+ 			  RUN_NORMAL | RUN_SIGIGNORE));
++}
++
++void
++logmsg_cleanup (int err)
++{
++    if (!use_editor || LogMsgFile == NULL)
++	return;
++
++    if (err == 0)
++    {
++	if (unlink_file (LogMsgFile) < 0)
++	    error (0, errno, "warning: cannot remove temp file %s", LogMsgFile);
++    }
++    else
++	error (0, 0, "your log message was saved in %s", LogMsgFile);
++    free (LogMsgFile);
++    LogMsgFile = NULL;
+ }
+@
+
+
+1.6
+log
+@-Wall clean, now first batch of lintian (-vIi for now, -E --pedantic later)
+XXX need to mmake regress, too…
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_logmsg_c,v 1.5 2010/09/15 20:57:01 tg Exp $
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_logmsg_c,v 1.5 2010/09/15 20:57:01 tg Exp $");
+@
+
+
+1.5
+log
+@WIP port (will be worked on more, commit for safety)
+
+Some changes, in this order:
+• re-sync with MirOS base cvs
+• reduce diff against upstream
+• apply cvs-datetime.patch from Arkadiusz Miskiewicz <arekm>
+  via Concurrent Versions System - Bugs: bug #21523, can't parse date/time: =UTC when commiting file (workaround/fix attached)
+• apply (only those considered somewhat sane) patches from Debian cvs_1:1.12.13-12
+  – 11_check_method_crash
+  – 12_rcs2log_POSIX_sort
+  – 14_ext_expansion
+  – 15_PATH_MAX_check
+  – 20_readdir_errno
+  – 21_getcwd_chroot
+  – 25_import-n-X
+  – 51_newlines_in_commit_template (partially)
+  – 55_keyword_alphanumerics (modified)
+  – 62_cvsrc_whitespace
+  – 65_login_cvspass_message
+  – 69_ext_allowroot (modified)
+  – 71_cvsbug_tmpfix
+  – 81_fix_-l (modified)
+  – 85_normalize_correct_roots
+  – 86_server_wrapper (modified)
+  – 93_homedir (modified)
+  – 95_flag_conflicted_copies
+  – 96_manpage_fixes (partially)
+  – 97_cvs.info.typo (partially)
+  – 98_fix_sparc_sigbus.diff
+• document Debian’s changes in the Texinfo manual
+• modify mkman.pl to produce more correct looking output
+• point to texinfo HTML document from HTML manpage
+• fix fseeko configure.in test
+• correct bugs in Debian’s changes
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 1
+a3 1
++++ src/logmsg.c	Wed Sep 15 19:36:15 2010
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_logmsg_c,v 1.4 2008/10/04 23:13:23 tg Exp $");
+d153 1
+a153 1
+@@@@ -387,9 +417,8 @@@@ do_editor (const char *dir, char **messa
+d165 7
+@
+
+
+1.4
+log
+@change bsiegert@@’s patch to retain log messages on abortion
+in a somewhat hackish way (set a flag, loop back to the
+beginning, skip over some code, then exit; using two gotos)
+to strip off the “CVS:” lines b̲e̲f̲o̲r̲e̲hand; also, defer unlink
+of the old temp file until the new temp file has been writ-
+ten, to lose even less log messages ☺
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_logmsg_c,v 1.3 2007/03/10 23:53:50 tg Exp $
+d3 1
+a3 16
++++ src/logmsg.c	Sat Oct  4 23:09:47 2008
+@@@@ -1,12 +1,12 @@@@
+ /*
+- * Copyright (C) 1986-2005 The Free Software Foundation, Inc.
++ * Copyright (C) 1986-2006 The Free Software Foundation, Inc.
+  *
+  * Portions Copyright (C) 1998-2005 Derek Price, Ximbiot <http://ximbiot.com>,
+  *                                  and others.
+  *
+  * Portions Copyright (C) 1992, Brian Berliner and Jeff Polk
+  * Portions Copyright (C) 1989-1992, Brian Berliner
+- * 
++ *
+  * You may distribute under the terms of the GNU General Public License as
+  * specified in the README file that comes with the CVS source distribution.
+  */
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_logmsg_c,v 1.3 2007/03/10 23:53:50 tg Exp $");
+a21 9
+@@@@ -181,7 +185,7 @@@@ fmt_proc (Node *p, void *closure)
+  * Builds a temporary file using setup_tmpfile() and invokes the user's
+  * editor on the file.  The header garbage in the resultant file is then
+  * stripped and the log message is stored in the "message" argument.
+- * 
++ *
+  * If REPOSITORY is non-NULL, process rcsinfo for that repository; if it
+  * is NULL, use the CVSADM_TEMPLATE file instead.  REPOSITORY should be
+  * NULL when running in client mode.
+d113 14
+a126 1
+@@@@ -361,9 +383,11 @@@@ do_editor (const char *dir, char **messa
+d140 1
+a140 1
+@@@@ -371,8 +395,10 @@@@ do_editor (const char *dir, char **messa
+d153 1
+a153 1
+@@@@ -387,14 +413,13 @@@@ do_editor (const char *dir, char **messa
+d164 2
+a165 10
+-/* Runs the user-defined verification script as part of the commit or import 
+-   process.  This verification is meant to be run whether or not the user 
+-   included the -m attribute.  unlike the do_editor function, this is 
++/* Runs the user-defined verification script as part of the commit or import
++   process.  This verification is meant to be run whether or not the user
++   included the -m attribute.  unlike the do_editor function, this is
+    independant of the running of an editor for getting a message.
+  */
+ void
+@@@@ -785,6 +810,7 @@@@ logfile_write (const char *repository, c
+d173 1
+a173 1
+@@@@ -800,6 +826,7 @@@@ logfile_write (const char *repository, c
+d181 1
+a181 1
+@@@@ -922,6 +949,7 @@@@ verifymsg_proc (const char *repository, 
+d189 1
+a189 1
+@@@@ -974,4 +1002,21 @@@@ verifymsg_proc (const char *repository, 
+@
+
+
+1.3
+log
+@sync the cvs port and the cvs in the base system;
+RCSID stuff like in commitid 10045F33CB2157CFEAE
+@
+text
+@d1 3
+a3 3
+$MirOS: ports/devel/cvs/patches/patch-src_logmsg_c,v 1.2 2007/02/01 23:29:36 tg Exp $
+--- src/logmsg.c.orig	Sat Mar 10 23:14:20 2007
++++ src/logmsg.c	Sat Mar 10 23:14:14 2007
+d23 1
+a23 1
++__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/logmsg.c,v 1.8 2007/02/01 23:24:28 tg Exp $");
+d46 2
+a47 5
+@@@@ -198,7 +202,6 @@@@ do_editor (const char *dir, char **messa
+     char *line;
+     int line_length;
+     size_t line_chars_allocated;
+-    char *fname;
+d50 1
+d52 1
+a52 2
+@@@@ -212,8 +215,15 @@@@ do_editor (const char *dir, char **messa
+         error(1, 0, "no editor defined, must use -e or -m");
+d54 1
+a54 15
+   again:
++    if (LogMsgFile)
++    {
++	if (unlink_file (LogMsgFile) < 0)
++	    error (0, errno, "warning: cannot remove temp file %s", LogMsgFile);
++	free (LogMsgFile);
++	LogMsgFile = NULL;
++    }
+     /* Create a temporary file.  */
+-    if( ( fp = cvs_temp_file( &fname ) ) == NULL )
++    if( ( fp = cvs_temp_file( &LogMsgFile ) ) == NULL )
+ 	error( 1, errno, "cannot create temporary file" );
+ 
+     if (*messagep)
+@@@@ -224,6 +234,8 @@@@ do_editor (const char *dir, char **messa
+d60 2
+d65 1
+a65 1
+@@@@ -267,6 +279,9 @@@@ do_editor (const char *dir, char **messa
+d75 3
+a77 1
+@@@@ -282,26 +297,26 @@@@ do_editor (const char *dir, char **messa
+d79 1
+d82 1
+a82 1
+-        error (1, errno, "%s", fname);
+d84 9
+a92 1
++        error (1, errno, "%s", LogMsgFile);
+d119 1
+a119 1
+@@@@ -326,7 +341,7 @@@@ do_editor (const char *dir, char **messa
+d128 1
+a128 1
+@@@@ -339,7 +354,7 @@@@ do_editor (const char *dir, char **messa
+d137 1
+a137 1
+@@@@ -361,9 +376,11 @@@@ do_editor (const char *dir, char **messa
+d151 1
+a151 1
+@@@@ -371,8 +388,10 @@@@ do_editor (const char *dir, char **messa
+d164 1
+a164 1
+@@@@ -387,14 +406,11 @@@@ do_editor (const char *dir, char **messa
+d171 2
+d184 1
+a184 1
+@@@@ -785,6 +801,7 @@@@ logfile_write (const char *repository, c
+d192 1
+a192 1
+@@@@ -800,6 +817,7 @@@@ logfile_write (const char *repository, c
+d200 1
+a200 1
+@@@@ -922,6 +940,7 @@@@ verifymsg_proc (const char *repository, 
+d208 1
+a208 1
+@@@@ -974,4 +993,21 @@@@ verifymsg_proc (const char *repository, 
+@
+
+
+1.2
+log
+@bring in bsiegert@@'s "wtf don't eat my fscking log messages!" patch
+@
+text
+@d1 28
+a28 4
+$MirOS: ports/devel/cvs/patches/patch-src_logmsg_c,v 1.1 2006/10/02 05:59:17 tg Exp $
+--- src/logmsg.c.orig	Sun Sep  4 00:27:22 2005
++++ src/logmsg.c	Thu Feb  1 23:27:09 2007
+@@@@ -31,6 +31,8 @@@@ static int verifymsg_proc (const char *r
+d37 10
+a46 1
+@@@@ -198,7 +200,6 @@@@ do_editor (const char *dir, char **messa
+d54 1
+a54 1
+@@@@ -212,8 +213,15 @@@@ do_editor (const char *dir, char **messa
+d71 1
+a71 1
+@@@@ -224,6 +232,8 @@@@ do_editor (const char *dir, char **messa
+d80 1
+a80 1
+@@@@ -267,6 +277,9 @@@@ do_editor (const char *dir, char **messa
+d90 1
+a90 1
+@@@@ -282,26 +295,26 @@@@ do_editor (const char *dir, char **messa
+d123 1
+a123 1
+@@@@ -326,7 +339,7 @@@@ do_editor (const char *dir, char **messa
+d132 1
+a132 1
+@@@@ -339,7 +352,7 @@@@ do_editor (const char *dir, char **messa
+d141 1
+a141 1
+@@@@ -361,9 +374,11 @@@@ do_editor (const char *dir, char **messa
+d155 1
+a155 1
+@@@@ -371,8 +386,10 @@@@ do_editor (const char *dir, char **messa
+d168 1
+a168 1
+@@@@ -387,9 +404,6 @@@@ do_editor (const char *dir, char **messa
+d177 10
+a186 2
+ /* Runs the user-defined verification script as part of the commit or import 
+@@@@ -785,6 +799,7 @@@@ logfile_write (const char *repository, c
+d194 1
+a194 1
+@@@@ -800,6 +815,7 @@@@ logfile_write (const char *repository, c
+d202 1
+a202 1
+@@@@ -922,6 +938,7 @@@@ verifymsg_proc (const char *repository, 
+d210 1
+a210 1
+@@@@ -974,4 +991,21 @@@@ verifymsg_proc (const char *repository, 
+@
+
+
+1.1
+log
+@add cvs port, compiles fine and warning-free on MirOS-current;
+other OSes not tested, older MirOS may have issues (mktime, regex/wctype)
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 36
+a38 2
++++ src/logmsg.c	Mon Oct  2 04:40:37 2006
+@@@@ -224,6 +224,8 @@@@ do_editor (const char *dir, char **messa
+d47 1
+a47 1
+@@@@ -267,6 +269,9 @@@@ do_editor (const char *dir, char **messa
+d57 89
+a145 1
+@@@@ -785,6 +790,7 @@@@ logfile_write (const char *repository, c
+d153 1
+a153 1
+@@@@ -800,6 +806,7 @@@@ logfile_write (const char *repository, c
+d161 1
+a161 1
+@@@@ -922,6 +929,7 @@@@ verifymsg_proc (const char *repository, 
+d169 22
+@
+

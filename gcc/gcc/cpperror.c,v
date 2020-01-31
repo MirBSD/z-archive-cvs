@@ -1,0 +1,284 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.1.101.1
+	GPC_gcc-3_4_6_gpc-20060325:1.1.101.1
+	GPC_gcc-3_4_6:1.1.101.1.0.4
+	GPC_gcc-3_4_6_BASE:1.1.101.1
+	GPC_gcc-3_4-20050823_gpc-20060325:1.1.101.1
+	gcc-3_4_6:1.1.101.1
+	MIRBSD_8:1.1.101.1.0.2
+	MIRBSD_8_BASE:1.1.101.1
+	gcc-3_4-20051206:1.1.101.1
+	SSP_gcc-3_4-20051115_protector-3_4_4-1:1.1.101.1
+	SSP_gcc-3_4-20051115_BASE:1.1.101.1
+	SSP_gcc-3_4-20051115:1.1.101.1.0.8
+	gcc-3_4-20051115:1.1.101.1
+	GPC_gcc-3_4-20050823_gpc-20051116:1.1.101.1
+	GPC_gcc-3_4-20050823_BASE:1.1.101.1
+	GPC_gcc-3_4-20050823_gpc-20050217:1.1.101.1
+	GPC_gcc-3_4-20050823:1.1.101.1.0.6
+	gcc-3_4-20050823:1.1.101.1
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2007.07.09.23.35.38;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004692C6384B578404;
+
+1.1
+date	2005.03.21.12.04.34;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.03.21.12.04.34;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@fix an out-of bounds malloc'd array access (buffer underrun) gcc relied on
+to get a zero into the line and column variables, which was cought by bsd
+malloc – odds are glibc 2.5/2.6 malloc will catch it too… STUPID IDIOTS!
+@
+text
+@/* $MirOS$ */
+
+/* Default error handlers for CPP Library.
+   Copyright (C) 1986, 1987, 1989, 1992, 1993, 1994, 1995, 1998, 1999, 2000,
+   2001, 2002  Free Software Foundation, Inc.
+   Written by Per Bothner, 1994.
+   Based on CCCP program by Paul Rubin, June 1986
+   Adapted to ANSI C, Richard Stallman, Jan 1987
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation; either version 2, or (at your option) any
+later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+
+ In other words, you are welcome to use, share and improve this program.
+ You are forbidden to forbid anyone else to use, share and improve
+ what you give them.   Help stamp out software-hoarding!  */
+
+#include "config.h"
+#include "system.h"
+#include "cpplib.h"
+#include "cpphash.h"
+#include "intl.h"
+
+static void print_location (cpp_reader *, fileline, unsigned int);
+
+/* Print the logical file location (LINE, COL) in preparation for a
+   diagnostic.  Outputs the #include chain if it has changed.  A line
+   of zero suppresses the include stack, and outputs the program name
+   instead.  */
+static void
+print_location (cpp_reader *pfile, fileline line, unsigned int col)
+{
+  if (line == 0)
+    fprintf (stderr, "%s: ", progname);
+  else
+    {
+      const struct line_map *map;
+      unsigned int lin;
+
+      map = linemap_lookup (&pfile->line_maps, line);
+      linemap_print_containing_files (&pfile->line_maps, map);
+
+      lin = SOURCE_LINE (map, line);
+      if (col == 0)
+	col = 1;
+
+      if (lin == 0)
+	fprintf (stderr, "%s:", map->to_file);
+      else if (CPP_OPTION (pfile, show_column) == 0)
+	fprintf (stderr, "%s:%u:", map->to_file, lin);
+      else
+	fprintf (stderr, "%s:%u:%u:", map->to_file, lin, col);
+
+      fputc (' ', stderr);
+    }
+}
+
+/* Set up for a diagnostic: print the file and line, bump the error
+   counter, etc.  LINE is the logical line number; zero means to print
+   at the location of the previously lexed token, which tends to be
+   the correct place by default.  Returns 0 if the error has been
+   suppressed.  */
+int
+_cpp_begin_message (cpp_reader *pfile, int code, fileline line,
+		    unsigned int column)
+{
+  int level = CPP_DL_EXTRACT (code);
+
+  switch (level)
+    {
+    case CPP_DL_WARNING:
+    case CPP_DL_PEDWARN:
+      if (CPP_IN_SYSTEM_HEADER (pfile)
+	  && ! CPP_OPTION (pfile, warn_system_headers))
+	return 0;
+      /* Fall through.  */
+
+    case CPP_DL_WARNING_SYSHDR:
+      if (CPP_OPTION (pfile, warnings_are_errors)
+	  || (level == CPP_DL_PEDWARN && CPP_OPTION (pfile, pedantic_errors)))
+	{
+	  if (CPP_OPTION (pfile, inhibit_errors))
+	    return 0;
+	  level = CPP_DL_ERROR;
+	  pfile->errors++;
+	}
+      else if (CPP_OPTION (pfile, inhibit_warnings))
+	return 0;
+      break;
+
+    case CPP_DL_ERROR:
+      if (CPP_OPTION (pfile, inhibit_errors))
+	return 0;
+      /* ICEs cannot be inhibited.  */
+    case CPP_DL_ICE:
+      pfile->errors++;
+      break;
+    }
+
+  print_location (pfile, line, column);
+  if (CPP_DL_WARNING_P (level))
+    fputs (_("warning: "), stderr);
+  else if (level == CPP_DL_ICE)
+    fputs (_("internal error: "), stderr);
+
+  return 1;
+}
+
+/* Don't remove the blank before do, as otherwise the exgettext
+   script will mistake this as a function definition */
+#define v_message(msgid, ap) \
+ do { vfprintf (stderr, _(msgid), ap); putc ('\n', stderr); } while (0)
+
+/* Exported interface.  */
+
+/* Print an error at the location of the previously lexed token.  */
+void
+cpp_error (cpp_reader * pfile, int level, const char *msgid, ...)
+{
+  fileline line;
+  unsigned int column;
+  va_list ap;
+  
+  va_start (ap, msgid);
+
+  if (CPP_OPTION (pfile, traditional))
+    {
+      if (pfile->state.in_directive)
+	line = pfile->directive_line;
+      else
+	line = pfile->line;
+      column = 0;
+    }
+  else if (pfile->cur_token <= pfile->base_run.base)
+    line = column = 0;
+  else
+    {
+      line = pfile->cur_token[-1].line;
+      column = pfile->cur_token[-1].col;
+    }
+
+  if (_cpp_begin_message (pfile, level, line, column))
+    v_message (msgid, ap);
+
+  va_end (ap);
+}
+
+/* Print an error at a specific location.  */
+void
+cpp_error_with_line (cpp_reader *pfile, int level,
+		     fileline line, unsigned int column,
+		     const char *msgid, ...)
+{
+  va_list ap;
+  
+  va_start (ap, msgid);
+
+  if (_cpp_begin_message (pfile, level, line, column))
+    v_message (msgid, ap);
+
+  va_end (ap);
+}
+
+void
+cpp_errno (cpp_reader *pfile, int level, const char *msgid)
+{
+  if (msgid[0] == '\0')
+    msgid = _("stdout");
+
+  cpp_error (pfile, level, "%s: %s", msgid, xstrerror (errno));
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+d144 2
+@
+
+
+1.1.101.1
+log
+@Import the GNU Compiler Collection 3.4-stable
+from gcc-3.4-20050318.tar.bz2 after having
+* all top-level non-directories (files)
+  - except config.if
+and these directories completely:
+* INSTALL
+* boehm-gc/Mac_files
+* boehm-gc/cord
+* boehm-gc/doc
+* boehm-gc/tests
+* contrib
+  - except texi2pod.pl
+* gcc/f
+* gcc/po
+* gcc/testsuite
+* gcc/treelang
+* include
+* intl
+* libf2c
+* libffi/testsuite
+* libiberty
+* libjava/testsuite
+* libstdc++-v3/docs
+* libstdc++-v3/po
+* libstdc++-v3/scripts
+* libstdc++-v3/testsuite
+* maintainer-scripts
+* zlib
+removed before importing.
+@
+text
+@@

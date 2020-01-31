@@ -1,0 +1,696 @@
+head	1.3;
+access;
+symbols
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2
+	cvs-200507211800:1.1.1.4
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2013.07.29.13.36.05;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10051F66FDD6BAD9889;
+
+1.2
+date	2005.07.21.18.12.11;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	6b1c42dfe58e1068;
+
+1.1
+date	2005.07.01.14.29.16;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+commitid	14f42c5534cb1d2;
+
+1.1.1.1
+date	2005.07.01.14.29.16;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	14f42c5534cb1d2;
+
+1.1.1.2
+date	2005.07.04.03.46.53;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	10e842c8b14198e2;
+
+1.1.1.3
+date	2005.07.10.00.08.00;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	136b42d066eed31f;
+
+1.1.1.4
+date	2005.07.21.18.08.45;	author tg;	state Exp;
+branches;
+next	;
+commitid	6cf642dfe4b3c137;
+
+
+desc
+@@
+
+
+1.3
+log
+@bugfixes and portability improvements (Debian sid, mirmake, pmake) sponsored by tarent solutions GmbH
+@
+text
+@/*	$OpenBSD: xidle.c,v 1.6 2005/07/21 15:25:08 fgsch Exp $	*/
+/*
+ * Copyright (c) 2005 Federico G. Schwindt.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE OPENBSD PROJECT AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OPENBSD
+ * PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <X11/Xlib.h>
+#include <X11/extensions/scrnsaver.h>
+#include <err.h>
+#include <getopt.h>
+#include <limits.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#ifndef __RCSID
+#define __RCSID(x) static const char __rcsid[] = x
+#endif
+
+__RCSID("$MirOS: X11/extras/xidle/xidle.c,v 1.2 2005/07/21 18:12:11 tg Exp $");
+
+#ifndef __dead
+#define __dead __attribute__((__noreturn__))
+#endif
+
+#ifndef PATH_PROG
+#define PATH_PROG	"/usr/X11R6/bin/xlock"
+#endif
+
+
+enum {
+	north = 0x01,
+	south = 0x02,
+	east  = 0x04,
+	west  = 0x08
+};
+
+struct xinfo {
+	Display		*dpy;
+	Window		 win;
+	int		 coord_x;
+	int		 coord_y;
+
+	int		 saver_event;	/* Only if Xss ext is available */
+
+	int		 saved_timeout;
+	int		 saved_interval;
+	int		 saved_pref_blank;
+	int		 saved_allow_exp;
+};
+
+struct xinfo x;
+int	position = north|west;
+
+const struct option longopts[] = {
+	{ "area",	required_argument,	NULL,		'a' },
+	{ "delay",	required_argument,	NULL,		'D' },
+	{ "display",	required_argument,	NULL,		'd' },
+	{ "program",	required_argument,	NULL,		'p' },
+	{ "timeout",	required_argument,	NULL,		't' },
+
+	{ "ne",		no_argument,		&position,	north|east },
+	{ "nw",		no_argument,		&position,	north|west },
+	{ "se",		no_argument,		&position,	south|east },
+	{ "sw",		no_argument,		&position,	south|west },
+
+	{ NULL,		0,			NULL,		0 }
+};
+
+char default_prog[] = PATH_PROG;
+
+extern char *__progname;
+
+void	init_x(const char *, struct xinfo *, int, int);
+void	close_x(struct xinfo *);
+void	action(struct xinfo *, char **);
+__dead void	usage(void);
+__dead void	handler(int);
+
+
+__dead void
+usage(void)
+{
+	fprintf(stderr, "Usage:\n%s %s\n", __progname,
+	    "[-area pixels] [-delay secs] [-display host:dpy] "
+	    "[-ne | -nw | -sw | -sw]\n      [-program path] [-timeout secs]");
+	exit(1);
+}
+
+
+void
+init_x(const char *display, struct xinfo *xi, int area, int timeout)
+{
+	XSetWindowAttributes attr;
+	Display *dpy;
+	Window win;
+	int error, event;
+	int screen;
+
+	dpy = XOpenDisplay(display);
+	if (!dpy) {
+		errx(1, "Unable to open display %s", XDisplayName(display));
+		/* NOTREACHED */
+	}
+
+	screen = DefaultScreen(dpy);
+
+	if (position & south)
+		xi->coord_y = DisplayHeight(dpy, screen) - area;
+	if (position & east)
+		xi->coord_x = DisplayWidth(dpy, screen) - area;
+
+	attr.override_redirect = True;
+	win = XCreateWindow(dpy, DefaultRootWindow(dpy),
+	    xi->coord_x, xi->coord_y, area, area, 0, 0, InputOnly,
+	    CopyFromParent, CWOverrideRedirect,  &attr);
+
+	XMapWindow(dpy, win);
+	XSelectInput(dpy, win, EnterWindowMask|StructureNotifyMask);
+
+	if (timeout > 0 &&
+	    XScreenSaverQueryExtension(dpy, &event, &error) == True) {
+		xi->saver_event = event;
+
+		XGetScreenSaver(dpy, &xi->saved_timeout, &xi->saved_interval,
+		    &xi->saved_pref_blank, &xi->saved_allow_exp);
+
+		XSetScreenSaver(dpy, timeout, 0, DontPreferBlanking,
+		    DontAllowExposures);
+		XScreenSaverSelectInput(dpy, DefaultRootWindow(dpy),
+		    ScreenSaverNotifyMask);
+	} else if (timeout > 0)
+		warnx("XScreenSaver extension not available. "
+		    "Timeout disabled.");
+
+	xi->dpy = dpy;
+	xi->win = win;
+}
+
+
+void
+close_x(struct xinfo *xi)
+{
+	XSetScreenSaver(xi->dpy, xi->saved_timeout, xi->saved_interval,
+	    xi->saved_pref_blank, xi->saved_allow_exp);
+	XDestroyWindow(xi->dpy, xi->win);
+	XCloseDisplay(xi->dpy);
+}
+
+
+void
+action(struct xinfo *xi, char **args)
+{
+	int dumb;
+
+	switch (fork()) {
+	case -1:
+		err(1, "fork");
+		/* NOTREACHED */
+
+	case 0:
+		execv(*args, args);
+		exit(1);
+		/* NOTREACHED */
+
+	default:
+		wait(&dumb);
+		XSync(xi->dpy, True);
+		break;
+	}
+}
+
+
+__dead void
+handler(int sig __attribute__((__unused__)))
+{
+	close_x(&x);
+	exit(0);
+	/* NOTREACHED */
+}
+
+
+int
+main(int argc, char **argv)
+{
+	char *program = default_prog;
+	char *display = NULL, *p;
+	char **ap, *args[10];
+	int area = 2, delay = 2;
+	int timeout = 0;
+	int pflag;
+	int c;
+
+	pflag = 0;
+	while ((c = getopt_long_only(argc, argv, "", longopts, NULL)) != -1) {
+		switch (c) {
+		case 'D':
+			delay = strtol(optarg, &p, 10);
+			if (*p || delay < 0) {
+				errx(1, "illegal value -- %s", optarg);
+				/* NOTREACHED */
+			}
+			break;
+
+		case 'a':
+			area = strtol(optarg, &p, 10);
+			if (*p || area < 1) {
+				errx(1, "illegal value -- %s", optarg);
+				/* NOTREACHED */
+			}
+			break;
+
+		case 'd':
+			display = optarg;
+			break;
+
+		case 'p':
+			program = optarg;
+			break;
+
+		case 't':
+			timeout = strtol(optarg, &p, 10);
+			if (*p || timeout < 0) {
+				errx(1, "illegal value -- %s", optarg);
+				/* NOTREACHED */
+			}
+			break;
+
+		case 0:
+			if (pflag) {
+				errx(1, "Cannot specify multiple positions");
+				/* NOTREACHED */
+			}
+			pflag++;
+			break;
+
+		default:
+			usage();
+			/* NOTREACHED */
+		}
+	}
+
+	if ((argc - optind) != 0) {
+		usage();
+		/* NOTREACHED */
+	}
+
+	for (ap = args; ap < &args[9] &&
+	    (*ap = strsep(&program, " ")) != NULL;) {
+		if (**ap != '\0')
+			ap++;
+	}
+	*ap = NULL;
+
+	bzero(&x, sizeof(struct xinfo));
+
+	init_x(display, &x, area, timeout);
+
+	signal(SIGINT, handler);
+	signal(SIGTERM, handler);
+
+	for (;;) {
+		XScreenSaverNotifyEvent *se;
+		XCrossingEvent *ce;
+		XEvent ev;
+
+		XNextEvent(x.dpy, &ev);
+
+		switch (ev.type) {
+		case MapNotify:
+			XMapRaised(x.dpy, x.win);
+			break;
+
+		case EnterNotify:
+			ce = (XCrossingEvent *)&ev;
+
+			sleep(delay);
+
+			XQueryPointer(x.dpy, x.win, &ce->root, &ce->window,
+			    &ce->x_root, &ce->y_root, &ce->x, &ce->y,
+			    &ce->state);
+
+			/* Check it was for real. */
+			if (ce->x_root < x.coord_x ||
+			    ce->y_root < x.coord_y ||
+			    ce->x_root > x.coord_x + area ||
+			    ce->y_root > x.coord_y + area)
+				break;
+			/* FALLTHROUGH */
+
+		default:
+			if (ev.type != EnterNotify &&
+			    ev.type != x.saver_event)
+				break;
+
+			/* Was due to terminal switching? */
+			if (ev.type == x.saver_event) {
+				se = (XScreenSaverNotifyEvent *)&ev;
+				if (se->forced != False)
+					break;
+			}
+			action(&x, args);
+			break;
+		}
+	}
+
+	/* NOTREACHED */
+}
+@
+
+
+1.2
+log
+@merge
+@
+text
+@d40 9
+a48 1
+__RCSID("$MirOS$");
+d94 2
+d106 1
+a106 1
+usage()
+d145 1
+a145 1
+	if (timeout > 0 && 
+d199 1
+a199 1
+handler(int sig)
+d210 1
+a210 1
+	char *program = PATH_PROG;
+d272 1
+a272 1
+	for (ap = args; ap < &args[9] && 
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: xidle.c,v 1.1 2005/06/30 01:48:45 fgsch Exp $	*/
+d27 2
+a30 2
+#include <sys/types.h>
+#include <sys/wait.h>
+d40 5
+a45 4
+enum {
+	width  = 2,
+	height = 2
+};
+d69 1
+a69 3
+char	*program = PATH_XLOCK;
+int	 timeout = 0;
+int	 position = north|west;
+d72 2
+d88 1
+a88 1
+void	init_x(const char *, struct xinfo *);
+d90 1
+a90 2
+void	action(struct xinfo *);
+void	dump_event(XEvent *, struct xinfo *);
+d98 3
+a100 3
+	fprintf(stderr, "usage: %s %s\n", __progname,
+	    "[-display host:dpy] [-ne | -nw | -sw | -sw] "
+	    "[-program path] [-timeout seconds]");
+d106 1
+a106 1
+init_x(const char *display, struct xinfo *xi)
+d123 1
+a123 1
+		xi->coord_y = DisplayHeight(dpy, screen) - height;
+d125 1
+a125 1
+		xi->coord_x = DisplayWidth(dpy, screen) - width;
+d129 1
+a129 1
+	    xi->coord_x, xi->coord_y, width, height, 0, 0, InputOnly,
+d166 1
+a166 1
+action(struct xinfo *xi)
+d176 2
+a177 2
+		execlp(program, program, (char *)NULL);
+		exit(0);
+d200 1
+d202 3
+d211 16
+d257 12
+d271 1
+a271 1
+	init_x(display, &x);
+d277 2
+a278 1
+		XCrossingEvent *e;
+d289 1
+a289 1
+			e = (XCrossingEvent *)&ev;
+d291 1
+a291 1
+			sleep(2);
+d293 3
+a295 2
+			XQueryPointer(x.dpy, x.win, &e->root, &e->window,
+			    &e->x_root, &e->y_root, &e->x, &e->y, &e->state);
+d298 4
+a301 2
+			if (e->y > x.coord_y + height ||
+			    e->x > x.coord_x + width)
+d306 11
+a316 4
+			if (ev.type == EnterNotify ||
+			    (ev.type == x.saver_event &&
+			    ((XScreenSaverNotifyEvent *)&ev)->forced == False))
+				action(&x);
+@
+
+
+1.1.1.1
+log
+@xidle (new) from obsd
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Update
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: xidle.c,v 1.2 2005/07/01 17:22:24 fgsch Exp $	*/
+d68 2
+d87 1
+a87 1
+void	init_x(const char *, struct xinfo *, int);
+d89 2
+a90 1
+void	action(struct xinfo *, char **);
+d106 1
+a106 1
+init_x(const char *display, struct xinfo *xi, int timeout)
+d166 1
+a166 1
+action(struct xinfo *xi, char **args)
+d176 1
+a176 1
+		execv(*args, args);
+a199 1
+	char *program = PATH_XLOCK;
+a200 2
+	char **ap, *args[10];
+	int timeout = 0;
+a236 7
+	for (ap = args; ap < &args[9] && 
+	    (*ap = strsep(&program, " ")) != NULL;) {
+		if (**ap != '\0')
+			ap++;
+	}
+	*ap = NULL;
+
+d239 1
+a239 1
+	init_x(display, &x, timeout);
+d245 1
+a245 2
+		XScreenSaverNotifyEvent *se;
+		XCrossingEvent *ce;
+d256 1
+a256 1
+			ce = (XCrossingEvent *)&ev;
+d260 2
+a261 3
+			XQueryPointer(x.dpy, x.win, &ce->root, &ce->window,
+			    &ce->x_root, &ce->y_root, &ce->x, &ce->y,
+			    &ce->state);
+d264 2
+a265 2
+			if (ce->y > x.coord_y + height ||
+			    ce->x > x.coord_x + width)
+d270 4
+a273 11
+			if (ev.type != EnterNotify &&
+			    ev.type != x.saver_event)
+				break;
+
+			/* Was due to terminal switching? */
+			if (ev.type == x.saver_event) {
+				se = (XScreenSaverNotifyEvent *)&ev;
+				if (se->forced != False)
+					break;
+			}
+			action(&x, args);
+@
+
+
+1.1.1.3
+log
+@Oops they changed it again
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: xidle.c,v 1.3 2005/07/08 21:03:59 fgsch Exp $	*/
+a39 3
+#ifndef PATH_PROG
+#define PATH_PROG	"/usr/X11R6/bin/xlock"
+#endif
+d41 4
+d68 1
+a68 1
+int	position = north|west;
+a70 2
+	{ "area",	required_argument,	NULL,		'a' },
+	{ "delay",	required_argument,	NULL,		'D' },
+d85 1
+a85 1
+void	init_x(const char *, struct xinfo *, int, int);
+d95 3
+a97 3
+	fprintf(stderr, "Usage:\n%s %s\n", __progname,
+	    "[-area pixels] [-delay secs] [-display host:dpy] "
+	    "[-ne | -nw | -sw | -sw]\n      [-program path] [-timeout secs]");
+d103 1
+a103 1
+init_x(const char *display, struct xinfo *xi, int area, int timeout)
+d120 1
+a120 1
+		xi->coord_y = DisplayHeight(dpy, screen) - area;
+d122 1
+a122 1
+		xi->coord_x = DisplayWidth(dpy, screen) - area;
+d126 1
+a126 1
+	    xi->coord_x, xi->coord_y, area, area, 0, 0, InputOnly,
+d197 1
+a197 1
+	char *program = PATH_PROG;
+a199 1
+	int area = 2, delay = 2;
+a206 16
+		case 'D':
+			delay = strtol(optarg, &p, 10);
+			if (*p || delay < 0) {
+				errx(1, "illegal value -- %s", optarg);
+				/* NOTREACHED */
+			}
+			break;
+
+		case 'a':
+			area = strtol(optarg, &p, 10);
+			if (*p || area < 1) {
+				errx(1, "illegal value -- %s", optarg);
+				/* NOTREACHED */
+			}
+			break;
+
+d246 1
+a246 1
+	init_x(display, &x, area, timeout);
+d266 1
+a266 1
+			sleep(delay);
+d273 2
+a274 2
+			if (ce->y > x.coord_y + area ||
+			    ce->x > x.coord_x + area)
+@
+
+
+1.1.1.4
+log
+@The first of a really large series of importing OpenBSD userland...
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: xidle.c,v 1.6 2005/07/21 15:25:08 fgsch Exp $	*/
+d175 1
+a175 1
+		exit(1);
+a254 5
+	if ((argc - optind) != 0) {
+		usage();
+		/* NOTREACHED */
+	}
+
+d291 2
+a292 4
+			if (ce->x_root < x.coord_x ||
+			    ce->y_root < x.coord_y ||
+			    ce->x_root > x.coord_x + area ||
+			    ce->y_root > x.coord_y + area)
+@
+
+

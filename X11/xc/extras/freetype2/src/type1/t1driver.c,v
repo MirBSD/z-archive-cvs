@@ -1,0 +1,1863 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.22.21;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.48.36;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.02.26.20.05.13;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.25.12;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.22;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.57;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.20;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.21;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.05;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  t1driver.c                                                             */
+/*                                                                         */
+/*    Type 1 driver interface (body).                                      */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include "t1driver.h"
+#include "t1gload.h"
+#include "t1load.h"
+
+#include "t1errors.h"
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+#include "t1afm.h"
+#endif
+
+#include FT_INTERNAL_DEBUG_H
+#include FT_INTERNAL_STREAM_H
+#include FT_INTERNAL_HASH_H
+
+#include FT_SERVICE_MULTIPLE_MASTERS_H
+#include FT_SERVICE_GLYPH_DICT_H
+#include FT_SERVICE_FONT_FORMAT_H
+#include FT_SERVICE_POSTSCRIPT_NAME_H
+#include FT_SERVICE_POSTSCRIPT_CMAPS_H
+#include FT_SERVICE_POSTSCRIPT_INFO_H
+#include FT_SERVICE_KERNING_H
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_t1driver
+
+ /*
+  *  GLYPH DICT SERVICE
+  *
+  */
+
+  static FT_Error
+  t1_get_glyph_name( T1_Face     face,
+                     FT_UInt     glyph_index,
+                     FT_Pointer  buffer,
+                     FT_UInt     buffer_max )
+  {
+    FT_STRCPYN( buffer, face->type1.glyph_names[glyph_index], buffer_max );
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_UInt
+  t1_get_name_index( T1_Face     face,
+                     FT_String*  glyph_name )
+  {
+    FT_Int  i;
+
+
+    for ( i = 0; i < face->type1.num_glyphs; i++ )
+    {
+      FT_String*  gname = face->type1.glyph_names[i];
+
+
+      if ( !ft_strcmp( glyph_name, gname ) )
+        return (FT_UInt)i;
+    }
+
+    return 0;
+  }
+
+
+  static const FT_Service_GlyphDictRec  t1_service_glyph_dict =
+  {
+    (FT_GlyphDict_GetNameFunc)  t1_get_glyph_name,    /* get_name   */
+    (FT_GlyphDict_NameIndexFunc)t1_get_name_index     /* name_index */
+  };
+
+
+  /*
+   *  POSTSCRIPT NAME SERVICE
+   *
+   */
+
+  static const char*
+  t1_get_ps_name( T1_Face  face )
+  {
+    return (const char*) face->type1.font_name;
+  }
+
+
+  static const FT_Service_PsFontNameRec  t1_service_ps_name =
+  {
+    (FT_PsName_GetFunc)t1_get_ps_name     /* get_ps_font_name */
+  };
+
+
+  /*
+   *  MULTIPLE MASTERS SERVICE
+   *
+   */
+
+#ifndef T1_CONFIG_OPTION_NO_MM_SUPPORT
+  static const FT_Service_MultiMastersRec  t1_service_multi_masters =
+  {
+    (FT_Get_MM_Func)        T1_Get_Multi_Master,   /* get_mm         */
+    (FT_Set_MM_Design_Func) T1_Set_MM_Design,      /* set_mm_design  */
+    (FT_Set_MM_Blend_Func)  T1_Set_MM_Blend,       /* set_mm_blend   */
+    (FT_Get_MM_Blend_Func)  T1_Get_MM_Blend,       /* get_mm_blend   */
+    (FT_Get_MM_Var_Func)    T1_Get_MM_Var,         /* get_mm_var     */
+    (FT_Set_Var_Design_Func)T1_Set_Var_Design,     /* set_var_design */
+    (FT_Get_Var_Design_Func)T1_Get_Var_Design,     /* get_var_design */
+
+    (FT_Get_Var_Blend_Func) NULL,                  /* get_var_blend  */
+    (FT_Done_Blend_Func)    T1_Done_Blend          /* done_blend     */
+  };
+#endif
+
+
+  /*
+   *  POSTSCRIPT INFO SERVICE
+   *
+   */
+
+  static FT_Error
+  t1_ps_get_font_info( FT_Face          face,
+                       PS_FontInfoRec*  afont_info )
+  {
+    *afont_info = ((T1_Face)face)->type1.font_info;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Error
+  t1_ps_get_font_extra( FT_Face           face,
+                        PS_FontExtraRec*  afont_extra )
+  {
+    *afont_extra = ((T1_Face)face)->type1.font_extra;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Int
+  t1_ps_has_glyph_names( FT_Face  face )
+  {
+    FT_UNUSED( face );
+
+    return 1;
+  }
+
+
+  static FT_Error
+  t1_ps_get_font_private( FT_Face         face,
+                          PS_PrivateRec*  afont_private )
+  {
+    *afont_private = ((T1_Face)face)->type1.private_dict;
+
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Long
+  t1_ps_get_font_value( FT_Face       face,
+                        PS_Dict_Keys  key,
+                        FT_UInt       idx,
+                        void         *value,
+                        FT_Long       value_len_ )
+  {
+    FT_ULong  retval    = 0; /* always >= 1 if valid */
+    FT_ULong  value_len = value_len_ < 0 ? 0 : (FT_ULong)value_len_;
+
+    T1_Face  t1face = (T1_Face)face;
+    T1_Font  type1  = &t1face->type1;
+
+
+    switch ( key )
+    {
+    case PS_DICT_FONT_TYPE:
+      retval = sizeof ( type1->font_type );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->font_type;
+      break;
+
+    case PS_DICT_FONT_MATRIX:
+      if ( idx < sizeof ( type1->font_matrix ) /
+                   sizeof ( type1->font_matrix.xx ) )
+      {
+        FT_Fixed  val = 0;
+
+
+        retval = sizeof ( val );
+        if ( value && value_len >= retval )
+        {
+          switch ( idx )
+          {
+          case 0:
+            val = type1->font_matrix.xx;
+            break;
+          case 1:
+            val = type1->font_matrix.xy;
+            break;
+          case 2:
+            val = type1->font_matrix.yx;
+            break;
+          case 3:
+            val = type1->font_matrix.yy;
+            break;
+          }
+          *((FT_Fixed *)value) = val;
+        }
+      }
+      break;
+
+    case PS_DICT_FONT_BBOX:
+      if ( idx < sizeof ( type1->font_bbox ) /
+                   sizeof ( type1->font_bbox.xMin ) )
+      {
+        FT_Fixed  val = 0;
+
+
+        retval = sizeof ( val );
+        if ( value && value_len >= retval )
+        {
+          switch ( idx )
+          {
+          case 0:
+            val = type1->font_bbox.xMin;
+            break;
+          case 1:
+            val = type1->font_bbox.yMin;
+            break;
+          case 2:
+            val = type1->font_bbox.xMax;
+            break;
+          case 3:
+            val = type1->font_bbox.yMax;
+            break;
+          }
+          *((FT_Fixed *)value) = val;
+        }
+      }
+      break;
+
+    case PS_DICT_PAINT_TYPE:
+      retval = sizeof ( type1->paint_type );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->paint_type;
+      break;
+
+    case PS_DICT_FONT_NAME:
+      retval = ft_strlen( type1->font_name ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_name ), retval );
+      break;
+
+    case PS_DICT_UNIQUE_ID:
+      retval = sizeof ( type1->private_dict.unique_id );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->private_dict.unique_id;
+      break;
+
+    case PS_DICT_NUM_CHAR_STRINGS:
+      retval = sizeof ( type1->num_glyphs );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->num_glyphs;
+      break;
+
+    case PS_DICT_CHAR_STRING_KEY:
+      if ( idx < (FT_UInt)type1->num_glyphs )
+      {
+        retval = ft_strlen( type1->glyph_names[idx] ) + 1;
+        if ( value && value_len >= retval )
+        {
+          ft_memcpy( value, (void *)( type1->glyph_names[idx] ), retval );
+          ((FT_Char *)value)[retval - 1] = (FT_Char)'\0';
+        }
+      }
+      break;
+
+    case PS_DICT_CHAR_STRING:
+      if ( idx < (FT_UInt)type1->num_glyphs )
+      {
+        retval = type1->charstrings_len[idx] + 1;
+        if ( value && value_len >= retval )
+        {
+          ft_memcpy( value, (void *)( type1->charstrings[idx] ),
+                     retval - 1 );
+          ((FT_Char *)value)[retval - 1] = (FT_Char)'\0';
+        }
+      }
+      break;
+
+    case PS_DICT_ENCODING_TYPE:
+      retval = sizeof ( type1->encoding_type );
+      if ( value && value_len >= retval )
+        *((T1_EncodingType *)value) = type1->encoding_type;
+      break;
+
+    case PS_DICT_ENCODING_ENTRY:
+      if ( type1->encoding_type == T1_ENCODING_TYPE_ARRAY &&
+           idx < (FT_UInt)type1->encoding.num_chars       )
+      {
+        retval = ft_strlen( type1->encoding.char_name[idx] ) + 1;
+        if ( value && value_len >= retval )
+        {
+          ft_memcpy( value, (void *)( type1->encoding.char_name[idx] ),
+                     retval - 1 );
+          ((FT_Char *)value)[retval - 1] = (FT_Char)'\0';
+        }
+      }
+      break;
+
+    case PS_DICT_NUM_SUBRS:
+      retval = sizeof ( type1->num_subrs );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->num_subrs;
+      break;
+
+    case PS_DICT_SUBR:
+      {
+        FT_Bool  ok = 0;
+
+
+        if ( type1->subrs_hash )
+        {
+          /* convert subr index to array index */
+          size_t*  val = ft_hash_num_lookup( (FT_Int)idx,
+                                             type1->subrs_hash );
+
+
+          if ( val )
+          {
+            idx = *val;
+            ok  = 1;
+          }
+        }
+        else
+        {
+          if ( idx < (FT_UInt)type1->num_subrs )
+            ok = 1;
+        }
+
+        if ( ok )
+        {
+          retval = type1->subrs_len[idx] + 1;
+          if ( value && value_len >= retval )
+          {
+            ft_memcpy( value, (void *)( type1->subrs[idx] ), retval - 1 );
+            ((FT_Char *)value)[retval - 1] = (FT_Char)'\0';
+          }
+        }
+      }
+      break;
+
+    case PS_DICT_STD_HW:
+      retval = sizeof ( type1->private_dict.standard_width[0] );
+      if ( value && value_len >= retval )
+        *((FT_UShort *)value) = type1->private_dict.standard_width[0];
+      break;
+
+    case PS_DICT_STD_VW:
+      retval = sizeof ( type1->private_dict.standard_height[0] );
+      if ( value && value_len >= retval )
+        *((FT_UShort *)value) = type1->private_dict.standard_height[0];
+      break;
+
+    case PS_DICT_NUM_BLUE_VALUES:
+      retval = sizeof ( type1->private_dict.num_blue_values );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_blue_values;
+      break;
+
+    case PS_DICT_BLUE_VALUE:
+      if ( idx < type1->private_dict.num_blue_values )
+      {
+        retval = sizeof ( type1->private_dict.blue_values[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.blue_values[idx];
+      }
+      break;
+
+    case PS_DICT_BLUE_SCALE:
+      retval = sizeof ( type1->private_dict.blue_scale );
+      if ( value && value_len >= retval )
+        *((FT_Fixed *)value) = type1->private_dict.blue_scale;
+      break;
+
+    case PS_DICT_BLUE_FUZZ:
+      retval = sizeof ( type1->private_dict.blue_fuzz );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->private_dict.blue_fuzz;
+      break;
+
+    case PS_DICT_BLUE_SHIFT:
+      retval = sizeof ( type1->private_dict.blue_shift );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->private_dict.blue_shift;
+      break;
+
+    case PS_DICT_NUM_OTHER_BLUES:
+      retval = sizeof ( type1->private_dict.num_other_blues );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_other_blues;
+      break;
+
+    case PS_DICT_OTHER_BLUE:
+      if ( idx < type1->private_dict.num_other_blues )
+      {
+        retval = sizeof ( type1->private_dict.other_blues[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.other_blues[idx];
+      }
+      break;
+
+    case PS_DICT_NUM_FAMILY_BLUES:
+      retval = sizeof ( type1->private_dict.num_family_blues );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_family_blues;
+      break;
+
+    case PS_DICT_FAMILY_BLUE:
+      if ( idx < type1->private_dict.num_family_blues )
+      {
+        retval = sizeof ( type1->private_dict.family_blues[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.family_blues[idx];
+      }
+      break;
+
+    case PS_DICT_NUM_FAMILY_OTHER_BLUES:
+      retval = sizeof ( type1->private_dict.num_family_other_blues );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_family_other_blues;
+      break;
+
+    case PS_DICT_FAMILY_OTHER_BLUE:
+      if ( idx < type1->private_dict.num_family_other_blues )
+      {
+        retval = sizeof ( type1->private_dict.family_other_blues[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.family_other_blues[idx];
+      }
+      break;
+
+    case PS_DICT_NUM_STEM_SNAP_H:
+      retval = sizeof ( type1->private_dict.num_snap_widths );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_snap_widths;
+      break;
+
+    case PS_DICT_STEM_SNAP_H:
+      if ( idx < type1->private_dict.num_snap_widths )
+      {
+        retval = sizeof ( type1->private_dict.snap_widths[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.snap_widths[idx];
+      }
+      break;
+
+    case PS_DICT_NUM_STEM_SNAP_V:
+      retval = sizeof ( type1->private_dict.num_snap_heights );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_snap_heights;
+      break;
+
+    case PS_DICT_STEM_SNAP_V:
+      if ( idx < type1->private_dict.num_snap_heights )
+      {
+        retval = sizeof ( type1->private_dict.snap_heights[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.snap_heights[idx];
+      }
+      break;
+
+    case PS_DICT_RND_STEM_UP:
+      retval = sizeof ( type1->private_dict.round_stem_up );
+      if ( value && value_len >= retval )
+        *((FT_Bool *)value) = type1->private_dict.round_stem_up;
+      break;
+
+    case PS_DICT_FORCE_BOLD:
+      retval = sizeof ( type1->private_dict.force_bold );
+      if ( value && value_len >= retval )
+        *((FT_Bool *)value) = type1->private_dict.force_bold;
+      break;
+
+    case PS_DICT_MIN_FEATURE:
+      if ( idx < sizeof ( type1->private_dict.min_feature ) /
+                   sizeof ( type1->private_dict.min_feature[0] ) )
+      {
+        retval = sizeof ( type1->private_dict.min_feature[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.min_feature[idx];
+      }
+      break;
+
+    case PS_DICT_LEN_IV:
+      retval = sizeof ( type1->private_dict.lenIV );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->private_dict.lenIV;
+      break;
+
+    case PS_DICT_PASSWORD:
+      retval = sizeof ( type1->private_dict.password );
+      if ( value && value_len >= retval )
+        *((FT_Long *)value) = type1->private_dict.password;
+      break;
+
+    case PS_DICT_LANGUAGE_GROUP:
+      retval = sizeof ( type1->private_dict.language_group );
+      if ( value && value_len >= retval )
+        *((FT_Long *)value) = type1->private_dict.language_group;
+      break;
+
+    case PS_DICT_IS_FIXED_PITCH:
+      retval = sizeof ( type1->font_info.is_fixed_pitch );
+      if ( value && value_len >= retval )
+        *((FT_Bool *)value) = type1->font_info.is_fixed_pitch;
+      break;
+
+    case PS_DICT_UNDERLINE_POSITION:
+      retval = sizeof ( type1->font_info.underline_position );
+      if ( value && value_len >= retval )
+        *((FT_Short *)value) = type1->font_info.underline_position;
+      break;
+
+    case PS_DICT_UNDERLINE_THICKNESS:
+      retval = sizeof ( type1->font_info.underline_thickness );
+      if ( value && value_len >= retval )
+        *((FT_UShort *)value) = type1->font_info.underline_thickness;
+      break;
+
+    case PS_DICT_FS_TYPE:
+      retval = sizeof ( type1->font_extra.fs_type );
+      if ( value && value_len >= retval )
+        *((FT_UShort *)value) = type1->font_extra.fs_type;
+      break;
+
+    case PS_DICT_VERSION:
+      retval = ft_strlen( type1->font_info.version ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.version ), retval );
+      break;
+
+    case PS_DICT_NOTICE:
+      retval = ft_strlen( type1->font_info.notice ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.notice ), retval );
+      break;
+
+    case PS_DICT_FULL_NAME:
+      retval = ft_strlen( type1->font_info.full_name ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.full_name ), retval );
+      break;
+
+    case PS_DICT_FAMILY_NAME:
+      retval = ft_strlen( type1->font_info.family_name ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.family_name ), retval );
+      break;
+
+    case PS_DICT_WEIGHT:
+      retval = ft_strlen( type1->font_info.weight ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.weight ), retval );
+      break;
+
+    case PS_DICT_ITALIC_ANGLE:
+      retval = sizeof ( type1->font_info.italic_angle );
+      if ( value && value_len >= retval )
+        *((FT_Long *)value) = type1->font_info.italic_angle;
+      break;
+    }
+
+    return retval == 0 ? -1 : (FT_Long)retval;
+  }
+
+
+  static const FT_Service_PsInfoRec  t1_service_ps_info =
+  {
+    (PS_GetFontInfoFunc)   t1_ps_get_font_info,    /* ps_get_font_info    */
+    (PS_GetFontExtraFunc)  t1_ps_get_font_extra,   /* ps_get_font_extra   */
+    (PS_HasGlyphNamesFunc) t1_ps_has_glyph_names,  /* ps_has_glyph_names  */
+    (PS_GetFontPrivateFunc)t1_ps_get_font_private, /* ps_get_font_private */
+    (PS_GetFontValueFunc)  t1_ps_get_font_value,   /* ps_get_font_value   */
+  };
+
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+  static const FT_Service_KerningRec  t1_service_kerning =
+  {
+    T1_Get_Track_Kerning,       /* get_track */
+  };
+#endif
+
+
+  /*
+   *  SERVICE LIST
+   *
+   */
+
+  static const FT_ServiceDescRec  t1_services[] =
+  {
+    { FT_SERVICE_ID_POSTSCRIPT_FONT_NAME, &t1_service_ps_name },
+    { FT_SERVICE_ID_GLYPH_DICT,           &t1_service_glyph_dict },
+    { FT_SERVICE_ID_FONT_FORMAT,          FT_FONT_FORMAT_TYPE_1 },
+    { FT_SERVICE_ID_POSTSCRIPT_INFO,      &t1_service_ps_info },
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+    { FT_SERVICE_ID_KERNING,              &t1_service_kerning },
+#endif
+
+#ifndef T1_CONFIG_OPTION_NO_MM_SUPPORT
+    { FT_SERVICE_ID_MULTI_MASTERS,        &t1_service_multi_masters },
+#endif
+    { NULL, NULL }
+  };
+
+
+  FT_CALLBACK_DEF( FT_Module_Interface )
+  Get_Interface( FT_Module         module,
+                 const FT_String*  t1_interface )
+  {
+    FT_UNUSED( module );
+
+    return ft_service_list_lookup( t1_services, t1_interface );
+  }
+
+
+#ifndef T1_CONFIG_OPTION_NO_AFM
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* <Function>                                                            */
+  /*    Get_Kerning                                                        */
+  /*                                                                       */
+  /* <Description>                                                         */
+  /*    A driver method used to return the kerning vector between two      */
+  /*    glyphs of the same face.                                           */
+  /*                                                                       */
+  /* <Input>                                                               */
+  /*    face        :: A handle to the source face object.                 */
+  /*                                                                       */
+  /*    left_glyph  :: The index of the left glyph in the kern pair.       */
+  /*                                                                       */
+  /*    right_glyph :: The index of the right glyph in the kern pair.      */
+  /*                                                                       */
+  /* <Output>                                                              */
+  /*    kerning     :: The kerning vector.  This is in font units for      */
+  /*                   scalable formats, and in pixels for fixed-sizes     */
+  /*                   formats.                                            */
+  /*                                                                       */
+  /* <Return>                                                              */
+  /*    FreeType error code.  0 means success.                             */
+  /*                                                                       */
+  /* <Note>                                                                */
+  /*    Only horizontal layouts (left-to-right & right-to-left) are        */
+  /*    supported by this function.  Other layouts, or more sophisticated  */
+  /*    kernings are out of scope of this method (the basic driver         */
+  /*    interface is meant to be simple).                                  */
+  /*                                                                       */
+  /*    They can be implemented by format-specific interfaces.             */
+  /*                                                                       */
+  static FT_Error
+  Get_Kerning( FT_Face     t1face,        /* T1_Face */
+               FT_UInt     left_glyph,
+               FT_UInt     right_glyph,
+               FT_Vector*  kerning )
+  {
+    T1_Face  face = (T1_Face)t1face;
+
+
+    kerning->x = 0;
+    kerning->y = 0;
+
+    if ( face->afm_data )
+      T1_Get_Kerning( (AFM_FontInfo)face->afm_data,
+                      left_glyph,
+                      right_glyph,
+                      kerning );
+
+    return FT_Err_Ok;
+  }
+
+
+#endif /* T1_CONFIG_OPTION_NO_AFM */
+
+
+  FT_CALLBACK_TABLE_DEF
+  const FT_Driver_ClassRec  t1_driver_class =
+  {
+    {
+      FT_MODULE_FONT_DRIVER       |
+      FT_MODULE_DRIVER_SCALABLE   |
+      FT_MODULE_DRIVER_HAS_HINTER,
+
+      sizeof ( FT_DriverRec ),
+
+      "type1",
+      0x10000L,
+      0x20000L,
+
+      NULL,    /* module-specific interface */
+
+      T1_Driver_Init,           /* FT_Module_Constructor  module_init   */
+      T1_Driver_Done,           /* FT_Module_Destructor   module_done   */
+      Get_Interface,            /* FT_Module_Requester    get_interface */
+    },
+
+    sizeof ( T1_FaceRec ),
+    sizeof ( T1_SizeRec ),
+    sizeof ( T1_GlyphSlotRec ),
+
+    T1_Face_Init,               /* FT_Face_InitFunc  init_face */
+    T1_Face_Done,               /* FT_Face_DoneFunc  done_face */
+    T1_Size_Init,               /* FT_Size_InitFunc  init_size */
+    T1_Size_Done,               /* FT_Size_DoneFunc  done_size */
+    T1_GlyphSlot_Init,          /* FT_Slot_InitFunc  init_slot */
+    T1_GlyphSlot_Done,          /* FT_Slot_DoneFunc  done_slot */
+
+    T1_Load_Glyph,              /* FT_Slot_LoadFunc  load_glyph */
+
+#ifdef T1_CONFIG_OPTION_NO_AFM
+    NULL,                       /* FT_Face_GetKerningFunc   get_kerning  */
+    NULL,                       /* FT_Face_AttachFunc       attach_file  */
+#else
+    Get_Kerning,                /* FT_Face_GetKerningFunc   get_kerning  */
+    T1_Read_Metrics,            /* FT_Face_AttachFunc       attach_file  */
+#endif
+    T1_Get_Advances,            /* FT_Face_GetAdvancesFunc  get_advances */
+
+    T1_Size_Request,            /* FT_Size_RequestFunc  request_size */
+    NULL                        /* FT_Size_SelectFunc   select_size  */
+  };
+
+
+/* END */
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2006, 2007, 2009 by             */
+d32 1
+d36 1
+a36 1
+#include FT_SERVICE_XFREE86_NAME_H
+d65 1
+a65 1
+    return T1_Err_Ok;
+d73 1
+a73 2
+    FT_Int      i;
+    FT_String*  gname;
+d78 2
+a79 1
+      gname = face->type1.glyph_names[i];
+d91 2
+a92 2
+    (FT_GlyphDict_GetNameFunc)  t1_get_glyph_name,
+    (FT_GlyphDict_NameIndexFunc)t1_get_name_index
+d110 1
+a110 1
+    (FT_PsName_GetFunc)t1_get_ps_name
+d122 10
+a131 5
+    (FT_Get_MM_Func)        T1_Get_Multi_Master,
+    (FT_Set_MM_Design_Func) T1_Set_MM_Design,
+    (FT_Set_MM_Blend_Func)  T1_Set_MM_Blend,
+    (FT_Get_MM_Var_Func)    T1_Get_MM_Var,
+    (FT_Set_Var_Design_Func)T1_Set_Var_Design
+d147 1
+a147 1
+    return T1_Err_Ok;
+d157 1
+a157 1
+    return T1_Err_Ok;
+d176 419
+a594 1
+    return T1_Err_Ok;
+d600 5
+a604 4
+    (PS_GetFontInfoFunc)   t1_ps_get_font_info,
+    (PS_GetFontExtraFunc)  t1_ps_get_font_extra,
+    (PS_HasGlyphNamesFunc) t1_ps_has_glyph_names,
+    (PS_GetFontPrivateFunc)t1_ps_get_font_private,
+d611 1
+a611 1
+    T1_Get_Track_Kerning,
+d625 1
+a625 1
+    { FT_SERVICE_ID_XF86_NAME,            FT_XF86_FORMAT_TYPE_1 },
+d639 2
+a640 2
+  static FT_Module_Interface
+  Get_Interface( FT_Driver         driver,
+d643 1
+a643 1
+    FT_UNUSED( driver );
+d684 1
+a684 1
+  Get_Kerning( T1_Face     face,
+d689 3
+d701 1
+a701 1
+    return T1_Err_Ok;
+d716 1
+a716 1
+      sizeof( FT_DriverRec ),
+d722 1
+a722 1
+      0,   /* format interface */
+d724 3
+a726 3
+      (FT_Module_Constructor)T1_Driver_Init,
+      (FT_Module_Destructor) T1_Driver_Done,
+      (FT_Module_Requester)  Get_Interface,
+d729 12
+a740 16
+    sizeof( T1_FaceRec ),
+    sizeof( T1_SizeRec ),
+    sizeof( T1_GlyphSlotRec ),
+
+    (FT_Face_InitFunc)        T1_Face_Init,
+    (FT_Face_DoneFunc)        T1_Face_Done,
+    (FT_Size_InitFunc)        T1_Size_Init,
+    (FT_Size_DoneFunc)        T1_Size_Done,
+    (FT_Slot_InitFunc)        T1_GlyphSlot_Init,
+    (FT_Slot_DoneFunc)        T1_GlyphSlot_Done,
+
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+    ft_stub_set_char_sizes,
+    ft_stub_set_pixel_sizes,
+#endif
+    (FT_Slot_LoadFunc)        T1_Load_Glyph,
+d743 2
+a744 2
+    (FT_Face_GetKerningFunc)  0,
+    (FT_Face_AttachFunc)      0,
+d746 2
+a747 2
+    (FT_Face_GetKerningFunc)  Get_Kerning,
+    (FT_Face_AttachFunc)      T1_Read_Metrics,
+d749 4
+a752 3
+    (FT_Face_GetAdvancesFunc) T1_Get_Advances,
+    (FT_Size_RequestFunc)     T1_Size_Request,
+    (FT_Size_SelectFunc)      0
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2006, 2007 by                   */
+d87 1
+d95 4
+a98 4
+ /*
+  *  POSTSCRIPT NAME SERVICE
+  *
+  */
+d106 1
+d113 4
+a116 4
+ /*
+  *  MULTIPLE MASTERS SERVICE
+  *
+  */
+d130 4
+a133 4
+ /*
+  *  POSTSCRIPT INFO SERVICE
+  *
+  */
+d140 12
+a151 1
+    return 0;
+d159 1
+d169 2
+a170 1
+    return 0;
+d177 1
+d182 1
+d190 5
+a194 4
+ /*
+  *  SERVICE LIST
+  *
+  */
+d325 1
+a325 1
+    (FT_Face_GetAdvancesFunc) 0,
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2006 by                         */
+d62 1
+a62 16
+    FT_String*  gname;
+
+
+    gname = face->type1.glyph_names[glyph_index];
+
+    if ( buffer_max > 0 )
+    {
+      FT_UInt  len = (FT_UInt)( ft_strlen( gname ) );
+
+
+      if (len >= buffer_max)
+        len = buffer_max - 1;
+
+      FT_MEM_COPY( buffer, gname, len );
+      ((FT_Byte*)buffer)[len] = 0;
+    }
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003 by                                     */
+d39 2
+d134 5
+a138 3
+    (FT_Get_MM_Func)       T1_Get_Multi_Master,
+    (FT_Set_MM_Design_Func)T1_Set_MM_Design,
+    (FT_Set_MM_Blend_Func) T1_Set_MM_Blend
+d165 9
+d176 3
+a178 2
+    (PS_GetFontInfoFunc)  t1_ps_get_font_info,
+    (PS_HasGlyphNamesFunc)t1_ps_has_glyph_names
+d181 6
+d200 4
+a260 3
+    T1_AFM*  afm;
+
+
+d264 5
+a268 3
+    afm = (T1_AFM*)face->afm_data;
+    if ( afm )
+      T1_Get_Kerning( afm, left_glyph, right_glyph, kerning );
+d309 4
+a312 2
+    (FT_Size_ResetPointsFunc) T1_Size_Reset,
+    (FT_Size_ResetPixelsFunc) T1_Size_Reset,
+d320 1
+a320 1
+    (FT_Face_AttachFunc)      T1_Read_AFM,
+d322 3
+a324 1
+    (FT_Face_GetAdvancesFunc) 0
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2006, 2007 by                   */
+a38 2
+#include FT_SERVICE_KERNING_H
+
+d60 16
+a75 1
+    FT_STRCPYN( buffer, face->type1.glyph_names[glyph_index], buffer_max );
+d132 3
+a134 5
+    (FT_Get_MM_Func)        T1_Get_Multi_Master,
+    (FT_Set_MM_Design_Func) T1_Set_MM_Design,
+    (FT_Set_MM_Blend_Func)  T1_Set_MM_Blend,
+    (FT_Get_MM_Var_Func)    T1_Get_MM_Var,
+    (FT_Set_Var_Design_Func)T1_Set_Var_Design
+a160 9
+  static FT_Error
+  t1_ps_get_font_private( FT_Face         face,
+                          PS_PrivateRec*  afont_private )
+  {
+    *afont_private = ((T1_Face)face)->type1.private_dict;
+    return 0;
+  }
+
+
+d163 2
+a164 3
+    (PS_GetFontInfoFunc)   t1_ps_get_font_info,
+    (PS_HasGlyphNamesFunc) t1_ps_has_glyph_names,
+    (PS_GetFontPrivateFunc)t1_ps_get_font_private,
+a166 6
+#ifndef T1_CONFIG_OPTION_NO_AFM
+  static const FT_Service_KerningRec  t1_service_kerning =
+  {
+    T1_Get_Track_Kerning,
+  };
+#endif
+a179 4
+#ifndef T1_CONFIG_OPTION_NO_AFM
+    { FT_SERVICE_ID_KERNING,              &t1_service_kerning },
+#endif
+
+d237 3
+d243 3
+a245 5
+    if ( face->afm_data )
+      T1_Get_Kerning( (AFM_FontInfo)face->afm_data,
+                      left_glyph,
+                      right_glyph,
+                      kerning );
+d286 2
+a287 4
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+    ft_stub_set_char_sizes,
+    ft_stub_set_pixel_sizes,
+#endif
+d295 1
+a295 1
+    (FT_Face_AttachFunc)      T1_Read_Metrics,
+d297 1
+a297 3
+    (FT_Face_GetAdvancesFunc) 0,
+    (FT_Size_RequestFunc)     T1_Size_Request,
+    (FT_Size_SelectFunc)      0
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2006 by                         */
+a38 2
+#include FT_SERVICE_KERNING_H
+
+d132 3
+a134 5
+    (FT_Get_MM_Func)        T1_Get_Multi_Master,
+    (FT_Set_MM_Design_Func) T1_Set_MM_Design,
+    (FT_Set_MM_Blend_Func)  T1_Set_MM_Blend,
+    (FT_Get_MM_Var_Func)    T1_Get_MM_Var,
+    (FT_Set_Var_Design_Func)T1_Set_Var_Design
+a160 9
+  static FT_Error
+  t1_ps_get_font_private( FT_Face         face,
+                          PS_PrivateRec*  afont_private )
+  {
+    *afont_private = ((T1_Face)face)->type1.private_dict;
+    return 0;
+  }
+
+
+d163 2
+a164 3
+    (PS_GetFontInfoFunc)   t1_ps_get_font_info,
+    (PS_HasGlyphNamesFunc) t1_ps_has_glyph_names,
+    (PS_GetFontPrivateFunc)t1_ps_get_font_private,
+a166 6
+#ifndef T1_CONFIG_OPTION_NO_AFM
+  static const FT_Service_KerningRec  t1_service_kerning =
+  {
+    T1_Get_Track_Kerning,
+  };
+#endif
+a179 4
+#ifndef T1_CONFIG_OPTION_NO_AFM
+    { FT_SERVICE_ID_KERNING,              &t1_service_kerning },
+#endif
+
+d237 3
+d243 3
+a245 5
+    if ( face->afm_data )
+      T1_Get_Kerning( (AFM_FontInfo)face->afm_data,
+                      left_glyph,
+                      right_glyph,
+                      kerning );
+d286 2
+a287 4
+#ifdef FT_CONFIG_OPTION_OLD_INTERNALS
+    ft_stub_set_char_sizes,
+    ft_stub_set_pixel_sizes,
+#endif
+d295 1
+a295 1
+    (FT_Face_AttachFunc)      T1_Read_Metrics,
+d297 1
+a297 3
+    (FT_Face_GetAdvancesFunc) 0,
+    (FT_Size_RequestFunc)     T1_Size_Request,
+    (FT_Size_SelectFunc)      0
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2006, 2007, 2009 by             */
+d62 16
+a77 1
+    FT_STRCPYN( buffer, face->type1.glyph_names[glyph_index], buffer_max );
+a101 1
+
+d109 4
+a112 4
+  /*
+   *  POSTSCRIPT NAME SERVICE
+   *
+   */
+a119 1
+
+d126 4
+a129 4
+  /*
+   *  MULTIPLE MASTERS SERVICE
+   *
+   */
+d143 4
+a146 4
+  /*
+   *  POSTSCRIPT INFO SERVICE
+   *
+   */
+d153 1
+a153 12
+
+    return T1_Err_Ok;
+  }
+
+
+  static FT_Error
+  t1_ps_get_font_extra( FT_Face           face,
+                        PS_FontExtraRec*  afont_extra )
+  {
+    *afont_extra = ((T1_Face)face)->type1.font_extra;
+
+    return T1_Err_Ok;
+a160 1
+
+d170 1
+a170 2
+
+    return T1_Err_Ok;
+a176 1
+    (PS_GetFontExtraFunc)  t1_ps_get_font_extra,
+a180 1
+
+d188 4
+a191 5
+
+  /*
+   *  SERVICE LIST
+   *
+   */
+d322 1
+a322 1
+    (FT_Face_GetAdvancesFunc) T1_Get_Advances,
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+a31 1
+#include FT_INTERNAL_HASH_H
+d35 1
+a35 1
+#include FT_SERVICE_FONT_FORMAT_H
+d64 1
+a64 1
+    return FT_Err_Ok;
+d72 2
+a73 1
+    FT_Int  i;
+d78 1
+a78 2
+      FT_String*  gname = face->type1.glyph_names[i];
+
+d90 2
+a91 2
+    (FT_GlyphDict_GetNameFunc)  t1_get_glyph_name,    /* get_name   */
+    (FT_GlyphDict_NameIndexFunc)t1_get_name_index     /* name_index */
+d109 1
+a109 1
+    (FT_PsName_GetFunc)t1_get_ps_name     /* get_ps_font_name */
+d121 5
+a125 10
+    (FT_Get_MM_Func)        T1_Get_Multi_Master,   /* get_mm         */
+    (FT_Set_MM_Design_Func) T1_Set_MM_Design,      /* set_mm_design  */
+    (FT_Set_MM_Blend_Func)  T1_Set_MM_Blend,       /* set_mm_blend   */
+    (FT_Get_MM_Blend_Func)  T1_Get_MM_Blend,       /* get_mm_blend   */
+    (FT_Get_MM_Var_Func)    T1_Get_MM_Var,         /* get_mm_var     */
+    (FT_Set_Var_Design_Func)T1_Set_Var_Design,     /* set_var_design */
+    (FT_Get_Var_Design_Func)T1_Get_Var_Design,     /* get_var_design */
+
+    (FT_Get_Var_Blend_Func) NULL,                  /* get_var_blend  */
+    (FT_Done_Blend_Func)    T1_Done_Blend          /* done_blend     */
+d141 1
+a141 1
+    return FT_Err_Ok;
+d151 1
+a151 1
+    return FT_Err_Ok;
+d170 1
+a170 419
+    return FT_Err_Ok;
+  }
+
+
+  static FT_Long
+  t1_ps_get_font_value( FT_Face       face,
+                        PS_Dict_Keys  key,
+                        FT_UInt       idx,
+                        void         *value,
+                        FT_Long       value_len_ )
+  {
+    FT_ULong  retval    = 0; /* always >= 1 if valid */
+    FT_ULong  value_len = value_len_ < 0 ? 0 : (FT_ULong)value_len_;
+
+    T1_Face  t1face = (T1_Face)face;
+    T1_Font  type1  = &t1face->type1;
+
+
+    switch ( key )
+    {
+    case PS_DICT_FONT_TYPE:
+      retval = sizeof ( type1->font_type );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->font_type;
+      break;
+
+    case PS_DICT_FONT_MATRIX:
+      if ( idx < sizeof ( type1->font_matrix ) /
+                   sizeof ( type1->font_matrix.xx ) )
+      {
+        FT_Fixed  val = 0;
+
+
+        retval = sizeof ( val );
+        if ( value && value_len >= retval )
+        {
+          switch ( idx )
+          {
+          case 0:
+            val = type1->font_matrix.xx;
+            break;
+          case 1:
+            val = type1->font_matrix.xy;
+            break;
+          case 2:
+            val = type1->font_matrix.yx;
+            break;
+          case 3:
+            val = type1->font_matrix.yy;
+            break;
+          }
+          *((FT_Fixed *)value) = val;
+        }
+      }
+      break;
+
+    case PS_DICT_FONT_BBOX:
+      if ( idx < sizeof ( type1->font_bbox ) /
+                   sizeof ( type1->font_bbox.xMin ) )
+      {
+        FT_Fixed  val = 0;
+
+
+        retval = sizeof ( val );
+        if ( value && value_len >= retval )
+        {
+          switch ( idx )
+          {
+          case 0:
+            val = type1->font_bbox.xMin;
+            break;
+          case 1:
+            val = type1->font_bbox.yMin;
+            break;
+          case 2:
+            val = type1->font_bbox.xMax;
+            break;
+          case 3:
+            val = type1->font_bbox.yMax;
+            break;
+          }
+          *((FT_Fixed *)value) = val;
+        }
+      }
+      break;
+
+    case PS_DICT_PAINT_TYPE:
+      retval = sizeof ( type1->paint_type );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->paint_type;
+      break;
+
+    case PS_DICT_FONT_NAME:
+      retval = ft_strlen( type1->font_name ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_name ), retval );
+      break;
+
+    case PS_DICT_UNIQUE_ID:
+      retval = sizeof ( type1->private_dict.unique_id );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->private_dict.unique_id;
+      break;
+
+    case PS_DICT_NUM_CHAR_STRINGS:
+      retval = sizeof ( type1->num_glyphs );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->num_glyphs;
+      break;
+
+    case PS_DICT_CHAR_STRING_KEY:
+      if ( idx < (FT_UInt)type1->num_glyphs )
+      {
+        retval = ft_strlen( type1->glyph_names[idx] ) + 1;
+        if ( value && value_len >= retval )
+        {
+          ft_memcpy( value, (void *)( type1->glyph_names[idx] ), retval );
+          ((FT_Char *)value)[retval - 1] = (FT_Char)'\0';
+        }
+      }
+      break;
+
+    case PS_DICT_CHAR_STRING:
+      if ( idx < (FT_UInt)type1->num_glyphs )
+      {
+        retval = type1->charstrings_len[idx] + 1;
+        if ( value && value_len >= retval )
+        {
+          ft_memcpy( value, (void *)( type1->charstrings[idx] ),
+                     retval - 1 );
+          ((FT_Char *)value)[retval - 1] = (FT_Char)'\0';
+        }
+      }
+      break;
+
+    case PS_DICT_ENCODING_TYPE:
+      retval = sizeof ( type1->encoding_type );
+      if ( value && value_len >= retval )
+        *((T1_EncodingType *)value) = type1->encoding_type;
+      break;
+
+    case PS_DICT_ENCODING_ENTRY:
+      if ( type1->encoding_type == T1_ENCODING_TYPE_ARRAY &&
+           idx < (FT_UInt)type1->encoding.num_chars       )
+      {
+        retval = ft_strlen( type1->encoding.char_name[idx] ) + 1;
+        if ( value && value_len >= retval )
+        {
+          ft_memcpy( value, (void *)( type1->encoding.char_name[idx] ),
+                     retval - 1 );
+          ((FT_Char *)value)[retval - 1] = (FT_Char)'\0';
+        }
+      }
+      break;
+
+    case PS_DICT_NUM_SUBRS:
+      retval = sizeof ( type1->num_subrs );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->num_subrs;
+      break;
+
+    case PS_DICT_SUBR:
+      {
+        FT_Bool  ok = 0;
+
+
+        if ( type1->subrs_hash )
+        {
+          /* convert subr index to array index */
+          size_t*  val = ft_hash_num_lookup( (FT_Int)idx,
+                                             type1->subrs_hash );
+
+
+          if ( val )
+          {
+            idx = *val;
+            ok  = 1;
+          }
+        }
+        else
+        {
+          if ( idx < (FT_UInt)type1->num_subrs )
+            ok = 1;
+        }
+
+        if ( ok )
+        {
+          retval = type1->subrs_len[idx] + 1;
+          if ( value && value_len >= retval )
+          {
+            ft_memcpy( value, (void *)( type1->subrs[idx] ), retval - 1 );
+            ((FT_Char *)value)[retval - 1] = (FT_Char)'\0';
+          }
+        }
+      }
+      break;
+
+    case PS_DICT_STD_HW:
+      retval = sizeof ( type1->private_dict.standard_width[0] );
+      if ( value && value_len >= retval )
+        *((FT_UShort *)value) = type1->private_dict.standard_width[0];
+      break;
+
+    case PS_DICT_STD_VW:
+      retval = sizeof ( type1->private_dict.standard_height[0] );
+      if ( value && value_len >= retval )
+        *((FT_UShort *)value) = type1->private_dict.standard_height[0];
+      break;
+
+    case PS_DICT_NUM_BLUE_VALUES:
+      retval = sizeof ( type1->private_dict.num_blue_values );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_blue_values;
+      break;
+
+    case PS_DICT_BLUE_VALUE:
+      if ( idx < type1->private_dict.num_blue_values )
+      {
+        retval = sizeof ( type1->private_dict.blue_values[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.blue_values[idx];
+      }
+      break;
+
+    case PS_DICT_BLUE_SCALE:
+      retval = sizeof ( type1->private_dict.blue_scale );
+      if ( value && value_len >= retval )
+        *((FT_Fixed *)value) = type1->private_dict.blue_scale;
+      break;
+
+    case PS_DICT_BLUE_FUZZ:
+      retval = sizeof ( type1->private_dict.blue_fuzz );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->private_dict.blue_fuzz;
+      break;
+
+    case PS_DICT_BLUE_SHIFT:
+      retval = sizeof ( type1->private_dict.blue_shift );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->private_dict.blue_shift;
+      break;
+
+    case PS_DICT_NUM_OTHER_BLUES:
+      retval = sizeof ( type1->private_dict.num_other_blues );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_other_blues;
+      break;
+
+    case PS_DICT_OTHER_BLUE:
+      if ( idx < type1->private_dict.num_other_blues )
+      {
+        retval = sizeof ( type1->private_dict.other_blues[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.other_blues[idx];
+      }
+      break;
+
+    case PS_DICT_NUM_FAMILY_BLUES:
+      retval = sizeof ( type1->private_dict.num_family_blues );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_family_blues;
+      break;
+
+    case PS_DICT_FAMILY_BLUE:
+      if ( idx < type1->private_dict.num_family_blues )
+      {
+        retval = sizeof ( type1->private_dict.family_blues[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.family_blues[idx];
+      }
+      break;
+
+    case PS_DICT_NUM_FAMILY_OTHER_BLUES:
+      retval = sizeof ( type1->private_dict.num_family_other_blues );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_family_other_blues;
+      break;
+
+    case PS_DICT_FAMILY_OTHER_BLUE:
+      if ( idx < type1->private_dict.num_family_other_blues )
+      {
+        retval = sizeof ( type1->private_dict.family_other_blues[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.family_other_blues[idx];
+      }
+      break;
+
+    case PS_DICT_NUM_STEM_SNAP_H:
+      retval = sizeof ( type1->private_dict.num_snap_widths );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_snap_widths;
+      break;
+
+    case PS_DICT_STEM_SNAP_H:
+      if ( idx < type1->private_dict.num_snap_widths )
+      {
+        retval = sizeof ( type1->private_dict.snap_widths[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.snap_widths[idx];
+      }
+      break;
+
+    case PS_DICT_NUM_STEM_SNAP_V:
+      retval = sizeof ( type1->private_dict.num_snap_heights );
+      if ( value && value_len >= retval )
+        *((FT_Byte *)value) = type1->private_dict.num_snap_heights;
+      break;
+
+    case PS_DICT_STEM_SNAP_V:
+      if ( idx < type1->private_dict.num_snap_heights )
+      {
+        retval = sizeof ( type1->private_dict.snap_heights[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.snap_heights[idx];
+      }
+      break;
+
+    case PS_DICT_RND_STEM_UP:
+      retval = sizeof ( type1->private_dict.round_stem_up );
+      if ( value && value_len >= retval )
+        *((FT_Bool *)value) = type1->private_dict.round_stem_up;
+      break;
+
+    case PS_DICT_FORCE_BOLD:
+      retval = sizeof ( type1->private_dict.force_bold );
+      if ( value && value_len >= retval )
+        *((FT_Bool *)value) = type1->private_dict.force_bold;
+      break;
+
+    case PS_DICT_MIN_FEATURE:
+      if ( idx < sizeof ( type1->private_dict.min_feature ) /
+                   sizeof ( type1->private_dict.min_feature[0] ) )
+      {
+        retval = sizeof ( type1->private_dict.min_feature[idx] );
+        if ( value && value_len >= retval )
+          *((FT_Short *)value) = type1->private_dict.min_feature[idx];
+      }
+      break;
+
+    case PS_DICT_LEN_IV:
+      retval = sizeof ( type1->private_dict.lenIV );
+      if ( value && value_len >= retval )
+        *((FT_Int *)value) = type1->private_dict.lenIV;
+      break;
+
+    case PS_DICT_PASSWORD:
+      retval = sizeof ( type1->private_dict.password );
+      if ( value && value_len >= retval )
+        *((FT_Long *)value) = type1->private_dict.password;
+      break;
+
+    case PS_DICT_LANGUAGE_GROUP:
+      retval = sizeof ( type1->private_dict.language_group );
+      if ( value && value_len >= retval )
+        *((FT_Long *)value) = type1->private_dict.language_group;
+      break;
+
+    case PS_DICT_IS_FIXED_PITCH:
+      retval = sizeof ( type1->font_info.is_fixed_pitch );
+      if ( value && value_len >= retval )
+        *((FT_Bool *)value) = type1->font_info.is_fixed_pitch;
+      break;
+
+    case PS_DICT_UNDERLINE_POSITION:
+      retval = sizeof ( type1->font_info.underline_position );
+      if ( value && value_len >= retval )
+        *((FT_Short *)value) = type1->font_info.underline_position;
+      break;
+
+    case PS_DICT_UNDERLINE_THICKNESS:
+      retval = sizeof ( type1->font_info.underline_thickness );
+      if ( value && value_len >= retval )
+        *((FT_UShort *)value) = type1->font_info.underline_thickness;
+      break;
+
+    case PS_DICT_FS_TYPE:
+      retval = sizeof ( type1->font_extra.fs_type );
+      if ( value && value_len >= retval )
+        *((FT_UShort *)value) = type1->font_extra.fs_type;
+      break;
+
+    case PS_DICT_VERSION:
+      retval = ft_strlen( type1->font_info.version ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.version ), retval );
+      break;
+
+    case PS_DICT_NOTICE:
+      retval = ft_strlen( type1->font_info.notice ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.notice ), retval );
+      break;
+
+    case PS_DICT_FULL_NAME:
+      retval = ft_strlen( type1->font_info.full_name ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.full_name ), retval );
+      break;
+
+    case PS_DICT_FAMILY_NAME:
+      retval = ft_strlen( type1->font_info.family_name ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.family_name ), retval );
+      break;
+
+    case PS_DICT_WEIGHT:
+      retval = ft_strlen( type1->font_info.weight ) + 1;
+      if ( value && value_len >= retval )
+        ft_memcpy( value, (void *)( type1->font_info.weight ), retval );
+      break;
+
+    case PS_DICT_ITALIC_ANGLE:
+      retval = sizeof ( type1->font_info.italic_angle );
+      if ( value && value_len >= retval )
+        *((FT_Long *)value) = type1->font_info.italic_angle;
+      break;
+    }
+
+    return retval == 0 ? -1 : (FT_Long)retval;
+d176 4
+a179 5
+    (PS_GetFontInfoFunc)   t1_ps_get_font_info,    /* ps_get_font_info    */
+    (PS_GetFontExtraFunc)  t1_ps_get_font_extra,   /* ps_get_font_extra   */
+    (PS_HasGlyphNamesFunc) t1_ps_has_glyph_names,  /* ps_has_glyph_names  */
+    (PS_GetFontPrivateFunc)t1_ps_get_font_private, /* ps_get_font_private */
+    (PS_GetFontValueFunc)  t1_ps_get_font_value,   /* ps_get_font_value   */
+d186 1
+a186 1
+    T1_Get_Track_Kerning,       /* get_track */
+d200 1
+a200 1
+    { FT_SERVICE_ID_FONT_FORMAT,          FT_FONT_FORMAT_TYPE_1 },
+d214 2
+a215 2
+  FT_CALLBACK_DEF( FT_Module_Interface )
+  Get_Interface( FT_Module         module,
+d218 1
+a218 1
+    FT_UNUSED( module );
+d259 1
+a259 1
+  Get_Kerning( FT_Face     t1face,        /* T1_Face */
+a263 3
+    T1_Face  face = (T1_Face)t1face;
+
+
+d273 1
+a273 1
+    return FT_Err_Ok;
+d288 1
+a288 1
+      sizeof ( FT_DriverRec ),
+d294 1
+a294 1
+      NULL,    /* module-specific interface */
+d296 3
+a298 3
+      T1_Driver_Init,           /* FT_Module_Constructor  module_init   */
+      T1_Driver_Done,           /* FT_Module_Destructor   module_done   */
+      Get_Interface,            /* FT_Module_Requester    get_interface */
+d301 16
+a316 12
+    sizeof ( T1_FaceRec ),
+    sizeof ( T1_SizeRec ),
+    sizeof ( T1_GlyphSlotRec ),
+
+    T1_Face_Init,               /* FT_Face_InitFunc  init_face */
+    T1_Face_Done,               /* FT_Face_DoneFunc  done_face */
+    T1_Size_Init,               /* FT_Size_InitFunc  init_size */
+    T1_Size_Done,               /* FT_Size_DoneFunc  done_size */
+    T1_GlyphSlot_Init,          /* FT_Slot_InitFunc  init_slot */
+    T1_GlyphSlot_Done,          /* FT_Slot_DoneFunc  done_slot */
+
+    T1_Load_Glyph,              /* FT_Slot_LoadFunc  load_glyph */
+d319 2
+a320 2
+    NULL,                       /* FT_Face_GetKerningFunc   get_kerning  */
+    NULL,                       /* FT_Face_AttachFunc       attach_file  */
+d322 2
+a323 2
+    Get_Kerning,                /* FT_Face_GetKerningFunc   get_kerning  */
+    T1_Read_Metrics,            /* FT_Face_AttachFunc       attach_file  */
+d325 3
+a327 4
+    T1_Get_Advances,            /* FT_Face_GetAdvancesFunc  get_advances */
+
+    T1_Size_Request,            /* FT_Size_RequestFunc  request_size */
+    NULL                        /* FT_Size_SelectFunc   select_size  */
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

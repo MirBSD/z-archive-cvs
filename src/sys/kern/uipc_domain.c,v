@@ -1,0 +1,564 @@
+head	1.3;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.2
+	MIRBSD_10:1.3.0.4
+	MIRBSD_10_BASE:1.3
+	MIRBSD_9_BASE:1.3
+	MIRBSD_8:1.3.0.2
+	MIRBSD_8_BASE:1.3
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2005.07.07.14.39.26;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	61cf42cd3eb15e48;
+
+1.2
+date	2005.03.06.21.28.03;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.28.54;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.28.54;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.07.14.35.41;	author tg;	state Exp;
+branches;
+next	;
+commitid	30a642cd3dcd4cb0;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@/**	$MirOS: src/sys/kern/uipc_domain.c,v 1.2 2005/03/06 21:28:03 tg Exp $ */
+/*	$OpenBSD: uipc_domain.c,v 1.23 2005/06/08 06:18:54 henning Exp $	*/
+/*	$NetBSD: uipc_domain.c,v 1.14 1996/02/09 19:00:44 christos Exp $	*/
+
+/*
+ * Copyright (c) 1982, 1986, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@@(#)uipc_domain.c	8.2 (Berkeley) 10/18/93
+ */
+
+#include <sys/param.h>
+#include <sys/socket.h>
+#include <sys/protosw.h>
+#include <sys/domain.h>
+#include <sys/mbuf.h>
+#include <sys/time.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+#include <sys/proc.h>
+#include <uvm/uvm_extern.h>
+#include <sys/sysctl.h>
+#include <sys/timeout.h>
+
+#include "bpfilter.h"
+
+struct	domain *domains;
+
+void		pffasttimo(void *);
+void		pfslowtimo(void *);
+struct domain *	pffinddomain(int);
+
+#if defined (KEY) || defined (IPSEC)
+int pfkey_init(void);
+#endif /* KEY || IPSEC */
+
+#define	ADDDOMAIN(x)	{ \
+	extern struct domain __CONCAT(x,domain); \
+	__CONCAT(x,domain.dom_next) = domains; \
+	domains = &__CONCAT(x,domain); \
+}
+
+void
+domaininit(void)
+{
+	struct domain *dp;
+	struct protosw *pr;
+	static struct timeout pffast_timeout;
+	static struct timeout pfslow_timeout;
+
+#undef unix
+	/*
+	 * KAME NOTE: ADDDOMAIN(route) is moved to the last part so that
+	 * it will be initialized as the *first* element.  confusing!
+	 */
+#ifndef lint
+	ADDDOMAIN(unix);
+#ifdef INET
+	ADDDOMAIN(inet);
+#endif
+#ifdef INET6
+	ADDDOMAIN(inet6);
+#endif /* INET6 */
+#if defined (KEY) || defined (IPSEC)
+	pfkey_init();
+#endif /* KEY || IPSEC */
+#ifdef IPX
+	ADDDOMAIN(ipx);
+#endif
+#ifdef NETATALK
+	ADDDOMAIN(atalk);
+#endif
+#ifdef NATM
+	ADDDOMAIN(natm);
+#endif
+#ifdef IPSEC
+#ifdef __KAME__
+	ADDDOMAIN(key);
+#endif
+#endif
+	ADDDOMAIN(route);
+#endif
+
+	for (dp = domains; dp; dp = dp->dom_next) {
+		if (dp->dom_init)
+			(*dp->dom_init)();
+		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
+			if (pr->pr_init)
+				(*pr->pr_init)();
+	}
+
+	if (max_linkhdr < 16)		/* XXX */
+		max_linkhdr = 16;
+	max_hdr = max_linkhdr + max_protohdr;
+	max_datalen = MHLEN - max_hdr;
+	timeout_set(&pffast_timeout, pffasttimo, &pffast_timeout);
+	timeout_set(&pfslow_timeout, pfslowtimo, &pfslow_timeout);
+	timeout_add(&pffast_timeout, 1);
+	timeout_add(&pfslow_timeout, 1);
+}
+
+struct domain *
+pffinddomain(int family)
+{
+	struct domain *dp;
+
+	for (dp = domains; dp != NULL; dp = dp->dom_next)
+		if (dp->dom_family == family)
+			return (dp);
+	return (NULL);
+}
+
+struct protosw *
+pffindtype(int family, int type)
+{
+	struct domain *dp;
+	struct protosw *pr;
+
+	dp = pffinddomain(family);
+	if (dp == NULL)
+		return (NULL);
+
+	for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
+		if (pr->pr_type && pr->pr_type == type)
+			return (pr);
+	return (NULL);
+}
+
+struct protosw *
+pffindproto(int family, int protocol, int type)
+{
+	struct domain *dp;
+	struct protosw *pr;
+	struct protosw *maybe = NULL;
+
+	if (family == 0)
+		return (NULL);
+
+	dp = pffinddomain(family);
+	if (dp == NULL)
+		return (NULL);
+
+	for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++) {
+		if ((pr->pr_protocol == protocol) && (pr->pr_type == type))
+			return (pr);
+
+		if (type == SOCK_RAW && pr->pr_type == SOCK_RAW &&
+		    pr->pr_protocol == 0 && maybe == NULL)
+			maybe = pr;
+	}
+	return (maybe);
+}
+
+int
+net_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen, struct proc *p)
+{
+	struct domain *dp;
+	struct protosw *pr;
+	int family, protocol;
+
+	/*
+	 * All sysctl names at this level are nonterminal.
+	 * Usually: next two components are protocol family and protocol
+	 *	number, then at least one addition component.
+	 */
+	if (namelen < 2)
+		return (EISDIR);		/* overloaded */
+	family = name[0];
+
+	if (family == 0)
+		return (0);
+#if NBPFILTER > 0
+	if (family == PF_BPF)
+		return (bpf_sysctl(name + 1, namelen - 1, oldp, oldlenp,
+		    newp, newlen));
+#endif
+	dp = pffinddomain(family);
+	if (dp == NULL)
+		return (ENOPROTOOPT);
+
+	if (namelen < 3)
+		return (EISDIR);		/* overloaded */
+	protocol = name[1];
+	for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
+		if (pr->pr_protocol == protocol && pr->pr_sysctl)
+			return ((*pr->pr_sysctl)(name + 2, namelen - 2,
+			    oldp, oldlenp, newp, newlen));
+	return (ENOPROTOOPT);
+}
+
+void
+pfctlinput(int cmd, struct sockaddr *sa)
+{
+	struct domain *dp;
+	struct protosw *pr;
+
+	for (dp = domains; dp; dp = dp->dom_next)
+		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
+			if (pr->pr_ctlinput)
+				(*pr->pr_ctlinput)(cmd, sa, NULL);
+}
+
+void
+pfslowtimo(void *arg)
+{
+	struct timeout *to = (struct timeout *)arg;
+	struct domain *dp;
+	struct protosw *pr;
+
+	for (dp = domains; dp; dp = dp->dom_next)
+		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
+			if (pr->pr_slowtimo)
+				(*pr->pr_slowtimo)();
+	timeout_add(to, hz/2);
+}
+
+void
+pffasttimo(void *arg)
+{
+	struct timeout *to = (struct timeout *)arg;
+	struct domain *dp;
+	struct protosw *pr;
+
+	for (dp = domains; dp; dp = dp->dom_next)
+		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
+			if (pr->pr_fasttimo)
+				(*pr->pr_fasttimo)();
+	timeout_add(to, hz/5);
+}
+@
+
+
+1.2
+log
+@* merge src/sys/
+  (at least the better part of it)
+* revert IPv6 networking to OpenBSD, since
+  I didn't get IPV4_MAPPED addresses working :(
+@
+text
+@d1 2
+a2 2
+/**	$MirOS$ */
+/*	$OpenBSD: uipc_domain.c,v 1.17 2004/04/01 23:56:05 tedu Exp $	*/
+d53 4
+a56 2
+void	pffasttimo(void *);
+void	pfslowtimo(void *);
+d68 1
+a68 1
+domaininit()
+d116 2
+a117 2
+if (max_linkhdr < 16)		/* XXX */
+max_linkhdr = 16;
+d126 2
+a127 3
+struct protosw *
+pffindtype(family, type)
+	int family, type;
+d129 1
+a129 2
+	register struct domain *dp;
+	register struct protosw *pr;
+d131 1
+a131 1
+	for (dp = domains; dp; dp = dp->dom_next)
+d133 1
+a133 1
+			goto found;
+d135 12
+a146 1
+found:
+d154 1
+a154 2
+pffindproto(family, protocol, type)
+	int family, protocol, type;
+d156 2
+a157 2
+	register struct domain *dp;
+	register struct protosw *pr;
+d162 5
+a166 5
+	for (dp = domains; dp; dp = dp->dom_next)
+		if (dp->dom_family == family)
+			goto found;
+	return (NULL);
+found:
+d172 1
+a172 1
+		    pr->pr_protocol == 0 && maybe == (struct protosw *)0)
+d179 2
+a180 8
+net_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
+	int *name;
+	u_int namelen;
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+	struct proc *p;
+d182 2
+a183 2
+	register struct domain *dp;
+	register struct protosw *pr;
+d188 1
+a188 3
+	 * PF_KEY: next component is protocol family, and then at least one
+	 *	additional component.
+	 * usually: next two components are protocol family and protocol
+a196 3
+	for (dp = domains; dp; dp = dp->dom_next)
+		if (dp->dom_family == family)
+			goto found;
+d202 2
+a203 10
+	return (ENOPROTOOPT);
+found:
+	switch (family) {
+#ifdef IPSEC
+#ifdef __KAME__
+	case PF_KEY:
+		pr = dp->dom_protosw;
+		if (pr->pr_sysctl)
+			return ((*pr->pr_sysctl)(name + 1, namelen - 1,
+				oldp, oldlenp, newp, newlen));
+d205 1
+a205 5
+#endif
+#endif
+	default:
+		break;
+	}
+d217 1
+a217 3
+pfctlinput(cmd, sa)
+	int cmd;
+	struct sockaddr *sa;
+d219 2
+a220 2
+	register struct domain *dp;
+	register struct protosw *pr;
+d229 1
+a229 2
+pfslowtimo(arg)
+	void *arg;
+d243 1
+a243 2
+pffasttimo(arg)
+	void *arg;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a94 9
+#ifdef NS
+	ADDDOMAIN(ns);
+#endif
+#ifdef ISO
+	ADDDOMAIN(iso);
+#endif
+#ifdef CCITT
+	ADDDOMAIN(ccitt);
+#endif
+a97 6
+#ifdef notdef /* XXXX */
+#include "imp.h"
+#if NIMP > 0
+	ADDDOMAIN(imp);
+#endif
+#endif
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@merge some more stuff
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: uipc_domain.c,v 1.23 2005/06/08 06:18:54 henning Exp $	*/
+d52 2
+a53 4
+void		pffasttimo(void *);
+void		pfslowtimo(void *);
+struct domain *	pffinddomain(int);
+
+d65 1
+a65 1
+domaininit(void)
+d94 9
+d128 2
+a129 2
+	if (max_linkhdr < 16)		/* XXX */
+		max_linkhdr = 16;
+d138 3
+a140 2
+struct domain *
+pffinddomain(int family)
+d142 2
+a143 1
+	struct domain *dp;
+d145 1
+a145 1
+	for (dp = domains; dp != NULL; dp = dp->dom_next)
+d147 1
+a147 1
+			return (dp);
+d149 1
+a149 12
+}
+
+struct protosw *
+pffindtype(int family, int type)
+{
+	struct domain *dp;
+	struct protosw *pr;
+
+	dp = pffinddomain(family);
+	if (dp == NULL)
+		return (NULL);
+
+d157 2
+a158 1
+pffindproto(int family, int protocol, int type)
+d160 2
+a161 2
+	struct domain *dp;
+	struct protosw *pr;
+d166 5
+a170 5
+
+	dp = pffinddomain(family);
+	if (dp == NULL)
+		return (NULL);
+
+d176 1
+a176 1
+		    pr->pr_protocol == 0 && maybe == NULL)
+d183 8
+a190 2
+net_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen, struct proc *p)
+d192 2
+a193 2
+	struct domain *dp;
+	struct protosw *pr;
+d198 3
+a200 1
+	 * Usually: next two components are protocol family and protocol
+d209 3
+d217 10
+a226 2
+	dp = pffinddomain(family);
+	if (dp == NULL)
+d228 5
+a232 1
+
+d244 3
+a246 1
+pfctlinput(int cmd, struct sockaddr *sa)
+d248 2
+a249 2
+	struct domain *dp;
+	struct protosw *pr;
+d258 2
+a259 1
+pfslowtimo(void *arg)
+d273 2
+a274 1
+pffasttimo(void *arg)
+@
+

@@ -1,0 +1,247 @@
+head	1.7;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.7
+date	2017.06.26.00.23.47;	author tg;	state dead;
+branches;
+next	1.6;
+commitid	100595054242F31B4E9;
+
+1.6
+date	2014.07.03.16.31.06;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10053B5855A68C8AE4D;
+
+1.5
+date	2012.06.24.14.13.42;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004FE720AB303C6DEE;
+
+1.4
+date	2012.06.24.14.10.16;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004FE71FCE3E4CABEF;
+
+1.3
+date	2012.06.24.13.21.16;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004FE7145F324AA413;
+
+1.2
+date	2012.06.24.13.09.03;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004FE7117B264CD6AD;
+
+1.1
+date	2012.06.24.12.45.45;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004FE70C0A00706F23;
+
+
+desc
+@@
+
+
+1.7
+log
+@stop keeping this in CVS
+@
+text
+@#!/usr/bin/make -f
+# $MirOS: contrib/hosted/tg/deb/mirsirc/debian/rules,v 1.6 2014/07/03 16:31:06 tg Exp $
+
+build build-arch:
+
+build-indep: debian/dsircp
+
+debian/dsircp: dsircp
+	v=$$(dpkg-parsechangelog | while read x y; do \
+		test x"$$x" = x"Version:" || continue; \
+		echo "$$y"; \
+		break; \
+	done) && test -n "$$v" && sed \
+	    -e 'sMirPorts-@@DIST_DATE@@MirDebian-'"$$v"'' \
+	    -e 's@@PREFIX@@/usr' <dsircp >debian/dsircp~
+	mv debian/dsircp~ debian/dsircp
+
+clean:
+	# goodbye dh_testdir
+	test -f dsircp
+	test -x debian/rules
+	-rm -rf debian/B debian/mirsirc debian/dsircp*
+	# goodbye dh_clean
+	-rm -f debian/files debian/substvars
+
+binary-arch: build-arch
+
+binary-indep: build-indep
+	# goodbye dh_testdir
+	test -f dsircp
+	test -x debian/rules
+	# goodbye dh_prep
+	-rm -f debian/files debian/substvars
+	# goodbye dh_installdirs
+	-rm -rf debian/mirsirc
+	mkdir -p debian/mirsirc/usr/bin debian/mirsirc/usr/share/doc/mirsirc \
+	    debian/mirsirc/usr/share/man/man1 debian/mirsirc/usr/share/menu \
+	    debian/mirsirc/usr/share/sirc
+	# goodbye dh_installchangelogs
+	cp -a debian/changelog \
+	    debian/mirsirc/usr/share/doc/mirsirc/changelog.Debian
+	gzip -n9 debian/mirsirc/usr/share/doc/mirsirc/changelog.Debian
+	# goodbye dh_installdocs
+	cp -a debian/copyright debian/mirsirc/usr/share/doc/mirsirc/copyright
+	cp -a PROGRAMMING README README.socks \
+	    debian/mirsirc/usr/share/doc/mirsirc/
+	cd debian/mirsirc/usr/share/doc/mirsirc && \
+	    for i in PROGRAMMING README README.socks; do \
+		gzip -n9 $$i; \
+	done
+	# goodbye dh_install
+	cp debian/dsircp sirc debian/mirsirc/usr/bin/
+	cp n0thing.pl sirc.help socks.pl debian/mirsirc/usr/share/sirc/
+	# goodbye dh_installmenu
+	cp -a debian/menu debian/mirsirc/usr/share/menu/mirsirc
+	# goodbye dh_installman
+	cp -a sirc.1 debian/mirsirc/usr/share/man/man1/
+	gzip -n9 debian/mirsirc/usr/share/man/man1/sirc.1
+	ln -s sirc.1.gz debian/mirsirc/usr/share/man/man1/dsircp.1.gz
+	# goodbye dh_fixperms
+	chmod 644 $$(find debian/mirsirc -type f)
+	chmod 755 $$(find debian/mirsirc -type d) \
+	    debian/mirsirc/usr/bin/dsircp debian/mirsirc/usr/bin/sirc
+	# goodbye dh_installdeb
+	-rm -rf debian/B
+	mkdir -p debian/mirsirc/DEBIAN debian/B/c
+	cd debian && cp -a postinst postrm prerm B/c/
+	# goodbye dh_gencontrol
+	dpkg-gencontrol -pmirsirc -Pdebian/mirsirc -isp
+	mv debian/mirsirc/DEBIAN/control debian/B/c/
+	rm -rf debian/mirsirc/DEBIAN
+	# backwards-compatible way to set Multi-Arch
+	printf '/^Architecture: /a\n%s\n.\nw\nq\n' 'Multi-Arch: foreign' | \
+	    ed -s debian/B/c/control
+	# goodbye dh_md5sums
+	(cd debian/mirsirc && find . -type f | sed s,^./,, | sort | \
+	    xargs md5sum) >debian/B/c/md5sums
+	# goodbye dh_builddeb
+	(cd debian/mirsirc && find . | sort | paxcpio \
+	    -oC512 -Hustar -Minodes -Mlinks -Muidgid -Mgslash) | \
+	    gzip -n9 >debian/B/data.tar.gz
+	cd debian/B/c && chmod 644 * && chmod 755 postinst postrm prerm
+	(cd debian/B/c && find . | sort | paxcpio \
+	    -oC512 -Hustar -Minodes -Mlinks -Muidgid -Mgslash) | \
+	    gzip -n9 >debian/B/control.tar.gz
+	echo 2.0 >debian/B/debian-binary
+	read fn rest <debian/files && cd debian/B && \
+	    paxtar -A -M dist -cf "../../../$$fn" \
+	    debian-binary control.tar.gz data.tar.gz
+
+binary: binary-indep binary-arch
+.PHONY: binary binary-arch binary-indep build build-arch build-indep clean
+@
+
+
+1.6
+log
+@no idea why this is floating around here… prolly for the next update…
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/deb/mirsirc/debian/rules,v 1.5 2012/06/24 14:13:42 tg Exp $
+@
+
+
+1.5
+log
+@fix pasto
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/deb/mirsirc/debian/rules,v 1.4 2012/06/24 14:10:16 tg Exp $
+d13 3
+a15 2
+	done) && test -n "$$v" && \
+	    sed "s#@@@@VERSION@@@@#$$v#" <dsircp >debian/dsircp~
+@
+
+
+1.4
+log
+@add menu and irc(1) alternative like sirc from stock Debian
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/deb/mirsirc/debian/rules,v 1.3 2012/06/24 13:21:16 tg Exp $
+d66 1
+a66 3
+	set -e; for f in postinst postrm prerm; do \
+		cp -a debian/mksh.$$f debian/B/c/$$f; \
+	done
+@
+
+
+1.3
+log
+@oops, install the right thing
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/deb/mirsirc/debian/rules,v 1.2 2012/06/24 13:09:03 tg Exp $
+d36 2
+a37 1
+	    debian/mirsirc/usr/share/man/man1 debian/mirsirc/usr/share/sirc
+d53 2
+d66 3
+d83 1
+a83 1
+	cd debian/B/c && chmod 644 *
+@
+
+
+1.2
+log
+@pimp the version branding and fix etch compatibility
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/deb/mirsirc/debian/rules,v 1.1 2012/06/24 12:45:45 tg Exp $
+d50 1
+a50 1
+	cp dsircp sirc debian/mirsirc/usr/bin/
+@
+
+
+1.1
+log
+@initial packaging attempt
+@
+text
+@d2 1
+a2 3
+# $MirOS: contrib/hosted/tg/deb/ssfe/debian/rules,v 1.3 2012/06/23 16:39:53 tg Exp $
+#-
+# Remember to update the Debian $version in dsircp as inline patch!
+d4 12
+a15 1
+build build-arch build-indep:
+d21 1
+a21 1
+	-rm -rf debian/B debian/mirsirc
+@
+

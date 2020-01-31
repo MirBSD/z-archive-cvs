@@ -1,0 +1,307 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_10:1.1.1.3.0.4
+	MIRBSD_10_BASE:1.1.1.3
+	MIRBSD_9_BASE:1.1.1.3
+	MIRBSD_8:1.1.1.3.0.2
+	MIRBSD_8_BASE:1.1.1.3
+	cvs-200509212000:1.1.1.3
+	cvs-200507211800:1.1.1.2
+	cvs-200504170300:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2009.11.09.21.30.56;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004AF88A0F18F30769;
+
+1.1
+date	2005.02.05.17.25.01;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.01;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.53.25;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2005.09.21.20.34.32;	author tg;	state Exp;
+branches;
+next	;
+commitid	20cd4331c3c732a2;
+
+
+desc
+@@
+
+
+1.2
+log
+@fix __CRAZY=Yes build (or work around bugs we can’t fix atm)
+@
+text
+@/*	$OpenBSD: difftime.c,v 1.9 2005/08/08 08:05:38 espie Exp $ */
+/*
+** This file is in the public domain, so clarified as of
+** 1996-06-05 by Arthur David Olson.
+*/
+
+/*LINTLIBRARY*/
+
+#include "private.h"	/* for time_t, TYPE_INTEGRAL, and TYPE_SIGNED */
+
+__RCSID("$MirOS$");
+
+double
+difftime(const time_t time1, const time_t time0)
+{
+	/*
+	** If (sizeof (double) > sizeof (time_t)) simply convert and subtract
+	** (assuming that the larger type has more precision).
+	** This is the common real-world case circa 2004.
+	*/
+	if (sizeof (double) > sizeof (time_t))
+		return (double) time1 - (double) time0;
+	if (!TYPE_INTEGRAL(time_t)) {
+		/*
+		** time_t is floating.
+		*/
+		return time1 - time0;
+	}
+	if (!TYPE_SIGNED(time_t)) {
+		/*
+		** time_t is integral and unsigned.
+		** The difference of two unsigned values can't overflow
+		** if the minuend is greater than or equal to the subtrahend.
+		*/
+		if (time1 >= time0)
+			return time1 - time0;
+		else	return -((double) (time0 - time1));
+	}
+	/*
+	** time_t is integral and signed.
+	** Handle cases where both time1 and time0 have the same sign
+	** (meaning that their difference cannot overflow).
+	*/
+	if ((time1 < 0) == (time0 < 0))
+		return time1 - time0;
+	/*
+	** time1 and time0 have opposite signs.
+	** Punt if unsigned long is too narrow.
+	*/
+	if (sizeof (unsigned long) < sizeof (time_t))
+		return (double) time1 - (double) time0;
+	/*
+	** Stay calm...decent optimizers will eliminate the complexity below.
+	*/
+	if (time1 >= 0 /* && time0 < 0 */)
+		return (unsigned long) time1 +
+			(unsigned long) (-(time0 + 1)) + 1;
+	return -(double) ((unsigned long) time0 +
+		(unsigned long) (-(time1 + 1)) + 1);
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d4 1
+a4 1
+** June 5, 1996 by Arthur David Olson (arthur_david_olson@@nih.gov).
+a6 5
+#if defined(LIBC_SCCS) && !defined(lint) && !defined(NOID)
+static char elsieid[] = "@@(#)difftime.c	7.9";
+static char rcsid[] = "$OpenBSD: difftime.c,v 1.6 2002/04/04 19:12:09 millert Exp $";
+#endif /* LIBC_SCCS and not lint */
+
+d9 1
+a9 1
+#include "private.h"
+d11 1
+a11 10
+/*
+** Algorithm courtesy Paul Eggert (eggert@@twinsun.com).
+*/
+
+#ifdef HAVE_LONG_DOUBLE
+#define long_double	long double
+#endif /* defined HAVE_LONG_DOUBLE */
+#ifndef HAVE_LONG_DOUBLE
+#define long_double	double
+#endif /* !defined HAVE_LONG_DOUBLE */
+d14 1
+a14 3
+difftime(time1, time0)
+const time_t	time1;
+const time_t	time0;
+d16 22
+a37 12
+	time_t	delta;
+	time_t	hibit;
+
+	{
+		time_t		tt;
+		double		d;
+		long_double	ld;
+
+		if (sizeof tt < sizeof d)
+			return (double) time1 - (double) time0;
+		if (sizeof tt < sizeof ld)
+			return (long_double) time1 - (long_double) time0;
+a38 2
+	if (time1 < time0)
+		return -difftime(time0, time1);
+d40 3
+a42 2
+	** As much as possible, avoid loss of precision
+	** by computing the difference before converting to double.
+d44 2
+a45 3
+	delta = time1 - time0;
+	if (delta >= 0)
+		return delta;
+d47 2
+a48 1
+	** Repair delta overflow.
+d50 2
+a51 1
+	hibit = (~ (time_t) 0) << (TYPE_BIT(time_t) - 1);
+d53 1
+a53 22
+	** The following expression rounds twice, which means
+	** the result may not be the closest to the true answer.
+	** For example, suppose time_t is 64-bit signed int,
+	** long_double is IEEE 754 double with default rounding,
+	** time1 = 9223372036854775807 and time0 = -1536.
+	** Then the true difference is 9223372036854777343,
+	** which rounds to 9223372036854777856
+	** with a total error of 513.
+	** But delta overflows to -9223372036854774273,
+	** which rounds to -9223372036854774784, and correcting
+	** this by subtracting 2 * (long_double) hibit
+	** (i.e. by adding 2**64 = 18446744073709551616)
+	** yields 9223372036854776832, which
+	** rounds to 9223372036854775808
+	** with a total error of 1535 instead.
+	** This problem occurs only with very large differences.
+	** It's too painful to fix this portably.
+	** We are not alone in this problem;
+	** some C compilers round twice when converting
+	** large unsigned types to small floating types,
+	** so if time_t is unsigned the "return delta" above
+	** has the same double-rounding problem with those compilers.
+d55 5
+a59 1
+	return delta - 2 * (long_double) hibit;
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d3 1
+a3 1
+** 1996-06-05 by Arthur David Olson.
+d7 2
+a8 2
+static char elsieid[] = "@@(#)difftime.c	7.19";
+static char rcsid[] = "$OpenBSD: difftime.c,v 1.8 2005/07/19 15:51:29 millert Exp $";
+d13 12
+a24 1
+#include "private.h"	/* for time_t, TYPE_INTEGRAL, and TYPE_SIGNED */
+d31 12
+a42 22
+	/*
+	** If (sizeof (double) > sizeof (time_t)) simply convert and subtract
+	** (assuming that the larger type has more precision).
+	** This is the common real-world case circa 2004.
+	*/
+	if (sizeof (double) > sizeof (time_t))
+		return (double) time1 - (double) time0;
+	if (!TYPE_INTEGRAL(time_t)) {
+		/*
+		** time_t is floating.
+		*/
+		return time1 - time0;
+	}
+	if (!TYPE_SIGNED(time_t)) {
+		/*
+		** time_t is integral and unsigned.
+		** The difference of two unsigned values can't overflow
+		** if the minuend is greater than or equal to the subtrahend.
+		*/
+		if (time1 >= time0)
+			return time1 - time0;
+		else	return -((double) (time0 - time1));
+d44 2
+d47 2
+a48 3
+	** time_t is integral and signed.
+	** Handle cases where both time1 and time0 have the same sign
+	** (meaning that their difference cannot overflow).
+d50 3
+a52 2
+	if ((time1 < 0) == (time0 < 0))
+		return time1 - time0;
+d54 1
+a54 2
+	** time1 and time0 have opposite signs.
+	** Punt if unsigned long is too narrow.
+d56 1
+a56 2
+	if (sizeof (unsigned long) < sizeof (time_t))
+		return (double) time1 - (double) time0;
+d58 22
+a79 1
+	** Stay calm...decent optimizers will eliminate the complexity below.
+d81 1
+a81 5
+	if (time1 >= 0 /* && time0 < 0 */)
+		return (unsigned long) time1 +
+			(unsigned long) (-(time0 + 1)) + 1;
+	return -(double) ((unsigned long) time0 +
+		(unsigned long) (-(time1 + 1)) + 1);
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD's libc as of today, minus some of the locale stuff,
+and with brk malloc instead of mmap malloc
+@
+text
+@a0 1
+/*	$OpenBSD: difftime.c,v 1.9 2005/08/08 08:05:38 espie Exp $ */
+d6 5
+@
+
+

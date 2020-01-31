@@ -1,0 +1,964 @@
+head	1.11;
+access;
+symbols
+	cvs-201003062040:1.1.3.3
+	cvs-200810311900:1.1.3.2
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	cvs-200607051500:1.1.3.1
+	netbsd:1.1.3;
+locks; strict;
+comment	@ * @;
+
+
+1.11
+date	2010.03.06.23.24.16;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1004B92E431600E22B7;
+
+1.10
+date	2010.03.06.21.29.07;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004B92C8D37339B566;
+
+1.9
+date	2009.07.23.19.32.25;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004A68BAC01D44054A;
+
+1.8
+date	2009.07.03.19.20.11;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004A4E59A979CDE2D6;
+
+1.7
+date	2009.01.18.18.47.06;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100497378EC5AE2AFC1;
+
+1.6
+date	2008.10.31.23.04.08;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100490B8EF75D813E85;
+
+1.5
+date	2008.10.31.21.39.53;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100490B7B3B7628CEC8;
+
+1.4
+date	2008.10.31.20.35.40;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100490B6C2C36D8ABD0;
+
+1.3
+date	2008.10.31.19.11.34;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100490B58676FCB2D2F;
+
+1.2
+date	2006.09.21.20.16.23;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004512F320386F848A;
+
+1.1
+date	2006.07.05.15.08.37;	author tg;	state Exp;
+branches
+	1.1.3.1;
+next	;
+commitid	10044ABD6033365D559;
+
+1.1.3.1
+date	2006.07.05.15.08.37;	author tg;	state Exp;
+branches;
+next	1.1.3.2;
+commitid	10044ABD6033365D559;
+
+1.1.3.2
+date	2008.10.31.19.06.04;	author tg;	state Exp;
+branches;
+next	1.1.3.3;
+commitid	100490B57202F143953;
+
+1.1.3.3
+date	2010.03.06.20.44.40;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004B92BEC54F4CD073;
+
+
+desc
+@@
+
+
+1.11
+log
+@sync © lines
+@
+text
+@/*	$NetBSD: cd9660_write.c,v 1.12 2009/11/22 18:43:27 mbalmer Exp $	*/
+
+/*
+ * Copyright (c) 2009
+ *	Thorsten Glaser <tg@@mirbsd.org>
+ * Copyright (c) 2005 Daniel Watt, Walter Deignan, Ryan Gabrys, Alan
+ * Perez-Rathke and Ram Vedam.  All rights reserved.
+ *
+ * This code was written by Daniel Watt, Walter Deignan, Ryan Gabrys,
+ * Alan Perez-Rathke and Ram Vedam.
+ *
+ * Redistribution and use in source and binary forms, with or
+ * without modification, are permitted provided that the following
+ * conditions are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above
+ *    copyright notice, this list of conditions and the following
+ *    disclaimer in the documentation and/or other materials provided
+ *    with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY DANIEL WATT, WALTER DEIGNAN, RYAN
+ * GABRYS, ALAN PEREZ-RATHKE AND RAM VEDAM ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL DANIEL WATT, WALTER DEIGNAN, RYAN
+ * GABRYS, ALAN PEREZ-RATHKE AND RAM VEDAM BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE,DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
+ * OF SUCH DAMAGE.
+ */
+
+#include "cd9660.h"
+#include "iso9660_rrip.h"
+
+#include <sys/cdefs.h>
+#if defined(__RCSID) && !defined(__lint)
+__IDSTRING(mbsdid, "$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.10 2010/03/06 21:29:07 tg Exp $");
+__RCSID("$NetBSD: cd9660_write.c,v 1.12 2009/11/22 18:43:27 mbalmer Exp $");
+#endif  /* !__lint */
+
+#include <inttypes.h>
+
+static int cd9660_write_volume_descriptors(FILE *);
+static int cd9660_write_path_table(FILE *, int, int);
+static int cd9660_write_path_tables(FILE *);
+static int cd9660_write_file(FILE *, cd9660node *);
+static int cd9660_write_filedata(FILE *, int, const unsigned char *, int);
+#if 0
+static int cd9660_write_buffered(FILE *, int, int, const unsigned char*);
+#endif
+static void cd9660_write_rr(FILE *, cd9660node *, int, int);
+
+/*
+ * Write the image
+ * Writes the entire image
+ * @@param const char* The filename for the image
+ * @@returns int 1 on success, 0 on failure
+ */
+int
+cd9660_write_image(const char* image)
+{
+	FILE *fd;
+	int status;
+	char buf[2048];
+
+	if ((fd = fopen(image, "w+")) == NULL) {
+		err(EXIT_FAILURE, "%s: Can't open `%s' for writing", __func__,
+		    image);
+	}
+
+	if (diskStructure.verbose_level > 0)
+		printf("Writing image\n");
+
+	/* write padding first, it gets overwritten if we have none */
+	memset(buf, 0, 2048);
+	cd9660_write_filedata(fd, diskStructure.totalSectors - 1,
+	    (unsigned char *)buf, 1);
+
+	if (diskStructure.has_generic_bootimage) {
+		status = cd9660_copy_file(fd, 0,
+		    diskStructure.generic_bootimage);
+		if (status == 0) {
+			warnx("%s: Error writing generic boot image",
+			    __func__);
+			goto cleanup_bad_image;
+		}
+	}
+
+	/* Write the volume descriptors */
+	status = cd9660_write_volume_descriptors(fd);
+	if (status == 0) {
+		warnx("%s: Error writing volume descriptors to image",
+		    __func__);
+		goto cleanup_bad_image;
+	}
+
+	if (diskStructure.verbose_level > 0)
+		printf("Volume descriptors written\n");
+
+	/*
+	 * Write the path tables: there are actually four, but right
+	 * now we are only concearned with two.
+	 */
+	status = cd9660_write_path_tables(fd);
+	if (status == 0) {
+		warnx("%s: Error writing path tables to image", __func__);
+		goto cleanup_bad_image;
+	}
+
+	if (diskStructure.verbose_level > 0)
+		printf("Path tables written\n");
+
+	/* Write the directories and files */
+	status = cd9660_write_file(fd, diskStructure.rootNode);
+	if (status == 0) {
+		warnx("%s: Error writing files to image", __func__);
+		goto cleanup_bad_image;
+	}
+
+	if (diskStructure.is_bootable) {
+		cd9660_write_boot(fd);
+	}
+
+	if (diskStructure.verbose_level > 0)
+		printf("Files written\n");
+	fclose(fd);
+
+	if (diskStructure.verbose_level > 0)
+		printf("Image closed\n");
+	return 1;
+
+cleanup_bad_image:
+	fclose(fd);
+	if (!diskStructure.keep_bad_images)
+		unlink(image);
+	if (diskStructure.verbose_level > 0)
+		printf("Bad image cleaned up\n");
+	return 0;
+}
+
+static int
+cd9660_write_volume_descriptors(FILE *fd)
+{
+	volume_descriptor *vd_temp = diskStructure.firstVolumeDescriptor;
+	int pos;
+
+	while (vd_temp != NULL) {
+		pos = vd_temp->sector*diskStructure.sectorSize;
+		cd9660_write_filedata(fd, vd_temp->sector,
+		    vd_temp->volumeDescriptorData, 1);
+		vd_temp = vd_temp->next;
+	}
+	return 1;
+}
+
+/*
+ * Write out an individual path table
+ * Used just to keep redundant code to a minimum
+ * @@param FILE *fd Valid file pointer
+ * @@param int Sector to start writing path table to
+ * @@param int Endian mode : BIG_ENDIAN or LITTLE_ENDIAN
+ * @@returns int 1 on success, 0 on failure
+ */
+static int
+cd9660_write_path_table(FILE *fd, int sector, int mode)
+{
+	int path_table_sectors = CD9660_BLOCKS(diskStructure.sectorSize,
+	    diskStructure.pathTableLength);
+	unsigned char *buffer;
+	unsigned char *buffer_head;
+	int len;
+	path_table_entry temp_entry;
+	cd9660node *ptcur;
+
+	buffer = calloc(diskStructure.sectorSize, path_table_sectors);
+	if (buffer == NULL) {
+		warnx("%s: Memory allocation error allocating buffer",
+		    __func__);
+		return 0;
+	}
+	buffer_head = buffer;
+
+	ptcur = diskStructure.rootNode;
+
+	while (ptcur != NULL) {
+		memset(&temp_entry, 0, sizeof(path_table_entry));
+		temp_entry.length[0] = ptcur->isoDirRecord->name_len[0];
+		temp_entry.extended_attribute_length[0] =
+		    ptcur->isoDirRecord->ext_attr_length[0];
+		memcpy(temp_entry.name, ptcur->isoDirRecord->name,
+		    temp_entry.length[0] + 1);
+
+		/* round up */
+		len = temp_entry.length[0] + 8 + (temp_entry.length[0] & 0x01);
+
+                /* todo: function pointers instead */
+		if (mode == LITTLE_ENDIAN) {
+			cd9660_731(ptcur->fileDataSector,
+			    temp_entry.first_sector);
+			cd9660_721((ptcur->parent == NULL ?
+				1 : ptcur->parent->ptnumber),
+			    temp_entry.parent_number);
+		} else {
+			cd9660_732(ptcur->fileDataSector,
+			    temp_entry.first_sector);
+			cd9660_722((ptcur->parent == NULL ?
+				1 : ptcur->parent->ptnumber),
+			    temp_entry.parent_number);
+		}
+
+
+		memcpy(buffer, &temp_entry, len);
+		buffer += len;
+
+		ptcur = ptcur->ptnext;
+	}
+
+	return cd9660_write_filedata(fd, sector, buffer_head,
+	    path_table_sectors);
+}
+
+
+/*
+ * Write out the path tables to disk
+ * Each file descriptor should be pointed to by the PVD, so we know which
+ * sector to copy them to. One thing to watch out for: the only path tables
+ * stored are in the endian mode that the application is compiled for. So,
+ * the first thing to do is write out that path table, then to write the one
+ * in the other endian mode requires to convert the endianness of each entry
+ * in the table. The best way to do this would be to create a temporary
+ * path_table_entry structure, then for each path table entry, copy it to
+ * the temporary entry, translate, then copy that to disk.
+ *
+ * @@param FILE* Valid file descriptor
+ * @@returns int 0 on failure, 1 on success
+ */
+static int
+cd9660_write_path_tables(FILE *fd)
+{
+	if (cd9660_write_path_table(fd,
+	    diskStructure.primaryLittleEndianTableSector, LITTLE_ENDIAN) == 0)
+		return 0;
+
+	if (cd9660_write_path_table(fd,
+	    diskStructure.primaryBigEndianTableSector, BIG_ENDIAN) == 0)
+		return 0;
+
+	/* @@TODO: handle remaining two path tables */
+	return 1;
+}
+
+/*
+ * Write a file to disk
+ * Writes a file, its directory record, and its data to disk
+ * This file is designed to be called RECURSIVELY, so initially call it
+ * with the root node. All of the records should store what sector the
+ * file goes in, so no computation should be  necessary.
+ *
+ * @@param int fd Valid file descriptor
+ * @@param struct cd9660node* writenode Pointer to the file to be written
+ * @@returns int 0 on failure, 1 on success
+ */
+static int
+cd9660_write_file(FILE *fd, cd9660node *writenode)
+{
+	char *buf;
+	char *temp_file_name;
+	int ret;
+	int working_sector;
+	int cur_sector_offset;
+	int written;
+	iso_directory_record_cd9660 temp_record;
+	cd9660node *temp;
+	int rv = 0;
+
+	/* Todo : clean up variables */
+
+	temp_file_name = calloc(1, CD9660MAXPATH + 1);
+	if (temp_file_name == NULL)
+		err(EXIT_FAILURE, "%s: malloc", __func__);
+
+	buf = malloc(diskStructure.sectorSize);
+	if (buf == NULL)
+		err(EXIT_FAILURE, "%s: malloc", __func__);
+
+	if ((writenode->level != 0) &&
+	    !(writenode->node->type & S_IFDIR)) {
+		fsinode *inode = writenode->node->inode;
+		/* Only attempt to write unwritten files that have length. */
+		if ((inode->flags & FI_WRITTEN) != 0) {
+			INODE_WARNX(("%s: skipping written inode %d", __func__,
+			    (int)inode->st.st_ino));
+		} else if (writenode->fileDataLength > 0) {
+			INODE_WARNX(("%s: writing inode %d blocks at %" PRIu32,
+			    __func__, (int)inode->st.st_ino, inode->ino));
+			inode->flags |= FI_WRITTEN;
+			cd9660_compute_full_filename(writenode,
+			    temp_file_name, CD9660MAXPATH + 1, 0);
+			ret = cd9660_copy_file(fd, writenode->fileDataSector,
+			    temp_file_name);
+			if (ret == 0)
+				goto out;
+		}
+	} else {
+		/*
+		 * Here is a new revelation that ECMA didnt explain
+		 * (at least not well).
+		 * ALL . and .. records store the name "\0" and "\1"
+		 * resepctively. So, for each directory, we have to
+		 * make a new node.
+		 *
+		 * This is where it gets kinda messy, since we have to
+		 * be careful of sector boundaries
+		 */
+		cur_sector_offset = 0;
+		working_sector = writenode->fileDataSector;
+		fseek(fd, working_sector * diskStructure.sectorSize, SEEK_SET);
+
+		/*
+		 * Now loop over children, writing out their directory
+		 * records - beware of sector boundaries
+	 	 */
+		TAILQ_FOREACH(temp, &writenode->cn_children, cn_next_child) {
+			/*
+			 * Copy the temporary record and adjust its size
+			 * if necessary
+			 */
+			memcpy(&temp_record, temp->isoDirRecord,
+			    sizeof(iso_directory_record_cd9660));
+
+			temp_record.length[0] =
+			    cd9660_compute_record_size(temp);
+
+			if (temp_record.length[0] + cur_sector_offset >=
+			    diskStructure.sectorSize) {
+				cur_sector_offset = 0;
+				working_sector++;
+
+				/* Seek to the next sector. */
+				fseek(fd,
+				    working_sector * diskStructure.sectorSize,
+				    SEEK_SET);
+			}
+			/* Write out the basic ISO directory record */
+			written = fwrite(&temp_record, 1,
+			    temp->isoDirRecord->length[0], fd);
+			if (diskStructure.rock_ridge_enabled) {
+				cd9660_write_rr(fd, temp,
+				    cur_sector_offset, working_sector);
+			}
+			fseek(fd,
+			    working_sector * diskStructure.sectorSize +
+			    cur_sector_offset + temp_record.length[0] -
+			    temp->su_tail_size,
+			    SEEK_SET);
+			if (temp->su_tail_size > 0)
+				fwrite(temp->su_tail_data, 1,
+				    temp->su_tail_size, fd);
+			if (ferror(fd)) {
+				warnx("%s: write error", __func__);
+				goto out;
+			}
+			cur_sector_offset += temp_record.length[0];
+
+		}
+
+		/*
+		 * Recurse on children.
+		 */
+		TAILQ_FOREACH(temp, &writenode->cn_children, cn_next_child) {
+			if ((ret = cd9660_write_file(fd, temp)) == 0)
+				goto out;
+		}
+	}
+	rv = 1;
+out:
+	free(temp_file_name);
+	free(buf);
+	return rv;
+}
+
+/*
+ * Wrapper function to write a buffer (one sector) to disk.
+ * Seeks and writes the buffer.
+ * NOTE: You dont NEED to use this function, but it might make your
+ * life easier if you have to write things that align to a sector
+ * (such as volume descriptors).
+ *
+ * @@param int fd Valid file descriptor
+ * @@param int sector Sector number to write to
+ * @@param const unsigned char* Buffer to write. This should be the
+ *                             size of a sector, and if only a portion
+ *                             is written, the rest should be set to 0.
+ */
+static int
+cd9660_write_filedata(FILE *fd, int sector, const unsigned char *buf,
+		      int numsecs)
+{
+	off_t curpos;
+	size_t success;
+
+	curpos = ftello(fd);
+
+	fseek(fd, sector * diskStructure.sectorSize, SEEK_SET);
+
+	success = fwrite(buf, diskStructure.sectorSize * numsecs, 1, fd);
+
+	fseek(fd, curpos, SEEK_SET);
+
+	if (success == 1)
+		success = diskStructure.sectorSize * numsecs;
+	return success;
+}
+
+#if 0
+static int
+cd9660_write_buffered(FILE *fd, int offset, int buff_len,
+		      const unsigned char* buffer)
+{
+	static int working_sector = -1;
+	static char buf[2048];
+
+	return 0;
+}
+#endif
+
+int
+cd9660_copy_file(FILE *fd, int start_sector, const char *filename)
+{
+	FILE *rf;
+	int bytes_read;
+	int sector = start_sector;
+	int buf_size = diskStructure.sectorSize;
+	char *buf;
+
+	buf = malloc(buf_size);
+	if (buf == NULL)
+		err(EXIT_FAILURE, "%s: malloc", __func__);
+
+	if ((rf = fopen(filename, "rb")) == NULL) {
+		warn("%s: cannot open %s", __func__, filename);
+		free(buf);
+		return 0;
+	}
+
+	if (diskStructure.verbose_level > 1)
+		printf("Writing file: %s\n",filename);
+
+	fseek(fd, start_sector * diskStructure.sectorSize, SEEK_SET);
+
+	while (!feof(rf)) {
+		bytes_read = fread(buf,1,buf_size,rf);
+		if (ferror(rf)) {
+			warn("%s: fread", __func__);
+			free(buf);
+			return 0;
+		}
+
+		fwrite(buf,1,bytes_read,fd);
+		if (ferror(fd)) {
+			warn("%s: fwrite", __func__);
+			free(buf);
+			return 0;
+		}
+		sector++;
+	}
+
+	fclose(rf);
+	free(buf);
+	return 1;
+}
+
+static void
+cd9660_write_rr(FILE *fd, cd9660node *writenode, int offset, int sector)
+{
+	int in_ca = 0;
+	struct ISO_SUSP_ATTRIBUTES *myattr;
+
+	offset += writenode->isoDirRecord->length[0];
+	fseek(fd, sector * diskStructure.sectorSize + offset, SEEK_SET);
+	/* Offset now points at the end of the record */
+	TAILQ_FOREACH(myattr, &writenode->head, rr_ll) {
+		fwrite(&(myattr->attr), CD9660_SUSP_ENTRY_SIZE(myattr), 1, fd);
+
+		if (!in_ca) {
+			offset += CD9660_SUSP_ENTRY_SIZE(myattr);
+			if (myattr->last_in_suf) {
+				/*
+				 * Point the offset to the start of this
+				 * record's CE area
+				 */
+				fseek(fd, (diskStructure.
+					susp_continuation_area_start_sector *
+					diskStructure.sectorSize)
+				    + writenode->susp_entry_ce_start,
+				    SEEK_SET);
+				in_ca = 1;
+			}
+		}
+	}
+	if (!in_ca && (offset & 1)) {
+		/* align to even size */
+		char x = 0;
+
+		fwrite(&x, 1, 1, fd);
+	}
+
+	/*
+	 * If we had to go to the continuation area, head back to
+	 * where we should be.
+	 */
+	if (in_ca)
+		fseek(fd, sector * diskStructure.sectorSize + offset, SEEK_SET);
+}
+@
+
+
+1.10
+log
+@merge and attempt to fix
+• cd9660/iso9660_rrip.c:cd9660_susp_handle_continuation_common() has
+  some different code for keeping track of working and placement of
+  the CE on the disc now but it looks as if it’s correct
+• I am fairly positive this doesn’t regress… but, alas, no guarantee
+@
+text
+@d4 2
+a5 1
+ * Copyright (c) 2009 Thorsten Glaser
+d42 1
+a42 1
+__IDSTRING(mbsdid, "$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.9 2009/07/23 19:32:25 tg Exp $");
+@
+
+
+1.9
+log
+@apply fixes, missing includes, and Debian compatibility glue to makefs(8);
+create an initial, experimental Debian source package for it for Luca Fav.
+@
+text
+@d1 1
+a1 2
+/**	$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.8 2009/07/03 19:20:11 tg Exp $ */
+/*	$NetBSD: cd9660_write.c,v 1.9 2008/05/10 19:00:07 skrll Exp $	*/
+d41 2
+a42 2
+__RCSID("$NetBSD: cd9660_write.c,v 1.9 2008/05/10 19:00:07 skrll Exp $");
+__IDSTRING(mbsdid, "$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.8 2009/07/03 19:20:11 tg Exp $");
+d55 1
+a55 1
+static int cd9660_write_rr(FILE *, cd9660node *, int, int);
+d278 1
+a278 1
+	int ca = 0, rv = 0;
+d348 3
+a350 4
+
+			written = fwrite(&temp_record, 1, temp_record.length[0],
+			    fd);
+			ca = 0;
+d352 1
+a352 1
+				ca = cd9660_write_rr(fd, temp,
+d355 8
+a362 1
+
+a368 10
+			/*
+			 * If we had to go the the continuation area,
+			 * head back to where we should be.
+			 */
+			if (ca) {
+				fseek(fd,
+				    working_sector * diskStructure.sectorSize +
+					cur_sector_offset,
+				    SEEK_SET);
+			}
+d477 1
+a477 1
+static int
+d484 1
+a484 1
+
+a486 3
+		fseek(fd,
+		    in_ca ? offset : sector*diskStructure.sectorSize + offset,
+		    SEEK_SET);
+a488 1
+		offset += CD9660_SUSP_ENTRY_SIZE(myattr);
+d490 2
+a491 2
+			if ((myattr->susp_type == SUSP_TYPE_SUSP) &&
+			    (myattr->entry_type == SUSP_ENTRY_SUSP_CE)) {
+d496 5
+a500 4
+				offset = (diskStructure.
+					  susp_continuation_area_start_sector *
+					    diskStructure.sectorSize)
+					+ writenode->susp_entry_ce_start;
+d512 6
+a517 1
+	return in_ca;
+@
+
+
+1.8
+log
+@move writing the padding (final sector) to the beginning, just after
+opening the image file, to not overwrite any fucking meaningful data
+when -o no-trailing-padding is used (in the rock ridge case, with my
+fixes, the SUSP continuation area; in the original NetBSD® crapware,
+or without RRIP, actual file data!)
+
+at least I think it doesn't miscalculate the image size at least for
+-t cd9660... at least I hope I'm right in this...
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.7 2009/01/18 18:47:06 tg Exp $ */
+d5 1
+d43 1
+a43 1
+__IDSTRING(mbsdid, "$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.7 2009/01/18 18:47:06 tg Exp $");
+d81 2
+a82 1
+	cd9660_write_filedata(fd, diskStructure.totalSectors - 1, buf, 1);
+@
+
+
+1.7
+log
+@fix another violation of ECMA 119 (ISO 9660):
+directory records must be a multiple of two octets; the system use area
+needs to be padded with a NUL byte to make it so (shortcut: the stuff
+_before_ the system use area is always even, so we “just” need to align
+the SUSP stuff with a NUL byte if needed)
+
+fixes the use of GNU GRUB 0.9x on our cd9660+RR images
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.6 2008/10/31 23:04:08 tg Exp $ */
+d42 1
+a42 1
+__IDSTRING(mbsdid, "$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.6 2008/10/31 23:04:08 tg Exp $");
+d78 4
+a126 4
+	/* Write padding bits. This is temporary */
+	memset(buf, 0, 2048);
+	cd9660_write_filedata(fd, diskStructure.totalSectors - 1, buf, 1);
+
+@
+
+
+1.6
+log
+@use calloc instead of malloc + memset
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.5 2008/10/31 21:39:53 tg Exp $ */
+d42 1
+a42 1
+__IDSTRING(mbsdid, "$MirOS: src/usr.sbin/makefs/cd9660/cd9660_write.c,v 1.5 2008/10/31 21:39:53 tg Exp $");
+d511 6
+@
+
+
+1.5
+log
+@kill strcat(3)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d42 1
+a42 1
+__IDSTRING(mbsdid, "$MirOS$");
+d178 1
+a178 1
+	buffer = malloc(diskStructure.sectorSize * path_table_sectors);
+a184 1
+	memset(buffer, 0, diskStructure.sectorSize * path_table_sectors);
+d281 1
+a281 1
+	temp_file_name = malloc(CD9660MAXPATH + 1);
+a284 2
+	memset(temp_file_name, 0, CD9660MAXPATH + 1);
+
+@
+
+
+1.4
+log
+@PRIu32 needs <inttypes.h>
+@
+text
+@d1 1
+d42 1
+d304 1
+a304 1
+			    temp_file_name, 0);
+@
+
+
+1.3
+log
+@bring MAIN branch into the pristine TNF state for reverse-merging
+@
+text
+@d43 2
+@
+
+
+1.2
+log
+@get rid of strcpy, strcat and sprintf
+XXX should add bounded attributes
+
+bad bad TNF
+@
+text
+@d1 1
+a1 1
+/*	$NetBSD: cd9660_write.c,v 1.8 2006/04/22 17:33:55 christos Exp $	*/
+d40 1
+a40 1
+__RCSID("$NetBSD: cd9660_write.c,v 1.8 2006/04/22 17:33:55 christos Exp $");
+d74 10
+d300 1
+a300 1
+			    temp_file_name, 0, CD9660MAXPATH + 1);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d290 1
+a290 1
+			    temp_file_name, 0);
+@
+
+
+1.1.3.1
+log
+@Time to hack on makefs, from TNF
+@
+text
+@@
+
+
+1.1.3.2
+log
+@Import NetBSD®-current (just after or at the 5.0 branch) makefs(8)
+and subtree required to build it in MirBSD
+@
+text
+@d1 1
+a1 1
+/*	$NetBSD: cd9660_write.c,v 1.9 2008/05/10 19:00:07 skrll Exp $	*/
+d40 1
+a40 1
+__RCSID("$NetBSD: cd9660_write.c,v 1.9 2008/05/10 19:00:07 skrll Exp $");
+a73 10
+	if (diskStructure.has_generic_bootimage) {
+		status = cd9660_copy_file(fd, 0,
+		    diskStructure.generic_bootimage);
+		if (status == 0) {
+			warnx("%s: Error writing generic boot image",
+			    __func__);
+			goto cleanup_bad_image;
+		}
+	}
+
+@
+
+
+1.1.3.3
+log
+@import newer makefs from TNF (with Acorn Archimedes support)
+@
+text
+@d1 1
+a1 1
+/*	$NetBSD: cd9660_write.c,v 1.12 2009/11/22 18:43:27 mbalmer Exp $	*/
+d40 1
+a40 1
+__RCSID("$NetBSD: cd9660_write.c,v 1.12 2009/11/22 18:43:27 mbalmer Exp $");
+d51 1
+a51 1
+static void cd9660_write_rr(FILE *, cd9660node *, int, int);
+d274 1
+a274 1
+	int rv = 0;
+d346 4
+a349 3
+			/* Write out the basic ISO directory record */
+			written = fwrite(&temp_record, 1,
+			    temp->isoDirRecord->length[0], fd);
+d351 1
+a351 1
+				cd9660_write_rr(fd, temp,
+d354 1
+a354 8
+			fseek(fd,
+			    working_sector * diskStructure.sectorSize +
+			    cur_sector_offset + temp_record.length[0] -
+			    temp->su_tail_size,
+			    SEEK_SET);
+			if (temp->su_tail_size > 0)
+				fwrite(temp->su_tail_data, 1,
+				    temp->su_tail_size, fd);
+d361 10
+d479 1
+a479 1
+static void
+d486 1
+a486 1
+	fseek(fd, sector * diskStructure.sectorSize + offset, SEEK_SET);
+d489 3
+d494 1
+d496 2
+a497 2
+			offset += CD9660_SUSP_ENTRY_SIZE(myattr);
+			if (myattr->last_in_suf) {
+d502 4
+a505 5
+				fseek(fd, (diskStructure.
+					susp_continuation_area_start_sector *
+					diskStructure.sectorSize)
+				    + writenode->susp_entry_ce_start,
+				    SEEK_SET);
+d511 1
+a511 6
+	/*
+	 * If we had to go to the continuation area, head back to
+	 * where we should be.
+	 */
+	if (in_ca)
+		fseek(fd, sector * diskStructure.sectorSize + offset, SEEK_SET);
+@
+
+

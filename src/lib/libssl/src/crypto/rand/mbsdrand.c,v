@@ -1,0 +1,281 @@
+head	1.7;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.7
+date	2015.07.18.13.44.39;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10055AA58566D9EE960;
+
+1.6
+date	2014.11.26.19.16.45;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1005476272D509C0E83;
+
+1.5
+date	2014.07.17.09.02.57;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10053C790780525F1B9;
+
+1.4
+date	2014.03.13.05.48.22;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100532146A3061EE0CD;
+
+1.3
+date	2014.03.13.04.46.44;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100532138484761BDE3;
+
+1.2
+date	2014.03.13.04.18.29;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100532131AE4D8218B9;
+
+1.1
+date	2014.03.13.03.55.10;	author tg;	state Exp;
+branches;
+next	;
+commitid	10053212C2D21633710;
+
+
+desc
+@@
+
+
+1.7
+log
+@drop compat code for old MirBSD, we’re going to need more anyway
+@
+text
+@/*-
+ * Copyright © 2014
+ *	Thorsten Glaser <tg@@mirbsd.org>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un‐
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person’s immediate fault when using the work as intended.
+ */
+
+#include <stdlib.h>
+#include <openssl/rand.h>
+
+__RCSID("$MirOS: src/lib/libssl/src/crypto/rand/mbsdrand.c,v 1.6 2014/11/26 19:16:45 tg Exp $");
+
+const char RAND_version[] = "MirBSD";
+
+extern void arc4random_ctl(unsigned int);
+
+static void ssleay_rand_seed(const void *, int);
+static int ssleay_rand_bytes(unsigned char *, int);
+static void ssleay_rand_cleanup(void);
+static void ssleay_rand_add(const void *, int, double);
+static void ssleay_rand_addb(int, const void *, int, double);
+
+RAND_METHOD rand_ssleay_meth = {
+	ssleay_rand_seed,
+	ssleay_rand_bytes,
+	ssleay_rand_cleanup,
+	ssleay_rand_add,
+	ssleay_rand_bytes,
+	RAND_poll
+};
+
+RAND_METHOD *
+RAND_SSLeay(void)
+{
+	return (&rand_ssleay_meth);
+}
+
+int
+RAND_poll(void)
+{
+	(void)arc4random();
+	return (1);
+}
+
+static void
+ssleay_rand_seed(const void *buf, int num)
+{
+	ssleay_rand_addb(1, buf, num, num);
+}
+
+static int
+ssleay_rand_bytes(unsigned char *buf, int num)
+{
+	if ((buf != NULL) && (num > 0))
+		arc4random_buf(buf, num);
+	return (1);
+}
+
+static void
+ssleay_rand_cleanup(void)
+{
+}
+
+static void
+ssleay_rand_add(const void *buf, int num, double add_entropy)
+{
+	ssleay_rand_addb(2, buf, num, add_entropy);
+}
+
+static void
+ssleay_rand_addb(int w, const void *buf, int num, double add_entropy)
+{
+	struct {
+		double e;
+		const void *bp;
+		int n;
+		int w;
+	} x;
+
+	x.bp = buf;
+	x.n = num;
+	x.e = add_entropy;
+	x.w = w;
+	arc4random_pushb_fast(&x, sizeof(x));
+	if ((buf != NULL) && (num > 0))
+		arc4random_pushb_fast(buf, num);
+	arc4random_ctl(0);
+}
+@
+
+
+1.6
+log
+@temporary, to make this buildable on my test system
+@
+text
+@d24 1
+a24 1
+__RCSID("$MirOS: src/lib/libssl/src/crypto/rand/mbsdrand.c,v 1.5 2014/07/17 09:02:57 tg Exp $");
+a101 11
+
+/*XXX temporary */
+#include <sys/param.h>
+#if (MirBSD < 0x0AB5)
+void
+arc4random_ctl(unsigned int x)
+{
+	/* not a correct implementation */
+	arc4random_pushb_fast(&x, sizeof(x));
+}
+#endif
+@
+
+
+1.5
+log
+@avoid catastrophic PRNG failure by getpid wrapping
+cf. http://www.tedunangst.com/flak/post/wrapping-pids-for-fun-and-profit
+do not use pthread_atfork, that’s unsafe (and evil anyway)
+but until our arc4random uses MAP_INHERIT_ZERO we must do this
+(and maybe even then it’s a good idea)
+but I agree with tedu that this is never seen in practice
+@
+text
+@d24 1
+a24 1
+__RCSID("$MirOS: src/lib/libssl/src/crypto/rand/mbsdrand.c,v 1.4 2014/03/13 05:48:22 tg Exp $");
+d102 11
+@
+
+
+1.4
+log
+@meh, stop already with exposing libc interna like that
+just invent our own private interface for RNG state hackery if needed
+@
+text
+@d24 1
+a24 1
+__RCSID("$MirOS: src/lib/libssl/src/crypto/rand/mbsdrand.c,v 1.1 2014/03/13 03:55:10 tg Exp $");
+d54 1
+@
+
+
+1.3
+log
+@mop up after openssl rng changes
+@
+text
+@a22 1
+#include LIBC_TPH
+d28 1
+a28 1
+extern void arc4random_stir_locked(pid_t);
+d66 1
+a66 3
+	if (buf == NULL)
+		num = 0;
+	if (num > 0)
+d97 1
+a97 3
+	if (buf == NULL)
+		num = 0;
+	if (num > 0)
+d99 1
+a99 5
+	if ((add_entropy <= num) && (add_entropy > 127)) {
+		_ARC4_LOCK();
+		arc4random_stir_locked(0);
+		_ARC4_UNLOCK();
+	}
+@
+
+
+1.2
+log
+@more intelligent alignment
+@
+text
+@d67 2
+d100 2
+@
+
+
+1.1
+log
+@rip out ssleay rng; use arc4random(3) directly
+@
+text
+@d25 1
+a25 1
+__RCSID("$MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $");
+d35 1
+a35 1
+static void ssleay_rand_addb(const void *, int, double, int);
+d61 1
+a61 1
+	ssleay_rand_addb(buf, num, num, 1);
+d80 1
+a80 1
+	ssleay_rand_addb(buf, num, add_entropy, 2);
+d84 1
+a84 1
+ssleay_rand_addb(const void *buf, int num, double add_entropy, int w)
+d87 1
+a88 1
+		double e;
+@
+

@@ -1,0 +1,862 @@
+head	1.12;
+access;
+symbols
+	paxmirabilis-20190825:1.12
+	paxmirabilis-20190224:1.12
+	paxmirabilis-20190210:1.12
+	npax:1.9.0.2
+	paxmirabilis-20171021:1.9
+	paxmirabilis-20161104:1.8
+	paxmirabilis-20161031:1.8
+	paxmirabilis-20161025:1.8
+	paxmirabilis-20160306:1.8
+	paxmirabilis-20151013:1.7
+	paxmirabilis-20140703:1.7
+	paxmirabilis-20120606:1.7
+	paxmirabilis-20120605:1.7
+	paxmirabilis-20120520:1.7
+	paxmirabilis-20120216:1.6
+	paxmirabilis-20120212:1.5
+	paxmirabilis-20110817:1.5;
+locks; strict;
+comment	@ * @;
+
+
+1.12
+date	2019.02.10.21.50.06;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	1005C609C8F43A9BDCB;
+
+1.11
+date	2018.12.13.07.12.00;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1005C1206596A173853;
+
+1.10
+date	2018.12.12.18.08.40;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1005C114EA81986F5EC;
+
+1.9
+date	2017.10.21.19.19.38;	author tg;	state Exp;
+branches
+	1.9.2.1;
+next	1.8;
+commitid	10059EB9DCC3CA82414;
+
+1.8
+date	2016.03.06.13.47.10;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10056DC34E25F0AA0A6;
+
+1.7
+date	2012.05.20.16.13.15;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004FB918314D2FECC0;
+
+1.6
+date	2012.02.16.17.41.40;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004F3D3FE2526B55B0;
+
+1.5
+date	2011.08.17.10.44.08;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004E4B9B8423DEE2E5;
+
+1.4
+date	2011.08.17.10.42.26;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004E4B9B1B739C49AC;
+
+1.3
+date	2011.08.17.09.46.20;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004E4B8DF61A7F694A;
+
+1.2
+date	2011.08.17.08.55.28;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E4B82113F01EDC4;
+
+1.1
+date	2011.08.16.21.32.45;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E4AE1EF00AF3003;
+
+1.9.2.1
+date	2018.12.12.04.16.13;	author tg;	state Exp;
+branches;
+next	1.9.2.2;
+commitid	1005C108B9122E60FA7;
+
+1.9.2.2
+date	2018.12.12.06.25.14;	author tg;	state Exp;
+branches;
+next	1.9.2.3;
+commitid	1005C10A9DB34B11C85;
+
+1.9.2.3
+date	2018.12.12.14.16.23;	author tg;	state Exp;
+branches;
+next	1.9.2.4;
+commitid	1005C11184842A35A8D;
+
+1.9.2.4
+date	2018.12.12.15.43.38;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005C112CBE1F8824CA;
+
+
+desc
+@@
+
+
+1.12
+log
+@port to Debian sid/{amd64,i386,hurd-i386,x32}, {stretch,jessie}/{amd64,i386}
+@
+text
+@/*-
+ * Copyright © 2011, 2017, 2019
+ *	mirabilos <m@@mirbsd.org>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un‐
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person’s immediate fault when using the work as intended.
+ */
+
+#include <sys/types.h>
+#if HAVE_BOTH_TIME_H
+#include <sys/time.h>
+#include <time.h>
+#elif HAVE_SYS_TIME_H
+#include <sys/time.h>
+#elif HAVE_TIME_H
+#include <time.h>
+#endif
+#include <sys/stat.h>
+#include <err.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#if HAVE_STRINGS_H
+#include <strings.h>
+#endif
+#include <unistd.h>
+
+#include "pax.h"
+#include "ar.h"
+#include "extern.h"
+
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.10 2018/12/12 18:08:40 tg Exp $");
+
+/*
+ * Routines for reading and writing Unix Archiver format libraries
+ */
+
+static const char magic[8] = {
+	0x21, 0x3C, 0x61, 0x72, 0x63, 0x68, 0x3E, 0x0A
+};
+
+/*
+ * initialisation for ar write
+ * returns 0 if ok, -1 otherwise
+ */
+int
+uar_stwr(int is_app)
+{
+	return (is_app ? 0 : wr_rdbuf(magic, 8));
+}
+
+/*
+ * check for ar magic
+ * returns 0 if ok, -1 otherwise
+ */
+int
+uar_ismagic(char *buf)
+{
+	return (memcmp(buf, magic, 8) ? -1 : 0);
+}
+
+/*
+ * used during format identification, but we differ
+ */
+int
+uar_id(char *buf MKSH_A_UNUSED, int len MKSH_A_UNUSED)
+{
+	errx(1, "internal error: %s should never have been called",
+	    "uar_id");
+}
+
+/* internal parsing functions */
+static uint64_t
+uar_atoi64(const char *buf, size_t len)
+{
+	char c;
+	uint64_t res = 0;
+
+ loop:
+	if (!len-- || (c = *buf++) < '0' || c > '9')
+		return (res);
+	res = (res * 10) + (c - '0');
+	goto loop;
+}
+
+static uint32_t
+uar_atoi32(const char *buf, size_t len)
+{
+	char c;
+	uint32_t res = 0;
+
+ loop:
+	if (!len-- || (c = *buf++) < '0' || c > '9')
+		return (res);
+	res = (res * 10) + (c - '0');
+	goto loop;
+}
+
+static uint32_t
+uar_otoi32(const char *buf, size_t len)
+{
+	char c;
+	uint32_t res = 0;
+
+ loop:
+	if (!len-- || (c = *buf++) < '0' || c > '7')
+		return (res);
+	res = (res << 3) | (c & 7);
+	goto loop;
+}
+
+/*
+ * parse header
+ */
+int
+uar_rd(ARCHD *arcn, char *buf)
+{
+	HD_AR *h = (HD_AR *)buf;
+	uint64_t i;
+
+	if (h->ar_magic[0] != 0x60 || h->ar_magic[1] != 0x0A)
+		return (-1);
+
+	memset(arcn, 0, sizeof(*arcn));
+	arcn->org_name = arcn->name;
+	arcn->sb.st_nlink = 1;
+	arcn->type = PAX_REG;
+
+	arcn->sb.st_ctime = arcn->sb.st_atime = arcn->sb.st_mtime =
+	    uar_atoi64(h->ar_mtime, sizeof(h->ar_mtime));
+	arcn->sb.st_uid = uar_atoi32(h->ar_uid, sizeof(h->ar_uid));
+	arcn->sb.st_gid = uar_atoi32(h->ar_gid, sizeof(h->ar_gid));
+	arcn->sb.st_mode = uar_otoi32(h->ar_mode, sizeof(h->ar_mode)) |
+	    S_IFREG;
+	i = uar_atoi64(h->ar_size, sizeof(h->ar_size));
+	arcn->pad = i & 1;
+
+	if (h->ar_name[0] == 0x23 &&
+	    h->ar_name[1] == 0x31 &&
+	    h->ar_name[2] == 0x2F) {
+		arcn->nlen = uar_atoi32(&(h->ar_name[3]),
+		    sizeof(h->ar_name) - 3);
+		if (arcn->nlen < 0 || arcn->nlen > PAXPATHLEN)
+			/*XXX just skip over this file */
+			return (-1);
+		if (rd_wrbuf(arcn->name, arcn->nlen) != arcn->nlen)
+			return (-1);
+		i -= arcn->nlen;
+	} else {
+		register char c;
+
+		/*arcn->nlen = 0;*/
+		while (arcn->nlen < (int)sizeof(h->ar_name)) {
+			c = h->ar_name[arcn->nlen];
+			if (c == ' ' || c == '/' || c == '\0')
+				break;
+			arcn->name[arcn->nlen++] = c;
+		}
+	}
+	arcn->name[arcn->nlen] = '\0';
+	arcn->sb.st_size = i;
+	arcn->skip = i;
+	return (0);
+}
+
+/* internal emission functions */
+static char *
+uar_itoa64(char *dst, uint64_t num)
+{
+	if (num >= 10)
+		dst = uar_itoa64(dst, num / 10);
+	*dst++ = '0' + (num % 10);
+	return (dst);
+}
+
+static char *
+uar_itoa32(char *dst, uint32_t num)
+{
+	if (num >= 10)
+		dst = uar_itoa32(dst, num / 10);
+	*dst++ = '0' + (num % 10);
+	return (dst);
+}
+
+static char *
+uar_itoo32(char *dst, uint32_t num)
+{
+	if (num & ~7)
+		dst = uar_itoo32(dst, num >> 3);
+	*dst++ = '0' | (num & 7);
+	return (dst);
+}
+
+/*
+ * write a header
+ */
+int
+uar_wr(ARCHD *arcn)
+{
+	HD_AR h;
+	u_long t_uid, t_gid;
+	time_t t_mtime = 0;
+	char *extname;
+	size_t n;
+	u_long t_mode[sizeof(arcn->sb.st_mode) <= sizeof(u_long) ? 1 : -1];
+
+	anonarch_init();
+
+	switch (arcn->type) {
+	case PAX_CTG:
+	case PAX_REG:
+	case PAX_HRG:
+		/* regular files, more or less */
+		break;
+	case PAX_DIR:
+		/* directory, ignore silently */
+		return (1);
+	default:
+		paxwarn(1, "ar can only archive regular files, which %s is not",
+		    arcn->org_name);
+		return (1);
+	}
+
+	/* trim trailing slashes */
+	n = strlen(arcn->name) - 1;
+	while (n && arcn->name[n] == '/')
+		--n;
+	arcn->name[++n] = '\0';
+	/* find out basename */
+	if ((extname = strrchr(arcn->name, '/')) == NULL)
+		extname = arcn->name;
+	else
+		++extname;
+
+	t_uid = (anonarch & ANON_UIDGID) ? 0UL : (u_long)arcn->sb.st_uid;
+	t_gid = (anonarch & ANON_UIDGID) ? 0UL : (u_long)arcn->sb.st_gid;
+	t_mode[0] = arcn->sb.st_mode;
+	if (!(anonarch & ANON_MTIME))
+		t_mtime = arcn->sb.st_mtime;
+
+#if HAVE_TIMET_LARGE
+	if (t_mtime > (time_t)999999999999ULL) {
+		paxwarn(1, "%s overflow for %s", "mtime", arcn->org_name);
+		t_mtime = (time_t)999999999999ULL;
+	}
+#endif
+	if (t_uid > 999999UL) {
+		paxwarn(1, "%s overflow for %s", "uid", arcn->org_name);
+		t_uid = 999999UL;
+	}
+	if (t_gid > 999999UL) {
+		paxwarn(1, "%s overflow for %s", "gid", arcn->org_name);
+		t_gid = 999999UL;
+	}
+	if (t_mode[0] > 077777777UL) {
+		paxwarn(1, "%s overflow for %s", "mode", arcn->org_name);
+		t_mode[0] &= 077777777UL;
+	}
+	if ((uint64_t)arcn->sb.st_size > ((uint64_t)9999999999ULL)) {
+		paxwarn(1, "%s overflow for %s", "size", arcn->org_name);
+		return (1);
+	}
+
+#ifndef SMALL
+	if (anonarch & ANON_DEBUG)
+		paxwarn(0, "writing mode %8lo user %ld:%ld "
+		    "mtime %08lX name '%s'", t_mode[0],
+		    t_uid, t_gid, (u_long)t_mtime, extname);
+#endif
+
+	memset(&h, ' ', sizeof(HD_AR));
+
+	if ((n = strlen(extname)) <= sizeof(h.ar_name)) {
+		while (n)
+			if (extname[--n] == ' ')
+				break;
+		if (n == 0) {
+			memcpy(h.ar_name, extname, strlen(extname));
+			extname = NULL;
+			goto got_name;
+		}
+	}
+	n = strlen(extname);
+	/* assert: n <= PAXPATHLEN <= 9999999999999 */
+	h.ar_name[0] = 0x23;
+	h.ar_name[1] = 0x31;
+	h.ar_name[2] = 0x2F;
+	uar_itoa32(&(h.ar_name[3]), n);
+ got_name:
+	uar_itoa64(h.ar_mtime, t_mtime);
+	uar_itoa32(h.ar_uid, t_uid);
+	uar_itoa32(h.ar_gid, t_gid);
+	uar_itoo32(h.ar_mode, t_mode[0]);
+	uar_itoa64(h.ar_size, arcn->sb.st_size +
+	    (extname ? strlen(extname) : 0));
+	h.ar_magic[0] = 0x60;
+	h.ar_magic[1] = 0x0A;
+	arcn->pad = (arcn->sb.st_size + (extname ? strlen(extname) : 0)) & 1;
+
+	if (wr_rdbuf((void *)&h, sizeof(HD_AR)) < 0)
+		return (-1);
+	if (extname) {
+		if (wr_rdbuf(extname, strlen(extname)) < 0)
+			return (-1);
+	}
+	/* so let the data follow */
+	return (0);
+}
+
+/*
+ * return size of trailer
+ */
+off_t
+uar_endrd(void)
+{
+	return (0);
+}
+
+/*
+ * another artefact of paxtar integration
+ */
+int
+uar_trail(ARCHD *ignore MKSH_A_UNUSED, char *buf MKSH_A_UNUSED,
+    int in_resync MKSH_A_UNUSED, int *cnt MKSH_A_UNUSED)
+{
+	errx(1, "internal error: %s should never have been called",
+	    "uar_trail");
+}
+@
+
+
+1.11
+log
+@constify
+@
+text
+@d2 1
+a2 1
+ * Copyright © 2011, 2017
+d253 2
+a254 1
+	if (sizeof(time_t) > 4 && t_mtime > (time_t)999999999999ULL) {
+d258 1
+@
+
+
+1.10
+log
+@merge the npax branch into MAIN
+
+asides from a missing dprintf and portability, this ought to be
+good enough for people (well me) to play with for now
+@
+text
+@d44 1
+a44 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.8 2016/03/06 13:47:10 tg Exp $");
+d50 1
+a50 1
+static /*const*/ char magic[8] = {
+@
+
+
+1.9
+log
+@fix the shit signed integer shitz (Debian #878642)
+
+why, oh, why, can this ancient code not use size_t throughout?
+@
+text
+@d2 2
+a3 1
+ * Copyright (c) 2011, 2017 mirabilos
+d5 5
+a9 11
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+d11 8
+a18 11
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+d21 2
+a22 1
+#include <sys/param.h>
+d24 6
+d32 2
+d35 3
+a37 2
+#include <stdint.h>
+#include <stdio.h>
+d39 1
+a39 2
+#include <stdlib.h>
+#include <time.h>
+d41 1
+a42 2
+#include "options.h"
+#include "ar.h"
+a53 1
+
+d78 1
+a78 2
+uar_id(char *buf __attribute__((__unused__)),
+    int len __attribute__((__unused__)))
+d274 1
+d279 1
+d333 2
+a334 4
+uar_trail(ARCHD *ignore __attribute__((__unused__)),
+    char *buf __attribute__((__unused__)),
+    int in_resync __attribute__((__unused__)),
+    int *cnt __attribute__((__unused__)))
+@
+
+
+1.9.2.1
+log
+@time to begin merging the old pax improvements: fold ar.h into ar.c
+@
+text
+@d2 1
+a2 2
+ * Copyright © 2011, 2016, 2017
+ *	mirabilos <m@@mirbsd.org>
+d4 11
+a14 5
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un‐
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+d16 11
+a26 8
+ * This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person’s immediate fault when using the work as intended.
+d29 1
+a29 2
+#include <sys/types.h>
+#if HAVE_BOTH_TIME_H
+a30 6
+#include <time.h>
+#elif HAVE_SYS_TIME_H
+#include <sys/time.h>
+#elif HAVE_TIME_H
+#include <time.h>
+#endif
+d33 2
+d36 1
+d38 1
+a38 6
+#include <string.h>
+#if HAVE_STRINGS_H
+#include <strings.h>
+#endif
+#include <unistd.h>
+
+d41 2
+d44 1
+a44 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.9 2017/10/21 19:19:38 tg Exp $");
+a53 67
+/****************************************************
+
+Libraries created by the Unix Archiver and compatible
+with the DEB file format consist of an initial eight-
+octet magic followed by a number of sections, per ar-
+chive member, comprised of a header and a data part.
+
+The magic is "<!arch>\n" (21 3C 61 72 63 68 3E 0A).
+
+Each archive member section (header followed by data)
+is aligned to a multiple of two octets. The magic and
+member header are both of even size, so a padding oc-
+tet "\n" (0Ah) can be appended after the data part of
+that section; an archive always has an even length. A
+header is 60 octets long and structured as follows:
+	+0	char ar_name[16];
+	+16	char ar_mtime[12];
+	+28	char ar_uid[6];
+	+34	char ar_gid[6];
+	+40	char ar_mode[8];
+	+48	char ar_size[10];
+	+58	char ar_magic[2];
+
+All header fields are left-justified and space-padded
+at the end, if necessary. The composition for ar_name
+will be described later. ar_mtime, ar_uid, ar_gid and
+ar_size are the unsigned decimental representation of
+the mtime as time_t, numeric user and group ID values
+and the size of the data part, respectively. ar_mode,
+on the other hand, is the octal representation of its
+Unix file mode (permissions). ar_magic = { 60h, 0Ah }
+
+Archive memeber filenames are basenames, i.e. they do
+not contain a path.
+
+If the filename is not longer than 16 octets and does
+not contain a space, it is stored as ar_name directly
+(although some implementations would trim the part of
+the filename before a ".o" extension). Otherwise, the
+ar_name field consists of the string "#1/" (23 31 2F)
+followed by the length of the filename as decimal un-
+signed integer (again space-padded); the APT archival
+routines only support extended filenames of less than
+300 octets. The actual filename is then stored as the
+first part of the data part consequently incrementing
+ar_size by its length. Since some versions of APT al-
+so support the SYSV property of ending ar_name with a
+slash "/" (2F), on encoding filenames containing them
+should be written as extended filenames; on decoding,
+a trailing slash in ar_name should be ignored. (Note,
+SYSV does not encode filenames that contain spaces as
+extended but BSD ar and APT truncate there then.)
+
+There are no trailers; an archive file ends after its
+last member section (including the padding).
+
+****************************************************/
+
+typedef struct {
+	char ar_name[16];
+	char ar_mtime[12];
+	char ar_uid[6];
+	char ar_gid[6];
+	char ar_mode[8];
+	char ar_size[10];
+	char ar_magic[2];
+} HD_AR;
+@
+
+
+1.9.2.2
+log
+@do extern.h, but we’ll have to do something about time values
+@
+text
+@d43 1
+a43 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.9.2.1 2018/12/12 04:16:13 tg Exp $");
+d145 2
+a146 1
+uar_id(char *buf MKSH_A_UNUSED, int len MKSH_A_UNUSED)
+d399 4
+a402 2
+uar_trail(ARCHD *ignore MKSH_A_UNUSED, char *buf MKSH_A_UNUSED,
+    int in_resync MKSH_A_UNUSED, int *cnt MKSH_A_UNUSED)
+@
+
+
+1.9.2.3
+log
+@tar, and make ANONARCH_DEBUG ifndef SMALL
+@
+text
+@d43 1
+a43 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.9.2.2 2018/12/12 06:25:14 tg Exp $");
+a340 1
+#ifndef SMALL
+a344 1
+#endif
+@
+
+
+1.9.2.4
+log
+@we need to bring back ar.h, too
+@
+text
+@d2 1
+a2 1
+ * Copyright © 2011, 2017
+a40 1
+#include "ar.h"
+d43 1
+a43 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.9.2.3 2018/12/12 14:16:23 tg Exp $");
+d53 68
+@
+
+
+1.8
+log
+@apply changes from mpax-erstmalnurderbackport branch not related to the CVEs
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2011 mirabilos
+d44 1
+a44 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.6 2012/02/16 17:41:40 tg Exp $");
+d157 1
+a157 1
+		if (arcn->nlen > PAXPATHLEN)
+@
+
+
+1.7
+log
+@get rid of extern.h including other headers
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2011 Thorsten Glaser.
+@
+
+
+1.6
+log
+@use an intermediate to uncomplain gcc for 16-bit sb.st_mode
+@
+text
+@d38 1
+d44 1
+a44 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.5 2011/08/17 10:44:08 tg Exp $");
+@
+
+
+1.5
+log
+@bugfix: padding when using an extended filename in creation
+@
+text
+@d43 1
+a43 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.3 2011/08/17 09:46:20 tg Exp $");
+d218 1
+d250 1
+d266 1
+a266 1
+	if (arcn->sb.st_mode > 077777777UL) {
+d268 1
+a268 1
+		arcn->sb.st_mode &= 077777777UL;
+d277 1
+a277 1
+		    "mtime %08lX name '%s'", (u_long)arcn->sb.st_mode,
+d302 1
+a302 1
+	uar_itoo32(h.ar_mode, arcn->sb.st_mode);
+@
+
+
+1.4
+log
+@bugfix: broken filenames when recursively tarring
+@
+text
+@d305 1
+a305 1
+	arcn->pad = arcn->sb.st_size & 1;
+@
+
+
+1.3
+log
+@fix ULL suffix (was correct in other places)
+@
+text
+@d43 1
+a43 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.2 2011/08/17 08:55:28 tg Exp $");
+d244 2
+@
+
+
+1.2
+log
+@make it compile, cleanly, twice in a row
+@
+text
+@d43 1
+a43 1
+__RCSID("$MirOS: src/bin/pax/ar.c,v 1.1 2011/08/16 21:32:45 tg Exp $");
+d252 1
+a252 1
+		t_mtime = (time_t)999999999999UL;
+@
+
+
+1.1
+log
+@backend for Unix Archiver libraries – ar(5) and deb(5) format files
+(since GNU binutils on ELF systems thinks SYSV style ar is used…)
+@
+text
+@d34 1
+d43 1
+a43 1
+__RCSID("$MirOS$");
+@
+

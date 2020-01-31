@@ -1,0 +1,288 @@
+head	1.4;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	2012.02.11.19.30.00;	author tg;	state dead;
+branches;
+next	1.3;
+commitid	1004F36C11F02848ED5;
+
+1.3
+date	2010.09.15.20.57.02;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C9132F41004B31C;
+
+1.2
+date	2007.09.13.14.12.53;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10046E945535545783F;
+
+1.1
+date	2007.03.10.23.53.50;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045F344D65465EF23;
+
+
+desc
+@@
+
+
+1.4
+log
+@update the CVS package in MirPorts (to match base and Debian)
+
+• since the Debian cvs source package was taken over by this one,
+  reverse things and use the Debian *.diff.gz to get our patches
+  from ;-) saves tracking things in CVS thrice
+• since the Debian cvs binary package contains PDF documentation
+  generated from something with our patches, ship it instead of
+  the one from the vanilla CVS distfile
+• ship cvs-switchroot(1) from Debian, which is just a fancy name
+  for mircvs://src/scripts/mnt-cvsroot and has a manpage
+• move stuff from PREFIX/share/cvs to PREFIX/share/doc/cvs as is proper
+• fix regression testsuite on MirBSD as much as possible (same as base)
+@
+text
+@$MirOS: ports/devel/cvs/patches/patch-src_patch_c,v 1.3 2010/09/15 20:57:02 tg Exp $
+--- src/patch.c.orig	Fri Sep 23 02:02:42 2005
++++ src/patch.c	Wed Sep 15 20:00:52 2010
+@@@@ -20,6 +20,8 @@@@
+ #include "cvs.h"
+ #include "getline.h"
+ 
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_patch_c,v 1.3 2010/09/15 20:57:02 tg Exp $");
++
+ static RETSIGTYPE patch_cleanup (int);
+ static Dtype patch_dirproc (void *callerdat, const char *dir,
+                             const char *repos, const char *update_dir,
+@@@@ -46,13 +48,13 @@@@ static int unidiff = 0;
+ 
+ static const char *const patch_usage[] =
+ {
+-    "Usage: %s %s [-flR] [-c|-u] [-s|-t] [-V %%d] [-k kopt]\n",
++    "Usage: %s %s [-flR] [-c|-u[p]] [-s|-t] [-V %%d] [-k kopt]\n",
+     "    -r rev|-D date [-r rev2 | -D date2] modules...\n",
+     "\t-f\tForce a head revision match if tag/date not found.\n",
+     "\t-l\tLocal directory only, not recursive\n",
+     "\t-R\tProcess directories recursively.\n",
+     "\t-c\tContext diffs (default)\n",
+-    "\t-u\tUnidiff format.\n",
++    "\t-u\tUnidiff format (-p works the same as in diff).\n",
+     "\t-s\tShort patch - one liner per file.\n",
+     "\t-t\tTop two diffs - last change made to the file.\n",
+     "\t-V vers\tUse RCS Version \"vers\" for keyword expansion.\n",
+@@@@ -78,7 +80,7 @@@@ patch (int argc, char **argv)
+ 	usage (patch_usage);
+ 
+     optind = 0;
+-    while ((c = getopt (argc, argv, "+V:k:cuftsQqlRD:r:")) != -1)
++    while ((c = getopt (argc, argv, "+V:k:cupftsQqlRD:r:")) != -1)
+     {
+ 	switch (c)
+ 	{
+@@@@ -149,11 +151,14 @@@@ patch (int argc, char **argv)
+ 		       "the -V option is obsolete and should not be used");
+ 		break;
+ 	    case 'u':
+-		unidiff = 1;		/* Unidiff */
++		unidiff |= 1;		/* Unidiff */
+ 		break;
+ 	    case 'c':			/* Context diff */
+-		unidiff = 0;
++		unidiff &= ~1;
+ 		break;
++	    case 'p':
++		unidiff |= 2;		/* Unidiff context */
++		break;
+ 	    case '?':
+ 	    default:
+ 		usage (patch_usage);
+@@@@ -167,6 +172,8 @@@@ patch (int argc, char **argv)
+     if (argc < 1)
+ 	usage (patch_usage);
+ 
++    if (!(unidiff & 1))
++	unidiff = 0;
+     if (toptwo_diffs && patch_short)
+ 	error (1, 0, "-t and -s options are mutually exclusive");
+     if (toptwo_diffs && (date1 != NULL || date2 != NULL ||
+@@@@ -202,6 +209,8 @@@@ patch (int argc, char **argv)
+ 	    send_arg("-s");
+ 	if (unidiff)
+ 	    send_arg("-u");
++	if (unidiff & 2)
++	    send_arg("-p");
+ 
+ 	if (rev1)
+ 	    option_with_arg ("-r", rev1);
+@@@@ -270,6 +279,7 @@@@ patch_proc (int argc, char **argv, char 
+     int which;
+     char *repository;
+     char *where;
++    char *cp;
+ 
+     TRACE ( TRACE_FUNCTION, "patch_proc ( %s, %s, %s, %d, %d, %s, %s )",
+ 	    xwhere ? xwhere : "(null)",
+@@@@ -292,7 +302,6 @@@@ patch_proc (int argc, char **argv, char 
+     /* if mfile isn't null, we need to set up to do only part of the module */
+     if (mfile != NULL)
+     {
+-	char *cp;
+ 	char *path;
+ 
+ 	/* if the portion of the module is a path, put the dir part on repos */
+@@@@ -342,14 +351,30 @@@@ patch_proc (int argc, char **argv, char 
+ 
+     if (rev1 != NULL && !rev1_validated)
+     {
+-	tag_check_valid (rev1, argc - 1, argv + 1, local_specified, 0,
+-			 repository, false);
++	if ((cp = strchr(rev1, ':')) != NULL)
++	{
++	    *cp++ = '\0';
++	    date1 = Make_Date (cp);
++	    if (*rev1 == '\0')
++		rev1 = NULL;
++	}
++	if (rev1)
++	    tag_check_valid (rev1, argc - 1, argv + 1, local_specified, 0,
++			     repository, false);
+ 	rev1_validated = 1;
+     }
+     if (rev2 != NULL && !rev2_validated)
+     {
+-	tag_check_valid (rev2, argc - 1, argv + 1, local_specified, 0,
+-			 repository, false);
++	if ((cp = strchr(rev2, ':')) != NULL)
++	{
++	    *cp++ = '\0';
++	    date2 = Make_Date (cp);
++	    if (*rev2 == '\0')
++		rev2 = NULL;
++	}
++	if (rev2)
++	    tag_check_valid (rev2, argc - 1, argv + 1, local_specified, 0,
++			     repository, false);
+ 	rev2_validated = 1;
+     }
+ 
+@@@@ -571,6 +596,7 @@@@ patch_fileproc (void *callerdat, struct 
+ 
+     if (unidiff) run_add_arg_p (&dargc, &darg_allocated, &dargv, "-u");
+     else run_add_arg_p (&dargc, &darg_allocated, &dargv, "-c");
++    if (unidiff & 2) run_add_arg_p (&dargc, &darg_allocated, &dargv, "-p");
+     switch (diff_exec (tmpfile1, tmpfile2, NULL, NULL, dargc, dargv,
+ 		       tmpfile3))
+     {
+@@@@ -671,7 +697,10 @@@@ failed to read diff file header %s for %
+ 	       program.  */
+ 	    if (unidiff)
+ 	    {
+-		cvs_output ("diff -u ", 0);
++		if (unidiff & 2)
++		    cvs_output ("diff -up ", 0);
++		else
++		    cvs_output ("diff -u ", 0);
+ 		cvs_output (file1, 0);
+ 		cvs_output (" ", 1);
+ 		cvs_output (file2, 0);
+@
+
+
+1.3
+log
+@WIP port (will be worked on more, commit for safety)
+
+Some changes, in this order:
+• re-sync with MirOS base cvs
+• reduce diff against upstream
+• apply cvs-datetime.patch from Arkadiusz Miskiewicz <arekm>
+  via Concurrent Versions System - Bugs: bug #21523, can't parse date/time: =UTC when commiting file (workaround/fix attached)
+• apply (only those considered somewhat sane) patches from Debian cvs_1:1.12.13-12
+  – 11_check_method_crash
+  – 12_rcs2log_POSIX_sort
+  – 14_ext_expansion
+  – 15_PATH_MAX_check
+  – 20_readdir_errno
+  – 21_getcwd_chroot
+  – 25_import-n-X
+  – 51_newlines_in_commit_template (partially)
+  – 55_keyword_alphanumerics (modified)
+  – 62_cvsrc_whitespace
+  – 65_login_cvspass_message
+  – 69_ext_allowroot (modified)
+  – 71_cvsbug_tmpfix
+  – 81_fix_-l (modified)
+  – 85_normalize_correct_roots
+  – 86_server_wrapper (modified)
+  – 93_homedir (modified)
+  – 95_flag_conflicted_copies
+  – 96_manpage_fixes (partially)
+  – 97_cvs.info.typo (partially)
+  – 98_fix_sparc_sigbus.diff
+• document Debian’s changes in the Texinfo manual
+• modify mkman.pl to produce more correct looking output
+• point to texinfo HTML document from HTML manpage
+• fix fseeko configure.in test
+• correct bugs in Debian’s changes
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_patch_c,v 1.2 2007/09/13 14:12:53 tg Exp $");
+@
+
+
+1.2
+log
+@fix stuff like
+$ cvs -d /cvs rdiff -uprMIRBSD_8:2005/12/22 -rMIRBSD_8:2006/01/01 src/share/mk
+diff mostly from http://ximbiot.com/cvs/wiki/index.php?title=Design_Proposals
+someone on irc://irc.mirbsd.org/#cvs told me about it, but I forgot the nick,
+sorry…
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_patch_c,v 1.1 2007/03/10 23:53:50 tg Exp $
+d3 1
+a3 1
++++ src/patch.c	Thu Sep 13 14:04:27 2007
+d8 1
+a8 1
++__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/patch.c,v 1.2 2007/02/16 19:41:59 tg Exp $");
+d25 1
+a25 1
++    "\t-u\tUnidiff format (-p like diff).\n",
+@
+
+
+1.1
+log
+@sync the cvs port and the cvs in the base system;
+RCSID stuff like in commitid 10045F33CB2157CFEAE
+@
+text
+@d1 3
+a3 3
+$MirOS$
+--- src/patch.c.orig	Sat Mar 10 23:14:20 2007
++++ src/patch.c	Sat Mar 10 23:14:14 2007
+d73 52
+a124 1
+@@@@ -571,6 +580,7 @@@@ patch_fileproc (void *callerdat, struct 
+d132 1
+a132 1
+@@@@ -671,7 +681,10 @@@@ failed to read diff file header %s for %
+@
+

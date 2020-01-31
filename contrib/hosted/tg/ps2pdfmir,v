@@ -1,0 +1,412 @@
+head	1.8;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.8
+date	2015.04.22.18.13.30;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1005537E46A30C84594;
+
+1.7
+date	2010.07.31.23.11.15;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004C54AD9249AE913C;
+
+1.6
+date	2010.07.31.23.01.30;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004C54AB4B16BF4AF6;
+
+1.5
+date	2010.07.31.22.45.11;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004C54A7770CA2C5A5;
+
+1.4
+date	2010.07.31.22.40.11;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004C54A65710764782;
+
+1.3
+date	2010.07.31.22.21.14;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C54A15D44AF7214;
+
+1.2
+date	2010.07.31.20.59.49;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004C548ED734082710;
+
+1.1
+date	2009.06.29.16.29.50;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004A48EC0A464E85A0;
+
+
+desc
+@@
+
+
+1.8
+log
+@Merge from Teckids:
+– default is PDF 1.4
+– new -V option to specify desired version, as long as gs supports it…
+And:
+– Unicode, modern shell style, comment overhaul
+– do not pass -dCompatibilityLevel to PDF/A generation
+– mark PDF/A as highly experimental, which it is, after all…
+@
+text
+@#!/bin/mksh
+# -*- mode: sh -*-
+# $MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $
+#-
+# Copyright © 2009, 2010, 2015
+#	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+# Copyright © 2014, 2015
+#	Thorsten Glaser <thorsten.glaser@@teckids.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un‐
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person’s immediate fault when using the work as intended.
+#-
+# Convert PostScript or PDF to PDF 1.4 (Acrobat 5-and-later compatible),
+# or, if the -a option is given, to something resembling PDF/A (PDF 1.4,
+# ISO standardised; experimental). Use -V to specify a different version
+# (e.g. PDF 1.3, Acrobat 4-and-later compatible).
+
+set -A args
+function addargs {
+	local _i
+
+	for _i in "$@@"; do
+		args[${#args[*]}]=$_i
+	done
+}
+
+function usage {
+	print -u2 "Syntax:"
+	print -ru2 "	$0 [-a] [-p papersize] [-t title] [-V 1.4] infile [outfile]"
+	print -ru2 "	$0 [-a] [-p p.] [-t t.] [-V v.] -o outfile infile [...]"
+	print -ru2 "	$0 [-a] [-ptV xxx] -c -o outfile pscommand [... -f infile ...]"
+	print -ru2 "	PDF/A generation (-a) ignores PDF version (-V) and is beta"
+	exit 1
+}
+
+pdfa=0
+pdfv=1.4
+icmd=0
+outfile=
+papersize=
+overtitle=
+while getopts "aco:p:t:V:" c; do
+	case $c {
+	(a)	pdfa=1 ;;
+	(c)	icmd=1 ;;
+	(o)	outfile=$OPTARG ;;
+	(p)	papersize=$OPTARG ;;
+	(t)	overtitle=$OPTARG ;;
+	(V)	pdfv=$OPTARG ;;
+	(*)	usage ;;
+	}
+done
+shift $((OPTIND - 1))
+
+#XXX
+if [[ $overtitle = *@@(\(|\))* ]]; then
+	print -u2 Cannot deal with parenthesēs in title.
+	exit 1
+fi
+
+if [[ -n $outfile ]]; then
+	(( $# )) || usage
+	infile=
+else
+	case $# {
+	(1)	infile=$1
+		if [[ -z $infile ]]; then
+			usage
+		elif [[ $infile = - ]]; then
+			outfile=-
+		else
+			outfile=${infile%.?(e)ps}.pdf
+		fi
+		;;
+	(2)	infile=$1
+		outfile=$2
+		[[ -z $infile || -z $outfile ]] && usage
+		;;
+	(*)	usage
+		;;
+	}
+fi
+
+r=${0%/*}
+[[ $r = $0 ]] && r=.
+r=$(realpath "$r")
+(( pdfa )) && addargs -I"$r"
+
+addargs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile="$outfile" \
+    -dSAFER -dSubsetFonts=true -dEmbedAllFonts=true
+[[ -n $papersize ]] && addargs -sPAPERSIZE="$papersize"
+
+if (( pdfa )); then
+	p=$r/sRGB_IEC61966-2-1_black_scaled.icc
+	d=$r/ps2pdfa.ps
+	if [[ ! -s $p || ! -s $d ]]; then
+		print -u2 "Cannot find definition and/or profile files:"
+		print -ru2 -- "• $d"
+		print -ru2 -- "• $p"
+		exit 1
+	fi
+	addargs -dNOOUTERSAVE -dPDFA -sProcessColorModel=DeviceCMYK \
+	    -c /ICCProfile "($p)" def -f "$d"
+else
+	addargs -dCompatibilityLevel="$pdfv"
+fi
+
+addargs -c .setpdfwrite
+[[ -n $overtitle ]] && addargs '[' /Title "($overtitle)" /DOCINFO pdfmark
+
+if [[ -n $infile ]]; then
+	addargs -f "$infile"
+elif (( icmd )); then
+	addargs "$@@"
+else
+	addargs -f "$@@"
+fi
+exec gs "${args[@@]}"
+@
+
+
+1.7
+log
+@might be useful to tag licence header onto this by now…
+also rework error message and limit script to ASCII chars
+@
+text
+@d2 2
+a3 1
+# $MirOS: contrib/hosted/tg/ps2pdfmir,v 1.6 2010/07/31 23:01:30 tg Exp $
+d5 4
+a8 2
+# Copyright (c) 2009, 2010
+#	Thorsten Glaser <tg@@mirbsd.org>
+d12 1
+a12 1
+# is granted to deal in this work without restriction, including un-
+d16 1
+a16 1
+# This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+d23 1
+a23 1
+# of said person's immediate fault when using the work as intended.
+d25 1
+a25 1
+# Convert PostScript or PDF to PDF 1.3 (Acrobat 4-and-later compatible),
+d27 2
+a28 1
+# Acrobat 5-and-later compatible, ISO standardised).
+d32 1
+a32 1
+	typeset _i
+d41 4
+a44 3
+	print -ru2 "	$0 [-a] [-p papersize] [-t title] infile [outfile]"
+	print -ru2 "	$0 [-a] [-p p.] [-t t.] -o outfile infile [...]"
+	print -ru2 "	$0 [-a] [-p p.] [-t t.] -c -o outfile pscommand [... -f infile ...]"
+d49 1
+d54 1
+a54 1
+while getopts "aco:p:t:" c; do
+d61 1
+d69 1
+a69 1
+	print -u2 Cannot deal with parentheses in title.
+d102 1
+a102 1
+    -dSAFER -dCompatibilityLevel=1.3 -dSubsetFonts=true -dEmbedAllFonts=true
+d109 3
+a111 3
+		print -u2 "Cannot find definition and profile files:"
+		print -ru2 -- "- $d"
+		print -ru2 -- "- $p"
+d116 2
+@
+
+
+1.6
+log
+@add option to override the document title (e.g. if none given,
+or if input is PDF instead of PS where it’s ignored)
+@
+text
+@d2 20
+a21 1
+# $MirOS: contrib/hosted/tg/ps2pdfmir,v 1.5 2010/07/31 22:45:11 tg Exp $
+d102 3
+a104 3
+		print -u2 "Cannot find definition files:"
+		print -ru2 "• $d"
+		print -ru2 "• $p"
+@
+
+
+1.5
+log
+@• add -p for paper size override
+• RTFM says to pass -dNOOUTERSAVE for PDF/A
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/ps2pdfmir,v 1.4 2010/07/31 22:40:11 tg Exp $
+d18 3
+a20 3
+	print -ru2 "	$0 [-a] [-p papersize] infile [outfile]"
+	print -ru2 "	$0 [-a] [-p p.] -o outfile infile [...]"
+	print -ru2 "	$0 [-a] [-p p.] -c -o outfile pscommand [... -f infile ...]"
+d28 2
+a29 1
+while getopts "aco:p:" c; do
+d35 1
+d41 6
+d92 3
+d96 1
+a96 1
+	addargs -c .setpdfwrite -f "$infile"
+d98 1
+a98 1
+	addargs -c .setpdfwrite "$@@"
+d100 1
+a100 1
+	addargs -c .setpdfwrite -f "$@@"
+@
+
+
+1.4
+log
+@allow multiple input files or even input postscript commands
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/ps2pdfmir,v 1.3 2010/07/31 22:21:14 tg Exp $
+d18 3
+a20 3
+	print -ru2 "	$0 [-a] infile [outfile]"
+	print -ru2 "	$0 [-a] -o outfile infile [...]"
+	print -ru2 "	$0 [-a] -c -o outfile pscommand [... -f infile ...]"
+d27 2
+a28 1
+while getopts "aco:" c; do
+d33 1
+d69 1
+d80 1
+a80 1
+	addargs -dPDFA -sProcessColorModel=DeviceCMYK \
+@
+
+
+1.3
+log
+@• customise ps2pdfa.ps
+• remove OutputConditionIdentifier, it’s said to be unneeded when
+  an ICC profile is given; we use sRGB_IEC61966-2-1_black_scaled.icc
+  since it’s freeware (ND though)
+• move /ICCProfile from ps2pdfa.ps to ps2pdfmir so that the
+  search path can be specified dynamically, on base of dirname $0
+• new flag “-a” to ps2pdfmir for creating output resembling PDF/A
+  (which has yet to be validated… but is good for nuking ECMAscript)
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/hosted/tg/ps2pdfmir,v 1.2 2010/07/31 20:59:49 tg Exp $
+d19 2
+d25 3
+a27 1
+while getopts "a" c; do
+d30 2
+d37 22
+a58 14
+case $# {
+(1)	infile=$1
+	if [[ $infile = - ]]; then
+		outfile=-
+	else
+		outfile=${infile%.?(e)ps}.pdf
+	fi
+	;;
+(2)	infile=$1
+	outfile=$2
+	;;
+(*)	usage
+	;;
+}
+d81 7
+a87 1
+addargs -c .setpdfwrite -f "$infile"
+@
+
+
+1.2
+log
+@expand to use gs directly
+@
+text
+@d1 68
+a68 9
+#!/bin/sh
+# $MirOS: contrib/hosted/tg/ps2pdfmir,v 1.1 2009/06/29 16:29:50 tg Exp $
+# Convert PostScript or PDF to PDF 1.3 (Acrobat 4-and-later compatible).
+
+exec gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite \
+    -sOutputFile="${2:-${1%.?(e)ps}.pdf}" \
+    -dSAFER -dCompatibilityLevel=1.3 \
+    -dSubsetFonts=true -dEmbedAllFonts=true \
+    -c .setpdfwrite -f "$1"
+@
+
+
+1.1
+log
+@add ps2pdf13+fontembedding, for mksh PDF manpage &c.
+@
+text
+@d2 2
+a3 3
+# $MirOS$
+# $Id: ps2pdf13 6300 2005-12-28 19:56:24Z giles $
+# Convert PostScript to PDF 1.3 (Acrobat 4-and-later compatible).
+d5 3
+a7 1
+exec ps2pdfwr -dCompatibilityLevel=1.3 \
+d9 1
+a9 1
+    "$@@"
+@
+

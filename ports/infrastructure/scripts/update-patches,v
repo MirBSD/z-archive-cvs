@@ -1,0 +1,303 @@
+head	1.7;
+access;
+symbols
+	MIRBSD_8_BASE:1.4;
+locks; strict;
+comment	@# @;
+
+
+1.7
+date	2011.08.13.22.19.34;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004E46F8814937CBB6;
+
+1.6
+date	2008.11.08.23.03.45;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10049161AC72620EAF0;
+
+1.5
+date	2006.06.15.19.18.43;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004491B2706C2443B2;
+
+1.4
+date	2005.12.17.05.46.20;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10043A3A3E65E20A413;
+
+1.3
+date	2005.05.30.16.47.11;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	4fc6429b436d42cb;
+
+1.2
+date	2005.03.18.16.10.55;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.03.18.15.47.19;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.47.19;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.7
+log
+@dict.leo.org says this is correct
+@
+text
+@#!/bin/mksh
+# $MirOS: ports/infrastructure/scripts/update-patches,v 1.6 2008/11/08 23:03:45 tg Exp $
+#-
+# Copyright (c) 2003, 2004, 2005
+#	Thorsten "mirabilos" Glaser <tg@@MirBSD.de>
+# Based upon code and idea (c) 2000
+#	Marc Espie for the OpenBSD project. All rights reserved.
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+# express, or implied, to the maximum extent permitted by applicable
+# law, without malicious intent or gross negligence; in no event may
+# licensor, an author or contributor be held liable for any indirect
+# or other damage, or direct damage except proven a consequence of a
+# direct error of said person and intended use of this work, loss or
+# other issues arising in any way out of its use, even if advised of
+# the possibility of such damage or existence of a nontrivial bug.
+
+
+# if OS diff not capable enough, require GNU diff
+if [[ $NEED_GDIFF = yes ]]; then
+	if [[ ! -x $(which gdiff) ]]; then
+		exec >&2
+		print "Fatal:\tGNU diff (gdiff) required for 'update-patches'"
+		print "\tIt may be installed from the textproc/gdiff port."
+		exit 1
+	fi
+	DIFFPROG=$(which gdiff)
+	TRANSFORM=cat
+	DIFF_FLAGS="-adu --ignore-matching-lines="
+	DIFF_FLAGS="${DIFF_FLAGS}\"^--- @@@@$PATCHORIG	.*\""
+	DIFF_FLAGS="${DIFF_FLAGS} --ignore-matching-lines="
+	DIFF_FLAGS="${DIFF_FLAGS}\"^+++ @@@@	.*\""
+else
+	DIFFPROG=$(which diff)
+	TRANSFORM='sed s/[.+]/\\\\&/g'
+	tfile=$(print -r -- $PATCHORIG | $TRANSFORM)
+	DIFF_FLAGS="-adu -I \"^--- @@@@$(print -- $tfile)	\""
+	DIFF_FLAGS="${DIFF_FLAGS} -I \"^\+\+\+ @@@@	\""
+fi
+
+mkdir -p $PATCHDIR
+
+
+# Find out all $PATCHORIG files and strip the name to what diff will use
+( cd $WRKDIST && find . -type f -name "*${PATCHORIG}" \
+    | fgrep -v $DISTORIG | sed -e "s#^./\(.*\)\.${PATCHORIG#.*}\$#\1#" \
+) |&
+
+while read -p file; do
+	if cmp -s "$WRKDIST/$file" "$WRKDIST/$file$PATCHORIG"; then
+		print -r -- "$file and $file$PATCHORIG are identical" >&2
+		continue
+	fi
+	if [[ ! -f $WRKDIST/$file ]]; then
+		print -r -- "$file does not exist" >&2
+		continue
+	fi
+	print -r -- "Processing ${file}..." >&2
+	# look in patchdir for an existing patchfile matching this
+	cd $PATCHDIR
+	for i in $PATCH_LIST; do
+		# Ignore non-files, or old backup
+		[[ ! -f $i || $i = *@@(${PATCHORIG}|.rej|~) ]] \
+		    && continue
+
+		# Patch found. Is this the one?
+		if grep "^--- $file$PATCHORIG" "$i" >/dev/null; then
+			accounted="$accounted $i"
+			# found it, copy preamble before comparison
+			esc="$(print -r -- "$file" | sed -e 's#/#\\/#g')"
+			( sed -e "/^--- $esc$PATCHORIG/,\$d" <$i; \
+			  cd $WRKDIST && ${DIFFPROG} -adup \
+			  ${DIFF_ARGS} "$file$PATCHORIG" "$file" \
+			) >"$i.new"
+			# did it change ? mark it as changed
+			tfile="$(print -r -- "$file" | $TRANSFORM)"
+			if eval ${DIFFPROG} "$(print -r -- "${DIFF_FLAGS}" \
+			    ${DIFF_ARGS} | sed "s#@@@@#${tfile}#g")" \
+			    "$i" "$i.new" 1>&2; then
+				rm "$i.new"
+			else
+				print -r -- "Patch $i for $file updated" >&2
+				mv "$i" "$i$PATCHORIG"
+				mv "$i.new" "$i"
+				edit="$edit $i"
+			fi
+			continue 2
+		fi
+	done
+
+	# Build a sensible name for the new patch file
+	patchname=patch-$(print -r -- "$file" | sed -e 's#[/. ]#_#g')
+	print -r -- "No patch-* found for $file, creating $patchname" >&2
+	( print -r -- '$Mir''OS$'; \
+	  cd $WRKDIST && ${DIFFPROG} -adup ${DIFF_ARGS} \
+	  "$file$PATCHORIG" "$file" \
+	) >$patchname
+	edit="$edit $patchname"
+	accounted="$accounted $patchname"
+done
+
+# Verify all patches accounted for
+cd $PATCHDIR
+for i in *; do
+	[[ ! -f $i || $i = *@@(${PATCHORIG}|.rej|~) ]] \
+	    && continue
+	grep '^\\ No newline at end of file' $i >/dev/null \
+	    && print -r -- "*** Patch $i needs manual intervention" >&2
+	[[ $accounted != *@@($i)* ]] \
+	    && print -r -- "*** Patch $i not accounted for" >&2
+done
+
+print -r -- $edit
+exit 0
+@
+
+
+1.6
+log
+@more mass conversions, including ancient eMail addresses
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/infrastructure/scripts/update-patches,v 1.5 2006/06/15 19:18:43 tg Exp $
+d76 1
+a76 1
+			# found it, copy preamble before comparision
+@
+
+
+1.5
+log
+@mirbsd.org, 66h.42h.de, bsdadvocacy.org, and whatnot
+we changed that too often, try to clean up the mess
+mostly outside the www/ module which is dead anyway.
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/infrastructure/scripts/update-patches,v 1.4 2005/12/17 05:46:20 tg Exp $
+d5 1
+a5 1
+#	Thorsten "mirabile" Glaser <tg@@MirBSD.de>
+@
+
+
+1.4
+log
+@big fat licence update (I left some which are bsiegert@@'s alone though)
+also, remove licence boilerplate from some .h files who don't deserve it
+and remove and add some advertising clauses because I say so
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/infrastructure/scripts/update-patches,v 1.3 2005/05/30 16:47:11 tg Exp $
+d5 1
+a5 1
+#	Thorsten "mirabile" Glaser <tg@@MirBSD.org>
+@
+
+
+1.3
+log
+@flag day: /bin/mksh is now default shell (XXX untested)
+pkg_scan: convert to ksh idioms, [ x"$1" ... is out
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/infrastructure/scripts/update-patches,v 1.2 2005/03/18 16:10:55 tg Exp $
+d16 8
+a23 7
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+@
+
+
+1.2
+log
+@because we use GNU CVS 1.12.11, we can have a *huge* speedup
+for 'make update-patches' since we need not check for RCS ID
+occuring in patches any more.
+
+Well, then, we HAVE to check for \$MirOS\$, but I'm positive
+that'd not occur so often, besides when we do distfiles from
+MirOS content, we'd rather patch them upstream. (Mostly.)
+
+So, speed it up then.
+
+Now bsiegert@@ it's up to you to fix this stuff ;-)
+@
+text
+@d1 2
+a2 2
+#!/bin/ksh
+# $MirOS: ports/infrastructure/scripts/update-patches,v 1.1.7.1 2005/03/18 15:47:19 tg Exp $
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.2 2005/03/03 19:43:30 tg Rel $
+a118 8
+# Check for $Id and similar bugs in all those patch files
+for i in $accounted; do
+	sed -e '1,/^--- /d' $i | egrep -sqe \
+	    '^[- ].*\$(Id|MirBSD|Revision|Author|Header|Date|Name)(\$|: )' \
+	    >/dev/null 2>&1 \
+	    && print -r -- "Problem with $i: RCS tag found in patch" >&2
+done
+
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

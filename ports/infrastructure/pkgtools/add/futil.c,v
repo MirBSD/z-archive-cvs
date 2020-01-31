@@ -1,0 +1,275 @@
+head	1.6;
+access;
+symbols
+	bsiegert-cfgfile_BASE:1.6
+	bsiegert-cfgfile:1.6.0.2
+	MIRBSD_8_BASE:1.2;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2008.11.02.18.56.28;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100490DF7B930A3A3BD;
+
+1.5
+date	2008.11.02.18.19.51;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100490DEF535C71F010;
+
+1.4
+date	2006.01.25.20.58.57;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10043D7E6A61025E72E;
+
+1.3
+date	2006.01.15.23.40.29;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10043CADD744FEA0AAB;
+
+1.2
+date	2005.05.20.23.48.52;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	aba428e776eb2f4;
+
+1.1
+date	2005.03.18.15.47.16;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.47.16;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.6
+log
+@• add new memory management functions (xcalloc, xrealloc, xfree, xstrdup,
+  xasprintf, xvasprintf)
+• add new process calling functions which can optionally unlimit datasize
+• add safe formatting functions (untested)
+• retire asystem for xsystem
+@
+text
+@/**	$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.5 2008/11/02 18:19:51 tg Exp $ */
+/*	$OpenBSD: futil.c,v 1.7 2003/07/04 17:31:19 avsm Exp $	*/
+
+/*
+ * FreeBSD install - a package for the installation and maintainance
+ * of non-core utilities.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * Jordan K. Hubbard
+ * 18 July 1993
+ *
+ * Miscellaneous file access utilities.
+ */
+
+#include <err.h>
+#include "lib.h"
+#include "add.h"
+
+__RCSID("$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.5 2008/11/02 18:19:51 tg Exp $");
+
+/*
+ * Assuming dir is a desired directory name, make it and all intervening
+ * directories necessary.
+ */
+
+int
+make_hierarchy(char *dir)
+{
+    char *cp1, *cp2;
+
+    if (dir[0] == '/')
+	cp1 = cp2 = dir + 1;
+    else
+	cp1 = cp2 = dir;
+    while (cp2) {
+	if ((cp2 = strchr(cp1, '/')) !=NULL )
+	    *cp2 = '\0';
+	if (fexists(dir)) {
+	    if (!(isdir(dir) || islinktodir(dir)))
+		return -1;
+	}
+	else {
+	    if (xsystem(false, "mkdir %s", dir))
+		return -1;
+	    apply_perms(NULL, dir);
+	}
+	/* Put it back */
+	if (cp2) {
+	    *cp2 = '/';
+	    cp1 = cp2 + 1;
+	}
+    }
+    return 0;
+}
+
+/* Using permission defaults, apply them as necessary */
+void
+apply_perms(const char *dir, char *arg)
+{
+    const char *cd_to;
+
+    if (!dir || *arg == '/')	/* absolute path? */
+	cd_to = "/";
+    else
+	cd_to = dir;
+
+#ifndef __INTERIX
+    if (Owner || Group) {
+	const char *real_owner = Owner ? Owner : "";
+	const char *real_group = Group ? Group : "";
+
+	if (xsystem(false, "cd %s && chown -R %s:%s %s", cd_to, real_owner ,
+		real_group, arg))
+	    pwarnx("couldn't change owner/group of '%s' to '%s:%s'",
+		   arg, real_owner, real_group);
+    }
+#endif
+    if (Mode) {
+	if (xsystem(false, "cd %s && chmod -R %s %s", cd_to, Mode, arg))
+	    pwarnx("couldn't change modes of '%s' to '%s'", arg, Mode);
+#ifdef AS_USER
+	if (xsystem(false, "cd %s && chmod -R a-st %s", cd_to, arg))
+	    pwarnx("SECURITY WARNING: could not reset sugid/itxt bits on '%s'", arg);
+#endif
+    }
+}
+@
+
+
+1.5
+log
+@rename vsystem into asystem, because v* are these who take a va_list
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.4 2006/01/25 20:58:57 tg Exp $ */
+d27 1
+a27 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.4 2006/01/25 20:58:57 tg Exp $");
+d51 1
+a51 1
+	    if (asystem("mkdir %s", dir))
+d80 1
+a80 1
+	if (asystem("cd %s && chown -R %s:%s %s", cd_to, real_owner ,
+d87 1
+a87 1
+	if (asystem("cd %s && chmod -R %s %s", cd_to, Mode, arg))
+d90 1
+a90 1
+	if (asystem("cd %s && chmod -R a-st %s", cd_to, arg))
+@
+
+
+1.4
+log
+@oops, typo
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.3 2006/01/15 23:40:29 tg Exp $ */
+d27 1
+a27 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.3 2006/01/15 23:40:29 tg Exp $");
+d51 1
+a51 1
+	    if (vsystem("mkdir %s", dir))
+d80 1
+a80 1
+	if (vsystem("cd %s && chown -R %s:%s %s", cd_to, real_owner ,
+d87 1
+a87 1
+	if (vsystem("cd %s && chmod -R %s %s", cd_to, Mode, arg))
+d90 1
+a90 1
+	if (vsystem("cd %s && chmod -R a-st %s", cd_to, arg))
+@
+
+
+1.3
+log
+@Message-ID: <Pine.BSO.4.64L.0601010338340.2023@@odem.66h.42h.de>
+
+just chmod -R a-st $dir after @@mode operation
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.2 2005/05/20 23:48:52 tg Exp $ */
+d27 1
+a27 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.2 2005/05/20 23:48:52 tg Exp $");
+d91 1
+a91 1
+	    pwarnx("SECURITY WARNING: could not reset sugid/itxt bits on '%s', arg);
+@
+
+
+1.2
+log
+@don't chown (or chgrp) on Interix
+
+agreed bsiegert@@
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.1.7.1 2005/03/18 15:47:16 tg Exp $ */
+d27 1
+a27 1
+__RCSID("$MirOS: ports/infrastructure/pkgtools/add/futil.c,v 1.1.7.1 2005/03/18 15:47:16 tg Exp $");
+d86 1
+a86 1
+    if (Mode)
+d89 5
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d27 1
+a27 1
+__RCSID("$MirOS$");
+d75 1
+d85 1
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

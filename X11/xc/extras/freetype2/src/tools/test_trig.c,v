@@ -1,0 +1,556 @@
+head	1.2;
+access;
+symbols
+	freetype-2_7_1:1.1.115.2
+	freetype-2_3_12:1.1.115.1
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.1.103.1
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2017.04.15.19.22.12;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10058F2723111C7BEE2;
+
+1.1
+date	2005.03.18.10.43.18;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.39;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.18;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.51;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2017.04.15.15.42.13;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.2
+log
+@first cut at a quickmerge
+@
+text
+@#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_TRIGONOMETRY_H
+
+#include <math.h>
+#include <stdio.h>
+
+#define  PI   3.14159265358979323846
+#define  SPI  (PI/FT_ANGLE_PI)
+
+/* the precision in 16.16 fixed-point checks. Expect between 2 and 5 */
+/* noise LSB bits during operations, due to rounding errors..        */
+#define  THRESHOLD  64
+
+  static  error = 0;
+
+  static void
+  test_cos( void )
+  {
+    int  i;
+
+
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+    {
+      FT_Fixed  f1, f2;
+      double    d2;
+
+
+      f1 = FT_Cos(i);
+      d2 = cos( i*SPI );
+      f2 = (FT_Fixed)(d2*65536.0);
+
+      if ( abs( f2-f1 ) > THRESHOLD )
+      {
+        error = 1;
+        printf( "FT_Cos[%3d] = %.7f  cos[%3d] = %.7f\n",
+                (i >> 16), f1/65536.0, (i >> 16), d2 );
+      }
+    }
+  }
+
+
+  static void
+  test_sin( void )
+  {
+    int  i;
+
+
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+    {
+      FT_Fixed  f1, f2;
+      double    d2;
+
+
+      f1 = FT_Sin(i);
+      d2 = sin( i*SPI );
+      f2 = (FT_Fixed)(d2*65536.0);
+
+      if ( abs( f2-f1 ) > THRESHOLD )
+      {
+        error = 1;
+        printf( "FT_Sin[%3d] = %.7f  sin[%3d] = %.7f\n",
+                (i >> 16), f1/65536.0, (i >> 16), d2 );
+      }
+    }
+  }
+
+
+  static void
+  test_tan( void )
+  {
+    int  i;
+
+
+    for ( i = 0; i < FT_ANGLE_PI2 - 0x2000000L; i += 0x10000L )
+    {
+      FT_Fixed  f1, f2;
+      double    d2;
+
+
+      f1 = FT_Tan(i);
+      d2 = tan( i*SPI );
+      f2 = (FT_Fixed)(d2*65536.0);
+
+      if ( abs( f2-f1 ) > THRESHOLD )
+      {
+        error = 1;
+        printf( "FT_Tan[%3d] = %.7f  tan[%3d] = %.7f\n",
+                (i >> 16), f1/65536.0, (i >> 16), d2 );
+      }
+    }
+  }
+
+
+  static void
+  test_atan2( void )
+  {
+    int  i;
+
+
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+    {
+      FT_Fixed  c2, s2;
+      double    l, a, c1, s1;
+      int       j;
+
+
+      l  = 5.0;
+      a  = i*SPI;
+
+      c1 = l * cos(a);
+      s1 = l * sin(a);
+
+      c2 = (FT_Fixed)(c1*65536.0);
+      s2 = (FT_Fixed)(s1*65536.0);
+
+      j  = FT_Atan2( c2, s2 );
+      if ( j < 0 )
+        j += FT_ANGLE_2PI;
+
+      if ( abs( i - j ) > 1 )
+      {
+        printf( "FT_Atan2( %.7f, %.7f ) = %.5f, atan = %.5f\n",
+                c2/65536.0, s2/65536.0, j/65536.0, i/65536.0 );
+      }
+    }
+  }
+
+
+  static void
+  test_unit( void )
+  {
+    int  i;
+
+
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+    {
+      FT_Vector  v;
+      double     a, c1, s1;
+      FT_Fixed   c2, s2;
+
+
+      FT_Vector_Unit( &v, i );
+      a  = ( i*SPI );
+      c1 = cos(a);
+      s1 = sin(a);
+      c2 = (FT_Fixed)(c1*65536.0);
+      s2 = (FT_Fixed)(s1*65536.0);
+
+      if ( abs( v.x-c2 ) > THRESHOLD ||
+           abs( v.y-s2 ) > THRESHOLD )
+      {
+        error = 1;
+        printf( "FT_Vector_Unit[%3d] = ( %.7f, %.7f )  vec = ( %.7f, %.7f )\n",
+                (i >> 16),
+                v.x/65536.0, v.y/65536.0,
+                c1, s1 );
+      }
+    }
+  }
+
+
+  static void
+  test_length( void )
+  {
+    int  i;
+
+
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+    {
+      FT_Vector  v;
+      FT_Fixed   l, l2;
+
+
+      l   = (FT_Fixed)(500.0*65536.0);
+      v.x = (FT_Fixed)( l * cos( i*SPI ) );
+      v.y = (FT_Fixed)( l * sin( i*SPI ) );
+      l2  = FT_Vector_Length( &v );
+
+      if ( abs( l2-l ) > THRESHOLD )
+      {
+        error = 1;
+        printf( "FT_Length( %.7f, %.7f ) = %.5f, length = %.5f\n",
+                v.x/65536.0, v.y/65536.0, l2/65536.0, l/65536.0 );
+      }
+    }
+  }
+
+
+  static void
+  test_rotate( void )
+  {
+    int  rotate;
+
+
+    for ( rotate = 0; rotate < FT_ANGLE_2PI; rotate += 0x10000L )
+    {
+      double  ra, cra, sra;
+      int     i;
+
+
+      ra  = rotate*SPI;
+      cra = cos( ra );
+      sra = sin( ra );
+
+      for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+      {
+        FT_Fixed   c2, s2, c4, s4;
+        FT_Vector  v;
+        double     l, a, c1, s1, c3, s3;
+
+
+        l  = 500.0;
+        a  = i*SPI;
+
+        c1 = l * cos(a);
+        s1 = l * sin(a);
+
+        v.x = c2 = (FT_Fixed)(c1*65536.0);
+        v.y = s2 = (FT_Fixed)(s1*65536.0);
+
+        FT_Vector_Rotate( &v, rotate );
+
+        c3 = c1 * cra - s1 * sra;
+        s3 = c1 * sra + s1 * cra;
+
+        c4 = (FT_Fixed)(c3*65536.0);
+        s4 = (FT_Fixed)(s3*65536.0);
+
+        if ( abs( c4 - v.x ) > THRESHOLD ||
+             abs( s4 - v.y ) > THRESHOLD )
+        {
+          error = 1;
+          printf( "FT_Rotate( (%.7f,%.7f), %.5f ) = ( %.7f, %.7f ), rot = ( %.7f, %.7f )\n",
+                  c1, s1, ra,
+                  c2/65536.0, s2/65536.0,
+                  c4/65536.0, s4/65536.0 );
+        }
+      }
+    }
+  }
+
+
+  int main( void )
+  {
+    test_cos();
+    test_sin();
+    test_tan();
+    test_atan2();
+    test_unit();
+    test_length();
+    test_rotate();
+
+    if (!error)
+      printf( "trigonometry test ok !\n" );
+
+    return !error;
+  }
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d11 2
+a12 3
+/* the precision in 16.16 fixed float points of the checks. Expect */
+/* between 2 and 5 noise LSB bits during operations, due to        */
+/* rounding errors..                                               */
+d20 1
+a20 3
+    FT_Fixed  f1, f2;
+    double    d1, d2;
+    int       i;
+d22 2
+a23 1
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000 )
+d25 4
+a29 1
+      d1 = f1/65536.0;
+a42 1
+
+d46 1
+a46 3
+    FT_Fixed  f1, f2;
+    double    d1, d2;
+    int       i;
+d48 2
+a49 1
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000 )
+d51 4
+a55 1
+      d1 = f1/65536.0;
+d72 1
+a72 3
+    FT_Fixed  f1, f2;
+    double    d1, d2;
+    int       i;
+d74 2
+a75 1
+    for ( i = 0; i < FT_ANGLE_PI2-0x2000000; i += 0x10000 )
+d77 4
+a81 1
+      d1 = f1/65536.0;
+d98 1
+a98 3
+    FT_Fixed  c2, s2;
+    double    l, a, c1, s1;
+    int       i, j;
+d100 2
+a101 1
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000 )
+d103 5
+d129 1
+d133 2
+a134 4
+    FT_Vector  v;
+    double     a, c1, s1;
+    FT_Fixed   c2, s2;
+    int        i;
+d136 1
+a136 1
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000 )
+d138 5
+d166 2
+a167 3
+    FT_Vector  v;
+    FT_Fixed   l, l2;
+    int        i;
+d169 1
+a169 1
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000 )
+d171 4
+d193 2
+a194 4
+    FT_Fixed  c2, s2, c4, s4;
+    FT_Vector v;
+    double    l, ra, a, c1, s1, cra, sra, c3, s3;
+    int       i, j, rotate;
+d196 1
+a196 1
+    for ( rotate = 0; rotate < FT_ANGLE_2PI; rotate += 0x10000 )
+d198 4
+d206 1
+a206 1
+      for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000 )
+d208 5
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d11 3
+a13 2
+/* the precision in 16.16 fixed-point checks. Expect between 2 and 5 */
+/* noise LSB bits during operations, due to rounding errors..        */
+d21 3
+a23 1
+    int  i;
+d25 1
+a25 2
+
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+a26 4
+      FT_Fixed  f1, f2;
+      double    d2;
+
+
+d28 1
+d42 1
+d46 3
+a48 1
+    int  i;
+d50 1
+a50 2
+
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+a51 4
+      FT_Fixed  f1, f2;
+      double    d2;
+
+
+d53 1
+d70 3
+a72 1
+    int  i;
+d74 1
+a74 2
+
+    for ( i = 0; i < FT_ANGLE_PI2 - 0x2000000L; i += 0x10000L )
+a75 4
+      FT_Fixed  f1, f2;
+      double    d2;
+
+
+d77 1
+d94 3
+a96 1
+    int  i;
+d98 1
+a98 2
+
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+a99 5
+      FT_Fixed  c2, s2;
+      double    l, a, c1, s1;
+      int       j;
+
+
+a120 1
+
+d124 4
+a127 2
+    int  i;
+
+d129 1
+a129 1
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+a130 5
+      FT_Vector  v;
+      double     a, c1, s1;
+      FT_Fixed   c2, s2;
+
+
+d154 3
+a156 2
+    int  i;
+
+d158 1
+a158 1
+    for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+a159 4
+      FT_Vector  v;
+      FT_Fixed   l, l2;
+
+
+d178 4
+a181 2
+    int  rotate;
+
+d183 1
+a183 1
+    for ( rotate = 0; rotate < FT_ANGLE_2PI; rotate += 0x10000L )
+a184 4
+      double  ra, cra, sra;
+      int     i;
+
+
+d189 1
+a189 1
+      for ( i = 0; i < FT_ANGLE_2PI; i += 0x10000L )
+a190 5
+        FT_Fixed   c2, s2, c4, s4;
+        FT_Vector  v;
+        double     l, a, c1, s1, c3, s3;
+
+
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

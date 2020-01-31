@@ -1,0 +1,718 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_10:1.1.1.2.0.4
+	MIRBSD_10_BASE:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200511231542:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2010.11.16.19.30.33;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004CE2DBD132C306A8;
+
+1.1
+date	2005.02.05.17.26.25;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.26.25;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.56.44;	author tg;	state Exp;
+branches;
+next	;
+commitid	560042e0092f571e;
+
+
+desc
+@@
+
+
+1.2
+log
+@• fix a bug with fd passing trying to fileno(NULL) inherited from OpenBSD
+  discovered by bsiegert@@
+• while here, make __CRAZY=Yes clean
+@
+text
+@/*	$OpenBSD: login_skey.c,v 1.17 2004/09/18 19:36:54 deraadt Exp $	*/
+
+/*
+ * Copyright (c) 2000, 2001, 2004 Todd C. Miller <Todd.Miller@@courtesan.com>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <sys/param.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <paths.h>
+#include <pwd.h>
+#include <readpassphrase.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <syslog.h>
+#include <unistd.h>
+
+#include <login_cap.h>
+#include <bsd_auth.h>
+#include <skey.h>
+
+__RCSID("$MirOS$");
+
+#define	MODE_LOGIN	0
+#define	MODE_CHALLENGE	1
+#define	MODE_RESPONSE	2
+
+void quit(int) __dead;
+void send_fd(int);
+void suspend(int);
+
+volatile sig_atomic_t resumed;
+struct skey skey;
+
+int
+main(int argc, char *argv[])
+{
+	FILE *back = NULL;
+	char *user = NULL, *cp, *ep;
+	char challenge[SKEY_MAX_CHALLENGE+17], response[SKEY_MAX_PW_LEN+1];
+	const char *errstr;
+	int ch, fd = -1, haskey = 0, mode = MODE_LOGIN;
+
+	(void)signal(SIGINT, quit);
+	(void)signal(SIGQUIT, quit);
+	(void)signal(SIGALRM, quit);
+	(void)signal(SIGTSTP, suspend);
+	(void)setpriority(PRIO_PROCESS, 0, 0);
+
+	openlog(NULL, LOG_ODELAY, LOG_AUTH);
+
+	while ((ch = getopt(argc, argv, "ds:v:")) != -1) {
+		switch (ch) {
+		case 'd':
+			back = stdout;
+			break;
+		case 's':	/* service */
+			if (strcmp(optarg, "login") == 0)
+				mode = MODE_LOGIN;
+			else if (strcmp(optarg, "challenge") == 0)
+				mode = MODE_CHALLENGE;
+			else if (strcmp(optarg, "response") == 0)
+				mode = MODE_RESPONSE;
+			else {
+				syslog(LOG_ERR, "%s: invalid service", optarg);
+				exit(1);
+			}
+			break;
+		case 'v':
+			if (strncmp(optarg, "fd=", 3) == 0) {
+				fd = strtonum(optarg + 3, 0, INT_MAX, &errstr);
+				if (errstr != NULL) {
+					syslog(LOG_ERR, "fd is %s: %s",
+					    errstr, optarg + 3);
+					fd = -1;
+				}
+			}
+			/* silently ignore unsupported variables */
+			break;
+		default:
+			syslog(LOG_ERR, "usage error");
+			exit(1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	switch (argc) {
+	case 2:	/* silently ignore class */
+	case 1:
+		user = *argv;
+		break;
+	default:
+		syslog(LOG_ERR, "usage error");
+		exit(1);
+	}
+
+	if (back == NULL && (back = fdopen(3, "r+")) == NULL)  {
+		syslog(LOG_ERR, "reopening back channel: %m");
+		exit(1);
+	}
+
+	/*
+	 * Note: our skeychallenge2() will always fill in the challenge,
+	 *       even if it has to create a fake one.
+	 */
+	switch (mode) {
+	case MODE_LOGIN:
+		haskey = (skeychallenge2(fd, &skey, user, challenge) == 0);
+		strlcat(challenge, "\nS/Key Password: ", sizeof(challenge));
+
+		/* time out getting passphrase after 2 minutes to avoid a DoS */
+		if (haskey)
+			alarm(120);
+		resumed = 0;
+		if (!readpassphrase(challenge, response, sizeof(response), 0))
+			exit(1);
+		if (response[0] == '\0')
+			readpassphrase("S/Key Password [echo on]: ",
+			    response, sizeof(response), RPP_ECHO_ON);
+		alarm(0);
+		if (resumed) {
+			/*
+			 * We were suspended by the user.  Our lock is
+			 * no longer valid so we must regain it so
+			 * an attacker cannot do a partial guess of
+			 * an S/Key response already in progress.
+			 */
+			haskey = (skeylookup(&skey, user) == 0);
+		}
+		break;
+
+	case MODE_CHALLENGE:
+		haskey = (skeychallenge2(fd, &skey, user, challenge) == 0);
+		strlcat(challenge, "\nS/Key Password: ", sizeof(challenge));
+		fprintf(back, BI_VALUE " challenge %s\n",
+		    auth_mkvalue(challenge));
+		fprintf(back, BI_CHALLENGE "\n");
+		if (skey.keyfile)
+			fprintf(back, BI_FDPASS "\n");
+		fflush(back);
+		if (skey.keyfile)
+			send_fd(fileno(back));
+		exit(0);
+
+	case MODE_RESPONSE:
+		/* read challenge */
+		mode = -1;
+		cp = challenge;
+		ep = challenge + sizeof(challenge);
+		while (cp < ep && read(fileno(back), cp, 1) == 1) {
+			if (*cp++ == '\0') {
+				mode = MODE_CHALLENGE;
+				break;
+			}
+		}
+		if (mode != MODE_CHALLENGE) {
+			syslog(LOG_ERR,
+			    "protocol error: bad/missing challenge");
+			exit(1);
+		}
+
+		/* read response */
+		cp = response;
+		ep = response + sizeof(response);
+		while (cp < ep && read(fileno(back), cp, 1) == 1) {
+			if (*cp++ == '\0') {
+				mode = MODE_RESPONSE;
+				break;
+			}
+		}
+		if (mode != MODE_RESPONSE) {
+			syslog(LOG_ERR,
+			    "protocol error: bad/missing response");
+			exit(1);
+		}
+
+		/*
+		 * Since the entry is locked we do not need to compare
+		 * the passed in challenge to the S/Key database but
+		 * maybe we should anyway?
+		 */
+		haskey = (skeychallenge2(fd, &skey, user, challenge) == 0);
+		break;
+	}
+
+	/*
+	 * Ignore keyboard interupt/suspend during database update.
+	 */
+	signal(SIGINT, SIG_IGN);
+	signal(SIGQUIT, SIG_IGN);
+	signal(SIGTSTP, SIG_IGN);
+
+	if (haskey && skeyverify(&skey, response) == 0) {
+		if (mode == MODE_LOGIN) {
+			if (skey.n <= 1)
+				printf("Warning! You MUST change your "
+				    "S/Key password now!\n");
+			else if (skey.n < 5)
+				printf("Warning! Change S/Key password soon\n");
+		}
+		fprintf(back, BI_AUTH "\n");
+		fprintf(back, BI_SECURE "\n");
+		exit(0);
+	}
+	fprintf(back, BI_REJECT "\n");
+	exit(1);
+}
+
+/* ARGSUSED */
+void
+quit(int signo __unused)
+{
+
+	_exit(1);
+}
+
+/* ARSGUSED */
+void
+suspend(int signo)
+{
+	sigset_t nset;
+	int save_errno = errno;
+
+	/*
+	 * Unlock the skey record so we don't sleep holding the lock.
+	 * Unblock SIGTSTP, set it to the default action and then
+	 * resend it so we are suspended properly.
+	 * When we resume, reblock SIGTSTP, reset the signal handler,
+	 * set a flag and restore errno.
+	 */
+	alarm(0);
+	skey_unlock(&skey);
+	(void)signal(signo, SIG_DFL);
+	(void)sigemptyset(&nset);
+	(void)sigaddset(&nset, signo);
+	(void)sigprocmask(SIG_UNBLOCK, &nset, NULL);
+	(void)kill(getpid(), signo);
+	(void)sigprocmask(SIG_BLOCK, &nset, NULL);
+	(void)signal(signo, suspend);
+	resumed = 1;
+	errno = save_errno;
+}
+
+void
+send_fd(int sock)
+{
+	struct msghdr msg;
+	struct cmsghdr *cmp;
+	char cmsgbuf[CMSG_SPACE(sizeof(int))];
+
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_control = cmsgbuf;
+	msg.msg_controllen = CMSG_LEN(sizeof(int));
+
+	cmp = CMSG_FIRSTHDR(&msg);
+	cmp->cmsg_len = CMSG_LEN(sizeof(int));
+	cmp->cmsg_level = SOL_SOCKET;
+	cmp->cmsg_type = SCM_RIGHTS;
+
+	*(int *)CMSG_DATA(cmp) = fileno(skey.keyfile);
+
+	if (sendmsg(sock, &msg, 0) < 0)
+		syslog(LOG_ERR, "sendmsg: %m");
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: login_skey.c,v 1.12 2004/03/10 21:30:27 millert Exp $	*/
+d3 2
+a4 2
+/*-
+ * Copyright (c) 1995 Berkeley Software Design, Inc. All rights reserved.
+d6 3
+a8 15
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Berkeley Software Design,
+ *      Inc.
+ * 4. The name of Berkeley Software Design, Inc.  may not be used to endorse
+ *    or promote products derived from this software without specific prior
+ *    written permission.
+d10 7
+a16 13
+ * THIS SOFTWARE IS PROVIDED BY BERKELEY SOFTWARE DESIGN, INC. ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL BERKELEY SOFTWARE DESIGN, INC. BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	BSDI $From: login_skey.c,v 1.3 1996/09/04 05:24:56 prb Exp $
+d18 1
+a18 1
+#include <sys/types.h>
+d20 1
+a39 1
+#include <sha1.h>
+d42 8
+a49 1
+void quit(int);
+d59 4
+a62 8
+	char *class = 0;
+	char *username = 0;
+	char skeyprompt[SKEY_MAX_CHALLENGE+17];
+	char passbuf[SKEY_MAX_PW_LEN+1];
+	int c, haskey;
+	int mode = 0;
+
+	skeyprompt[0] = '\0';
+d72 3
+a74 3
+	while ((c = getopt(argc, argv, "ds:v:")) != -1)
+		switch (c) {
+		case 'd':	/* to remain undocumented */
+a76 2
+		case 'v':
+			break;
+d79 1
+a79 1
+				mode = 0;
+d81 1
+a81 1
+				mode = 1;
+d83 1
+a83 1
+				mode = 2;
+d89 11
+d104 3
+d108 2
+a109 3
+	switch (argc - optind) {
+	case 2:
+		class = argv[optind + 1];
+d111 1
+a111 1
+		username = argv[optind];
+a117 1
+
+d123 8
+a130 52
+	if (mode == 2) {
+		mode = 0;
+		c = -1;
+		/* XXX - redo these loops! */
+		while (++c < sizeof(skeyprompt) &&
+		    read(3, &skeyprompt[c], 1) == 1) {
+			if (skeyprompt[c] == '\0') {
+				mode++;
+				break;
+			}
+		}
+		if (mode == 1) {
+			c = -1;
+			while (++c < sizeof(passbuf) &&
+			    read(3, &passbuf[c], 1) == 1) {
+				if (passbuf[c] == '\0') {
+					mode++;
+					break;
+				}
+			}
+		}
+		if (mode < 2) {
+			syslog(LOG_ERR, "protocol error on back channel");
+			exit(1);
+		}
+		/*
+		 * Sigh.  S/Key really is a stateful protocol.
+		 * We must assume that a user will only try to
+		 * authenticate one at a time and that this call to
+		 * skeychallenge will produce the same results as
+		 * the call to skeychallenge when mode was 1.
+		 *
+		 * Furthermore, RFC2289 requires that an entry be
+		 * locked against a partial guess race which is
+		 * simply not possible if the calling program queries
+		 * the user for the passphrase itself.  Oh well.
+		 */
+		haskey = (skeychallenge(&skey, username, skeyprompt) == 0);
+	} else {
+		/*
+		 * Attempt an S/Key challenge.
+		 * The OpenBSD skeychallenge() will always fill in a
+		 * challenge, even if it has to cons one up.
+		 */
+		haskey = (skeychallenge(&skey, username, skeyprompt) == 0);
+		strlcat(skeyprompt, "\nS/Key Password: ", sizeof skeyprompt);
+		if (mode == 1) {
+			fprintf(back, BI_VALUE " challenge %s\n",
+			    auth_mkvalue(skeyprompt));
+			fprintf(back, BI_CHALLENGE "\n");
+			exit(0);
+		}
+d132 1
+a132 1
+		/* Time out getting passphrase after 2 minutes to avoid a DoS */
+d136 1
+a136 1
+		if (!readpassphrase(skeyprompt, passbuf, sizeof(passbuf), 0))
+d138 1
+a138 1
+		if (passbuf[0] == '\0')
+d140 1
+a140 1
+			    passbuf, sizeof(passbuf), RPP_ECHO_ON);
+d149 47
+a195 1
+			haskey = (skeylookup(&skey, username) == 0);
+d197 8
+d214 2
+a215 2
+	if (haskey && skeyverify(&skey, passbuf) == 0) {
+		if (mode == 0) {
+d230 1
+d232 1
+a232 1
+quit(int signo)
+d238 1
+d264 22
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: login_skey.c,v 1.17 2004/09/18 19:36:54 deraadt Exp $	*/
+d3 2
+a4 2
+/*
+ * Copyright (c) 2000, 2001, 2004 Todd C. Miller <Todd.Miller@@courtesan.com>
+d6 15
+a20 3
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+d22 13
+a34 7
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+d36 1
+a36 1
+
+a37 1
+#include <sys/socket.h>
+d57 1
+a59 4
+#define	MODE_LOGIN	0
+#define	MODE_CHALLENGE	1
+#define	MODE_RESPONSE	2
+
+a60 1
+void send_fd(int);
+d70 8
+a77 4
+	char *user = NULL, *cp, *ep;
+	char challenge[SKEY_MAX_CHALLENGE+17], response[SKEY_MAX_PW_LEN+1];
+	const char *errstr;
+	int ch, fd = -1, haskey = 0, mode = MODE_LOGIN;
+d87 3
+a89 3
+	while ((ch = getopt(argc, argv, "ds:v:")) != -1) {
+		switch (ch) {
+		case 'd':
+d92 2
+d96 1
+a96 1
+				mode = MODE_LOGIN;
+d98 1
+a98 1
+				mode = MODE_CHALLENGE;
+d100 1
+a100 1
+				mode = MODE_RESPONSE;
+a105 11
+		case 'v':
+			if (strncmp(optarg, "fd=", 3) == 0) {
+				fd = strtonum(optarg + 3, 0, INT_MAX, &errstr);
+				if (errstr != NULL) {
+					syslog(LOG_ERR, "fd is %s: %s",
+					    errstr, optarg + 3);
+					fd = -1;
+				}
+			}
+			/* silently ignore unsupported variables */
+			break;
+a109 3
+	}
+	argc -= optind;
+	argv += optind;
+d111 3
+a113 2
+	switch (argc) {
+	case 2:	/* silently ignore class */
+d115 1
+a115 1
+		user = *argv;
+d122 1
+d128 52
+a179 8
+	/*
+	 * Note: our skeychallenge2() will always fill in the challenge,
+	 *       even if it has to create a fake one.
+	 */
+	switch (mode) {
+	case MODE_LOGIN:
+		haskey = (skeychallenge2(fd, &skey, user, challenge) == 0);
+		strlcat(challenge, "\nS/Key Password: ", sizeof(challenge));
+d181 1
+a181 1
+		/* time out getting passphrase after 2 minutes to avoid a DoS */
+d185 1
+a185 1
+		if (!readpassphrase(challenge, response, sizeof(response), 0))
+d187 1
+a187 1
+		if (response[0] == '\0')
+d189 1
+a189 1
+			    response, sizeof(response), RPP_ECHO_ON);
+d198 1
+a198 45
+			haskey = (skeylookup(&skey, user) == 0);
+		}
+		break;
+
+	case MODE_CHALLENGE:
+		haskey = (skeychallenge2(fd, &skey, user, challenge) == 0);
+		strlcat(challenge, "\nS/Key Password: ", sizeof(challenge));
+		fprintf(back, BI_VALUE " challenge %s\n",
+		    auth_mkvalue(challenge));
+		fprintf(back, BI_CHALLENGE "\n");
+		fprintf(back, BI_FDPASS "\n");
+		fflush(back);
+		send_fd(fileno(back));
+		exit(0);
+
+	case MODE_RESPONSE:
+		/* read challenge */
+		mode = -1;
+		cp = challenge;
+		ep = challenge + sizeof(challenge);
+		while (cp < ep && read(fileno(back), cp, 1) == 1) {
+			if (*cp++ == '\0') {
+				mode = MODE_CHALLENGE;
+				break;
+			}
+		}
+		if (mode != MODE_CHALLENGE) {
+			syslog(LOG_ERR,
+			    "protocol error: bad/missing challenge");
+			exit(1);
+		}
+
+		/* read response */
+		cp = response;
+		ep = response + sizeof(response);
+		while (cp < ep && read(fileno(back), cp, 1) == 1) {
+			if (*cp++ == '\0') {
+				mode = MODE_RESPONSE;
+				break;
+			}
+		}
+		if (mode != MODE_RESPONSE) {
+			syslog(LOG_ERR,
+			    "protocol error: bad/missing response");
+			exit(1);
+a199 8
+
+		/*
+		 * Since the entry is locked we do not need to compare
+		 * the passed in challenge to the S/Key database but
+		 * maybe we should anyway?
+		 */
+		haskey = (skeychallenge2(fd, &skey, user, challenge) == 0);
+		break;
+d209 2
+a210 2
+	if (haskey && skeyverify(&skey, response) == 0) {
+		if (mode == MODE_LOGIN) {
+a224 1
+/* ARGSUSED */
+a231 1
+/* ARSGUSED */
+a256 22
+
+void
+send_fd(int sock)
+{
+	struct msghdr msg;
+	struct cmsghdr *cmp;
+	char cmsgbuf[CMSG_SPACE(sizeof(int))];
+
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_control = cmsgbuf;
+	msg.msg_controllen = CMSG_LEN(sizeof(int));
+
+	cmp = CMSG_FIRSTHDR(&msg);
+	cmp->cmsg_len = CMSG_LEN(sizeof(int));
+	cmp->cmsg_level = SOL_SOCKET;
+	cmp->cmsg_type = SCM_RIGHTS;
+
+	*(int *)CMSG_DATA(cmp) = fileno(skey.keyfile);
+
+	if (sendmsg(sock, &msg, 0) < 0)
+		syslog(LOG_ERR, "sendmsg: %m");
+}
+@
+

@@ -1,0 +1,153 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2006.01.17.20.45.42;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043CD575B2AADC8AB;
+
+1.1
+date	2005.05.14.23.21.02;	author tg;	state Exp;
+branches
+	1.1.201.1;
+next	;
+commitid	1e94428687d39445;
+
+1.1.201.1
+date	2005.05.14.23.21.02;	author tg;	state Exp;
+branches;
+next	;
+commitid	1e94428687d39445;
+
+
+desc
+@@
+
+
+1.2
+log
+@Apply http://tinydns.org/srv-patch, bump patchlevel:
+
+| From: Michael Handler <handler@@sub-rosa.com>
+| To: dns@@list.cr.yp.to
+| Subject: tinydns-data SRV & axfr-get SRV/PTR patches
+| Date: Thu, 14 Sep 2000 20:37:50 -0400
+|
+| Here's a combined patch that:
+|
+| a) adds a native SRV type to tinydns-data
+|
+| Sfqdn:ip:x:port:weight:priority:ttl:timestamp
+|
+| Standard rules for ip, x, ttl, and timestamp apply. Port, weight, and
+| priority all range from 0-65535. Weight and priority are optional; they
+| default to zero if not provided.
+|
+| Sconsole.zoinks.example.com:1.2.3.4:rack102-con1:2001:69:7:300:
+|
+| b) makes axfr-get decompose SRV and PTR records and write them out in
+| native format, rather than opaque. Again, this is necessary because if the
+| DNAME fields in the records reference the same zone as fqdn, they can have
+| compression pointers that are bogus outside the context of that specific
+| packet, and which can't be correctly loaded into data.cdb by tinydns-data.
+|
+| --michael
+|
+| Laurent G. Bercot <ska-djbdns@@skarnet.org> updated it for djbdns-1.05:
+@
+text
+@$MirOS: ports/net/djbdns/patches/patch-src_axfr-get_c,v 1.1.201.1 2005/05/14 23:21:02 tg Exp $
+--- src/axfr-get.c.orig	Sun Feb 11 21:11:23 2001
++++ src/axfr-get.c	Tue Jan 17 20:35:47 2006
+@@@@ -13,6 +13,7 @@@@
+ #include "byte.h"
+ #include "str.h"
+ #include "ip4.h"
++#include "ip6.h"
+ #include "timeoutread.h"
+ #include "timeoutwrite.h"
+ #include "dns.h"
+@@@@ -209,6 +210,26 @@@@ unsigned int doit(char *buf,unsigned int
+     if (!stralloc_cats(&line,".:")) return 0;
+     if (!stralloc_catulong0(&line,dist,0)) return 0;
+   }
++  else if (byte_equal(data,2,DNS_T_SRV)) {
++    uint16 dist, weight, port;
++    if (!stralloc_copys(&line,"S")) return 0;
++    if (!dns_domain_todot_cat(&line,d1)) return 0;
++    if (!stralloc_cats(&line,"::")) return 0;
++    pos = x_copy(buf,len,pos,data,2);
++    uint16_unpack_big(data,&dist);
++    pos = x_copy(buf,len,pos,data,2);
++    uint16_unpack_big(data,&weight);
++    pos = x_copy(buf,len,pos,data,2);
++    uint16_unpack_big(data,&port);
++    x_getname(buf,len,pos,&d1);
++    if (!dns_domain_todot_cat(&line,d1)) return 0;
++    if (!stralloc_cats(&line,".:")) return 0;
++    if (!stralloc_catulong0(&line,dist,0)) return 0;
++    if (!stralloc_cats(&line,":")) return 0;
++    if (!stralloc_catulong0(&line,weight,0)) return 0;
++    if (!stralloc_cats(&line,":")) return 0;
++    if (!stralloc_catulong0(&line,port,0)) return 0;
++  }
+   else if (byte_equal(data,2,DNS_T_A) && (dlen == 4)) {
+     char ipstr[IP4_FMT];
+     if (!stralloc_copys(&line,"+")) return 0;
+@@@@ -216,6 +237,22 @@@@ unsigned int doit(char *buf,unsigned int
+     if (!stralloc_cats(&line,":")) return 0;
+     x_copy(buf,len,pos,data,4);
+     if (!stralloc_catb(&line,ipstr,ip4_fmt(ipstr,data))) return 0;
++  }
++  else if (byte_equal(data,2,DNS_T_PTR)) {
++    if (!stralloc_copys(&line,"^")) return 0;
++    if (!dns_domain_todot_cat(&line,d1)) return 0;
++    if (!stralloc_cats(&line,":")) return 0;
++    x_getname(buf,len,pos,&d1);
++    if (!dns_domain_todot_cat(&line,d1)) return 0;
++    if (!stralloc_cats(&line,".")) return 0;
++  }
++  else if (byte_equal(data,2,DNS_T_AAAA)) {
++    char ipstr[IP6_FMT];
++    if (!stralloc_copys(&line,"3")) return 0;
++    if (!dns_domain_todot_cat(&line,d1)) return 0;
++    if (!stralloc_cats(&line,":")) return 0;
++    x_copy(buf,len,pos,data,16);
++    if (!stralloc_catb(&line,ipstr,ip6_fmt_flat(ipstr,data))) return 0;
+   }
+   else {
+     unsigned char ch;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 1
+a3 1
++++ src/axfr-get.c	Sat May 14 22:27:17 2005
+d12 28
+a39 1
+@@@@ -216,6 +217,14 @@@@ unsigned int doit(char *buf,unsigned int
+d44 8
+@
+
+
+1.1.201.1
+log
+@New djbdns port, #ifdef'd, "original" and "no_ipv6" flavours removed
+"no_ipv4" non-functional at the moment, will follow later after
+redesign using crunchgen(1) and crunchide(1)
+@
+text
+@@

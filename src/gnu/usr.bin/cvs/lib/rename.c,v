@@ -1,0 +1,258 @@
+head	1.1;
+branch	1.1.101;
+access;
+symbols
+	MIRBSD_10:1.1.101.3.0.4
+	MIRBSD_10_BASE:1.1.101.3
+	MIRBSD_9_BASE:1.1.101.3
+	MIRBSD_8:1.1.101.3.0.2
+	MIRBSD_8_BASE:1.1.101.3
+	cvs-1_12_13:1.1.101.3
+	cvs-1_12_12:1.1.101.2
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.03.06.15.17.51;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.03.06.15.17.51;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.04.19.20.33.22;	author tg;	state Exp;
+branches;
+next	1.1.101.3;
+
+1.1.101.3
+date	2005.12.05.21.43.46;	author tg;	state Exp;
+branches;
+next	;
+commitid	2cec4394b499b817;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* rename.c -- BSD compatible directory function for System V
+   Copyright (C) 1988, 1990 Free Software Foundation, Inc.
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2, or (at your option)
+   any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.  */
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
+#ifndef STDC_HEADERS
+extern int errno;
+#endif
+
+/* Rename file FROM to file TO.
+   Return 0 if successful, -1 if not. */
+
+int
+rename (from, to)
+     char *from;
+     char *to;
+{
+  struct stat from_stats;
+  int pid, status;
+
+  if (stat (from, &from_stats) == 0)
+    {
+      /* We don't check existence_error because the systems which need it
+	 have rename().  */
+      if (CVS_UNLINK (to) && errno != ENOENT)
+	return -1;
+      if ((from_stats.st_mode & S_IFMT) == S_IFDIR)
+	{
+#ifdef MVDIR
+	  /* I don't think MVDIR ever gets defined, but I don't think
+	     it matters, because I don't think CVS ever calls rename()
+	     on directories.  */
+
+	  /* Need a setuid root process to link and unlink directories. */
+	  pid = fork ();
+	  switch (pid)
+	    {
+	    case -1:		/* Error. */
+	      error (1, errno, "cannot fork");
+
+	    case 0:		/* Child. */
+	      execl (MVDIR, "mvdir", from, to, (char *) 0);
+	      error (255, errno, "cannot run `%s'", MVDIR);
+
+	    default:		/* Parent. */
+	      while (wait (&status) != pid)
+		/* Do nothing. */ ;
+
+	      errno = 0;	/* mvdir printed the system error message. */
+	      return status != 0 ? -1 : 0;
+	    }
+#else /* no MVDIR */
+	  error (1, 0, "internal error: cannot move directories");
+#endif /* no MVDIR */
+	}
+      else
+	{
+	  /* We don't check existence_error because the systems which need it
+	     have rename().  */
+	  if (link (from, to) == 0 && (CVS_UNLINK (from) == 0 || errno == ENOENT))
+	    return 0;
+	}
+    }
+  return -1;
+}
+@
+
+
+1.1.101.1
+log
+@GNU CVS 1.12.11 with the following directories removed:
+- contrib/pam
+- emx
+- os2
+- tools
+- vms
+- windows-NT
+- zlib
+@
+text
+@@
+
+
+1.1.101.2
+log
+@GNU CVS 1.12.12 "should" fix security issues
+@
+text
+@d1 2
+a2 4
+/* Work around the bug in some systems whereby rename fails when the source
+   path has a trailing slash.  The rename functions of SunOS 4.1.1_U1 and
+   mips-dec-ultrix4.4 have this bug.
+   Copyright (C) 2001-2003 Free Software Foundation, Inc.
+d12 1
+a12 1
+   GNU General Public License for more details.
+d14 3
+a16 5
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software Foundation,
+   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+
+/* written by Volker Borchert */
+d18 5
+a22 2
+#if HAVE_CONFIG_H
+# include <config.h>
+a23 8
+#undef rename
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "dirname.h"
+#include "xalloc.h"
+d25 2
+a26 2
+/* Rename the file SRC_PATH to DST_PATH, removing any trailing
+   slashes from SRC_PATH.  Needed for SunOS 4.1.1_U1.  */
+d29 3
+a31 1
+rpl_rename (const char *src_path, const char *dst_path)
+d33 2
+a34 3
+  char *src_temp;
+  int ret_val;
+  size_t s_len = strlen (src_path);
+d36 1
+a36 1
+  if (s_len && src_path[s_len - 1] == '/')
+d38 40
+a77 2
+      src_temp = xstrdup (src_path);
+      strip_trailing_slashes (src_temp);
+d79 1
+a79 9
+  else
+    src_temp = (char *) src_path;
+
+  ret_val = rename (src_temp, dst_path);
+
+  if (src_temp != src_path)
+    free (src_temp);
+
+  return ret_val;
+@
+
+
+1.1.101.3
+log
+@Import current version of GNU CVS, in the hope to actually fix bugs...
+@
+text
+@d2 1
+a2 1
+   file has a trailing slash.  The rename functions of SunOS 4.1.1_U1 and
+d4 1
+a4 1
+   Copyright (C) 2001, 2002, 2003, 2005 Free Software Foundation, Inc.
+d18 1
+a18 1
+   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.  */
+d22 1
+a22 1
+#ifdef HAVE_CONFIG_H
+d34 2
+a35 2
+/* Rename the file SRC to DST, removing any trailing
+   slashes from SRC.  Needed for SunOS 4.1.1_U1.  */
+d38 1
+a38 1
+rpl_rename (char const *src, char const *dst)
+d42 1
+a42 1
+  size_t s_len = strlen (src);
+d44 1
+a44 1
+  if (s_len && src[s_len - 1] == '/')
+d46 1
+a46 1
+      src_temp = xstrdup (src);
+d50 1
+a50 1
+    src_temp = (char *) src;
+d52 1
+a52 1
+  ret_val = rename (src_temp, dst);
+d54 1
+a54 1
+  if (src_temp != src)
+@
+
+

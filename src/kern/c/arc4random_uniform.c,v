@@ -1,0 +1,133 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2010.09.12.17.10.49;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004C8D0939027D8BE7;
+
+1.1
+date	2010.09.12.12.24.28;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004C8CC69150D1B4BD;
+
+
+desc
+@@
+
+
+1.2
+log
+@new implementation of arc4random(3) API (except arc4random_uniform(3),
+which though has been split off earlier today)
+
+deprecate arc4random_push arc4random_pushb arc4random_pushk
+in favour of arc4random_pushb_fast as well
+
+hide internal symbols from user with a version script (only some,
+until the next major bump)
+
+make deprecated functions into macros already
+
+switch some kernel code to use the new shared code already; rewrite
+of kernel arc4random(9) will come next/later
+@
+text
+@/*-
+ * Copyright (c) 2010
+ *	Thorsten Glaser <tg@@mirbsd.org>
+ * Copyright (c) 2008
+ *	Damien Miller <djm@@openbsd.org>
+ * With simplifications by Jinmei Tatuya.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <libckern.h>
+#include <sys/limits.h>
+
+__RCSID("$MirOS: src/kern/c/arc4random_uniform.c,v 1.1 2010/09/12 12:24:28 tg Exp $");
+
+/* u_int32_t in the original API, but we pray they're the same */
+extern uint32_t arc4random(void);
+
+/*
+ * Calculate a uniformly distributed random number less than
+ * upper_bound avoiding "modulo bias".
+ *
+ * Uniformity is achieved by generating new random numbers
+ * until the one returned is outside the range
+ * [0, 2^32 % upper_bound[. This guarantees the selected
+ * random number will be inside the range
+ * [2^32 % upper_bound, 2^32[ which maps back to
+ * [0, upper_bound[ after reduction modulo upper_bound.
+ */
+uint32_t
+arc4random_uniform(uint32_t upper_bound)
+{
+	uint32_t r, min;
+
+	if (upper_bound < 2)
+		return (0);
+
+#if defined(ULONG_MAX) && (ULONG_MAX > 0xFFFFFFFFUL)
+	min = 0x100000000UL % upper_bound;
+#else
+	/* calculate (2^32 % upper_bound) avoiding 64-bit math */
+	if (upper_bound > 0x80000000U)
+		/* 2^32 - upper_bound (only one "value area") */
+		min = 1 + ~upper_bound;
+	else
+		/* ((2^32 - x) % x) == (2^32 % x) when x <= 2^31 */
+		min = (0xFFFFFFFFU - upper_bound + 1) % upper_bound;
+#endif
+
+	/*
+	 * This could theoretically loop forever but each retry has
+	 * p > 0.5 (worst case, usually far better) of selecting a
+	 * number inside the range we need, so it should rarely need
+	 * to re-roll (at all).
+	 */
+	do {
+		r = arc4random();
+	} while (r < min);
+
+	return (r % upper_bound);
+}
+@
+
+
+1.1
+log
+@• kern/c/arc4random_uniform.c, kern/include/libckern.h: move
+  arc4random_uniform(3) implementation here
+• kern/c/Makefile.inc: build arc4random_uniform.c kernel/user
+• lib/libc/crypt/arc4random.c, sys/dev/rnd.c: remove implementation here
+• sys/dev/rndvar.h: prototype is now in <libckern.h>
+• contrib/code/Snippets/arc4random.c: sync with master implementation
+@
+text
+@d22 1
+a22 1
+#include <limits.h>
+d24 1
+a24 1
+__RCSID("$MirOS$");
+@
+

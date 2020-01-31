@@ -1,0 +1,1098 @@
+head	1.4;
+access;
+symbols
+	MIRBSD_10:1.4.0.4
+	MIRBSD_10_BASE:1.4
+	MIRBSD_9_BASE:1.4
+	MIRBSD_8:1.4.0.2
+	MIRBSD_8_BASE:1.4
+	cvs-200507211800:1.1.1.2
+	cvs-200504261445:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2005.04.26.21.06.01;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2005.04.26.15.51.33;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.03.13.19.16.15;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.30.23;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.30.23;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.26.14.55.48;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@some build fixes
+@
+text
+@/**	$MirOS: src/usr.sbin/arp/arp.c,v 1.3 2005/04/26 15:51:33 tg Exp $ */
+/*	$OpenBSD: arp.c,v 1.36 2005/04/04 16:14:45 deraadt Exp $ */
+/*	$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $ */
+
+/*
+ * Copyright (c) 1984, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Sun Microsystems, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+/*
+ * arp - display, set, and delete arp table entries
+ */
+
+#include <sys/param.h>
+#include <sys/file.h>
+#include <sys/socket.h>
+#include <sys/sysctl.h>
+
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <net/if_types.h>
+#include <net/route.h>
+#include <netinet/in.h>
+#include <netinet/if_ether.h>
+#include <arpa/inet.h>
+
+#include <netdb.h>
+#include <errno.h>
+#include <err.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <paths.h>
+#include <unistd.h>
+
+__RCSID("$MirOS: src/usr.sbin/arp/arp.c,v 1.3 2005/04/26 15:51:33 tg Exp $");
+
+int delete(const char *, const char *);
+void search(in_addr_t addr, void (*action)(struct sockaddr_dl *sdl,
+	struct sockaddr_inarp *sin, struct rt_msghdr *rtm));
+void print_entry(struct sockaddr_dl *sdl,
+	struct sockaddr_inarp *sin, struct rt_msghdr *rtm);
+void nuke_entry(struct sockaddr_dl *sdl,
+	struct sockaddr_inarp *sin, struct rt_msghdr *rtm);
+void ether_print(const char *);
+int file(char *);
+int get(const char *);
+int getinetaddr(const char *, struct in_addr *);
+void getsocket(void);
+int rtmsg(int);
+int set(int, char **);
+void usage(void);
+
+static pid_t pid;
+static int replace;	/* replace entries when adding */
+static int nflag;	/* no reverse dns lookups */
+static int aflag;	/* do it for all entries */
+static int s = -1;
+
+extern int h_errno;
+
+/* ROUNDUP() is nasty, but it is identical to what's in the kernel. */
+#define ROUNDUP(a)					\
+	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
+
+/* which function we're supposed to do */
+#define F_GET		1
+#define F_SET		2
+#define F_FILESET	3
+#define F_DELETE	4
+
+int
+main(int argc, char *argv[])
+{
+	int	ch, func = 0, rtn;
+
+	pid = getpid();
+	opterr = 0;
+	while ((ch = getopt(argc, argv, "andSsFf")) != -1) {
+		switch (ch) {
+		case 'a':
+			aflag = 1;
+			break;
+		case 'n':
+			nflag = 1;
+			break;
+		case 'd':
+			if (func)
+				usage();
+			func = F_DELETE;
+			break;
+		case 's':
+			if (func)
+				usage();
+			func = F_SET;
+			break;
+		case 'F':
+			replace = 1;
+			break;
+		case 'f':
+			if (func)
+				usage();
+			func = F_FILESET;
+			break;
+		default:
+			usage();
+			break;
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (!func)
+		func = F_GET;
+	rtn = 0;
+
+	switch (func) {
+	case F_GET:
+		if (aflag && argc == 0)
+			search(0, print_entry);
+		else if (!aflag && argc == 1)
+			rtn = get(argv[0]);
+		else
+			usage();
+		break;
+	case F_SET:
+		if (argc < 2 || argc > 5)
+			usage();
+		if (replace)
+			delete(argv[0], NULL);
+		rtn = set(argc, argv) ? 1 : 0;
+		break;
+	case F_DELETE:
+		if (aflag && argc == 0)
+			search(0, nuke_entry);
+		else if (!aflag && argc == 1)
+			rtn = delete(argv[0], argv[1]);
+		else
+			usage();
+		break;
+	case F_FILESET:
+		if (argc != 1)
+			usage();
+		rtn = file(argv[0]);
+		break;
+	}
+	return (rtn);
+}
+
+/*
+ * Process a file to set standard arp entries
+ */
+int
+file(char *name)
+{
+	char	 line[100], arg[5][50], *args[5];
+	int	 i, retval;
+	FILE	*fp;
+
+	if ((fp = fopen(name, "r")) == NULL)
+		err(1, "cannot open %s", name);
+	args[0] = &arg[0][0];
+	args[1] = &arg[1][0];
+	args[2] = &arg[2][0];
+	args[3] = &arg[3][0];
+	args[4] = &arg[4][0];
+	retval = 0;
+	while (fgets(line, 100, fp) != NULL) {
+		if ((line[0] == '#') || (line[0] == '\n'))
+			continue;
+		i = sscanf(line, "%49s %49s %49s %49s %49s", arg[0], arg[1],
+		    arg[2], arg[3], arg[4]);
+		if (i < 2) {
+			warnx("bad line: %s", line);
+			retval = 1;
+			continue;
+		}
+		if (replace)
+			delete(arg[0], NULL);
+		if (set(i, args))
+			retval = 1;
+	}
+	fclose(fp);
+	return (retval);
+}
+
+void
+getsocket(void)
+{
+	if (s >= 0)
+		return;
+	s = socket(PF_ROUTE, SOCK_RAW, 0);
+	if (s < 0)
+		err(1, "socket");
+}
+
+struct sockaddr_in	so_mask = { 8, 0, 0, { 0xffffffff } };
+struct sockaddr_inarp	blank_sin = { sizeof(blank_sin), AF_INET }, sin_m;
+struct sockaddr_dl	blank_sdl = { sizeof(blank_sdl), AF_LINK }, sdl_m;
+int			expire_time, flags, export_only, doing_proxy,
+			    found_entry;
+struct	{
+	struct rt_msghdr	m_rtm;
+	char			m_space[512];
+}	m_rtmsg;
+
+/*
+ * Set an individual arp entry
+ */
+int
+set(int argc, char *argv[])
+{
+	struct sockaddr_inarp *sin;
+	struct sockaddr_dl *sdl;
+	struct rt_msghdr *rtm;
+	char *eaddr = argv[1], *host = argv[0];
+	struct ether_addr *ea;
+
+	sin = &sin_m;
+	rtm = &(m_rtmsg.m_rtm);
+
+	getsocket();
+	argc -= 2;
+	argv += 2;
+	sdl_m = blank_sdl;		/* struct copy */
+	sin_m = blank_sin;		/* struct copy */
+	if (getinetaddr(host, &sin->sin_addr) == -1)
+		return (1);
+	ea = ether_aton(eaddr);
+	if (ea == NULL)
+		errx(1, "invalid ethernet address: %s", eaddr);
+	memcpy(LLADDR(&sdl_m), ea, sizeof(*ea));
+	sdl_m.sdl_alen = 6;
+	doing_proxy = flags = export_only = expire_time = 0;
+	while (argc-- > 0) {
+		if (strncmp(argv[0], "temp", 4) == 0) {
+			struct timeval time;
+
+			gettimeofday(&time, 0);
+			expire_time = time.tv_sec + 20 * 60;
+			if (flags & RTF_PERMANENT_ARP) {
+				/* temp or permanent, not both */
+				usage();
+				return (0);
+			}
+		} else if (strncmp(argv[0], "pub", 3) == 0) {
+			flags |= RTF_ANNOUNCE;
+			doing_proxy = SIN_PROXY;
+		} else if (strncmp(argv[0], "permanent", 9) == 0) {
+			flags |= RTF_PERMANENT_ARP;
+			if (expire_time != 0) {
+				/* temp or permanent, not both */
+				usage();
+				return (0);
+			}
+		} else if (strncmp(argv[0], "trail", 5) == 0)
+			printf("%s: Sending trailers is no longer supported\n",
+			    host);
+
+		argv++;
+	}
+
+tryagain:
+	if (rtmsg(RTM_GET) < 0) {
+		warn("%s", host);
+		return (1);
+	}
+	sin = (struct sockaddr_inarp *)(rtm + 1);
+	sdl = (struct sockaddr_dl *)(ROUNDUP(sin->sin_len) + (char *)sin);
+	if (sin->sin_addr.s_addr == sin_m.sin_addr.s_addr) {
+		if (sdl->sdl_family == AF_LINK &&
+		    (rtm->rtm_flags & RTF_LLINFO) &&
+		    !(rtm->rtm_flags & RTF_GATEWAY))
+			switch (sdl->sdl_type) {
+			case IFT_ETHER:
+			case IFT_FDDI:
+			case IFT_ISO88023:
+			case IFT_ISO88024:
+			case IFT_ISO88025:
+#ifdef IFT_CARP
+			case IFT_CARP:
+#endif
+				goto overwrite;
+			}
+
+		if (doing_proxy == 0) {
+			printf("set: can only proxy for %s\n", host);
+			return (1);
+		}
+		if (sin_m.sin_other & SIN_PROXY) {
+			printf("set: proxy entry exists for non 802 device\n");
+			return (1);
+		}
+		sin_m.sin_other = SIN_PROXY;
+		export_only = 1;
+		goto tryagain;
+	}
+
+overwrite:
+	if (sdl->sdl_family != AF_LINK) {
+		printf("cannot intuit interface index and type for %s\n", host);
+		return (1);
+	}
+	sdl_m.sdl_type = sdl->sdl_type;
+	sdl_m.sdl_index = sdl->sdl_index;
+	return (rtmsg(RTM_ADD));
+}
+
+/*
+ * Display an individual arp entry
+ */
+int
+get(const char *host)
+{
+	struct sockaddr_inarp *sin;
+
+	sin = &sin_m;
+	sin_m = blank_sin;		/* struct copy */
+	if (getinetaddr(host, &sin->sin_addr) == -1)
+		exit(1);
+	search(sin->sin_addr.s_addr, print_entry);
+	if (found_entry == 0) {
+		printf("%s (%s) -- no entry\n", host, inet_ntoa(sin->sin_addr));
+		return (1);
+	}
+	return (0);
+}
+
+/*
+ * Delete an arp entry
+ */
+int
+delete(const char *host, const char *info)
+{
+	struct sockaddr_inarp *sin;
+	struct rt_msghdr *rtm;
+	struct sockaddr_dl *sdl;
+
+	sin = &sin_m;
+	rtm = &m_rtmsg.m_rtm;
+
+	if (info && strncmp(info, "pro", 3) )
+		export_only = 1;
+	getsocket();
+	sin_m = blank_sin;		/* struct copy */
+	if (getinetaddr(host, &sin->sin_addr) == -1)
+		return (1);
+tryagain:
+	if (rtmsg(RTM_GET) < 0) {
+		warn("%s", host);
+		return (1);
+	}
+	sin = (struct sockaddr_inarp *)(rtm + 1);
+	sdl = (struct sockaddr_dl *)(ROUNDUP(sin->sin_len) + (char *)sin);
+	if (sin->sin_addr.s_addr == sin_m.sin_addr.s_addr)
+		if (sdl->sdl_family == AF_LINK &&
+		    (rtm->rtm_flags & RTF_LLINFO) &&
+		    !(rtm->rtm_flags & RTF_GATEWAY))
+			switch (sdl->sdl_type) {
+			case IFT_ETHER:
+			case IFT_FDDI:
+			case IFT_ISO88023:
+			case IFT_ISO88024:
+			case IFT_ISO88025:
+#ifdef IFT_CARP
+			case IFT_CARP:
+#endif
+				goto delete;
+			}
+
+	if (sin_m.sin_other & SIN_PROXY) {
+		warnx("delete: can't locate %s", host);
+		return (1);
+	} else {
+		sin_m.sin_other = SIN_PROXY;
+		goto tryagain;
+	}
+delete:
+	if (sdl->sdl_family != AF_LINK) {
+		printf("cannot locate %s\n", host);
+		return (1);
+	}
+	if (rtmsg(RTM_DELETE))
+		return (1);
+	printf("%s (%s) deleted\n", host, inet_ntoa(sin->sin_addr));
+	return (0);
+}
+
+/*
+ * Search the entire arp table, and do some action on matching entries.
+ */
+void
+search(in_addr_t addr, void (*action)(struct sockaddr_dl *sdl,
+    struct sockaddr_inarp *sin, struct rt_msghdr *rtm))
+{
+	int mib[6];
+	size_t needed;
+	char *lim, *buf, *next;
+	struct rt_msghdr *rtm;
+	struct sockaddr_inarp *sin;
+	struct sockaddr_dl *sdl;
+
+	mib[0] = CTL_NET;
+	mib[1] = PF_ROUTE;
+	mib[2] = 0;
+	mib[3] = AF_INET;
+	mib[4] = NET_RT_FLAGS;
+	mib[5] = RTF_LLINFO;
+	if (sysctl(mib, 6, NULL, &needed, NULL, 0) < 0)
+		err(1, "route-sysctl-estimate");
+	if (needed == 0)
+		return;
+	if ((buf = malloc(needed)) == NULL)
+		err(1, "malloc");
+	if (sysctl(mib, 6, buf, &needed, NULL, 0) < 0)
+		err(1, "actual retrieval of routing table");
+	lim = buf + needed;
+	for (next = buf; next < lim; next += rtm->rtm_msglen) {
+		rtm = (struct rt_msghdr *)next;
+		sin = (struct sockaddr_inarp *)(rtm + 1);
+		sdl = (struct sockaddr_dl *)(sin + 1);
+		if (addr) {
+			if (addr != sin->sin_addr.s_addr)
+				continue;
+			found_entry = 1;
+		}
+		(*action)(sdl, sin, rtm);
+	}
+	free(buf);
+}
+
+/*
+ * Display an arp entry
+ */
+void
+print_entry(struct sockaddr_dl *sdl, struct sockaddr_inarp *sin,
+    struct rt_msghdr *rtm)
+{
+	char ifname[IFNAMSIZ], *host;
+	struct hostent *hp;
+
+	if (nflag == 0)
+		hp = gethostbyaddr((caddr_t)&(sin->sin_addr),
+		    sizeof(sin->sin_addr), AF_INET);
+	else
+		hp = 0;
+	if (hp)
+		host = hp->h_name;
+	else {
+		host = "?";
+		if (h_errno == TRY_AGAIN)
+			nflag = 1;
+	}
+	printf("%s (%s) at ", host, inet_ntoa(sin->sin_addr));
+	if (sdl->sdl_alen)
+		ether_print(LLADDR(sdl));
+	else
+		printf("(incomplete)");
+	if (if_indextoname(sdl->sdl_index, ifname) != NULL)
+		printf(" on %s", ifname);
+	if (rtm->rtm_flags & RTF_PERMANENT_ARP)
+		printf(" permanent");
+	if (rtm->rtm_rmx.rmx_expire == 0)
+		printf(" static");
+	if (sin->sin_other & SIN_PROXY)
+		printf(" published (proxy only)");
+	if (rtm->rtm_addrs & RTA_NETMASK) {
+		sin = (struct sockaddr_inarp *)
+		    (ROUNDUP(sdl->sdl_len) + (char *)sdl);
+		if (sin->sin_addr.s_addr == 0xffffffff)
+			printf(" published");
+		if (sin->sin_len != 8)
+			printf("(weird %d)", sin->sin_len);
+	}
+	printf("\n");
+}
+
+/*
+ * Nuke an arp entry
+ */
+void
+nuke_entry(struct sockaddr_dl *sdl, struct sockaddr_inarp *sin,
+    struct rt_msghdr *rtm)
+{
+	char ip[20];
+
+	strlcpy(ip, inet_ntoa(sin->sin_addr), sizeof(ip));
+	delete(ip, NULL);
+}
+
+void
+ether_print(const char *scp)
+{
+	const u_char *cp = (u_char *)scp;
+
+	printf("%02x:%02x:%02x:%02x:%02x:%02x",
+	    cp[0], cp[1], cp[2], cp[3], cp[4], cp[5]);
+}
+
+void
+usage(void)
+{
+	fprintf(stderr, "usage: arp [-n] hostname\n");
+	fprintf(stderr, "usage: arp [-n] -a\n");
+	fprintf(stderr, "usage: arp -d hostname\n");
+	fprintf(stderr, "usage: arp -d -a\n");
+	fprintf(stderr, "usage: arp [-F] -s hostname ether_addr "
+	    "[temp | permanent] [pub]\n");
+	fprintf(stderr, "usage: arp [-F] -f filename\n");
+	exit(1);
+}
+
+int
+rtmsg(int cmd)
+{
+	static int seq;
+	struct rt_msghdr *rtm;
+	char *cp;
+	int l;
+
+	rtm = &m_rtmsg.m_rtm;
+	cp = m_rtmsg.m_space;
+	errno = 0;
+
+	if (cmd == RTM_DELETE)
+		goto doit;
+	memset(&m_rtmsg, 0, sizeof(m_rtmsg));
+	rtm->rtm_flags = flags;
+	rtm->rtm_version = RTM_VERSION;
+
+	switch (cmd) {
+	default:
+		errx(1, "internal wrong cmd");
+		/*NOTREACHED*/
+	case RTM_ADD:
+		rtm->rtm_addrs |= RTA_GATEWAY;
+		rtm->rtm_rmx.rmx_expire = expire_time;
+		rtm->rtm_inits = RTV_EXPIRE;
+		rtm->rtm_flags |= (RTF_HOST | RTF_STATIC);
+		sin_m.sin_other = 0;
+		if (doing_proxy) {
+			if (export_only)
+				sin_m.sin_other = SIN_PROXY;
+			else {
+				rtm->rtm_addrs |= RTA_NETMASK;
+				rtm->rtm_flags &= ~RTF_HOST;
+			}
+		}
+		/* FALLTHROUGH */
+	case RTM_GET:
+		rtm->rtm_addrs |= RTA_DST;
+	}
+
+#define NEXTADDR(w, s)					\
+	if (rtm->rtm_addrs & (w)) {			\
+		memcpy(cp, &s, sizeof(s));		\
+		cp += ROUNDUP(sizeof(s));		\
+	}
+
+	NEXTADDR(RTA_DST, sin_m);
+	NEXTADDR(RTA_GATEWAY, sdl_m);
+	NEXTADDR(RTA_NETMASK, so_mask);
+
+	rtm->rtm_msglen = cp - (char *)&m_rtmsg;
+doit:
+	l = rtm->rtm_msglen;
+	rtm->rtm_seq = ++seq;
+	rtm->rtm_type = cmd;
+	if (write(s, (char *)&m_rtmsg, l) < 0)
+		if (errno != ESRCH || cmd != RTM_DELETE) {
+			warn("writing to routing socket");
+			return (-1);
+		}
+
+	do {
+		l = read(s, (char *)&m_rtmsg, sizeof(m_rtmsg));
+	} while (l > 0 && (rtm->rtm_seq != seq || rtm->rtm_pid != pid));
+
+	if (l < 0)
+		warn("read from routing socket");
+	return (0);
+}
+
+int
+getinetaddr(const char *host, struct in_addr *inap)
+{
+	struct hostent *hp;
+
+	if (inet_aton(host, inap) == 1)
+		return (0);
+	if ((hp = gethostbyname(host)) == NULL) {
+		warnx("%s: %s", host, hstrerror(h_errno));
+		return (-1);
+	}
+	memcpy(inap, hp->h_addr, sizeof(*inap));
+	return (0);
+}
+@
+
+
+1.3
+log
+@merge
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d63 1
+a63 1
+__RCSID("$MirOS$");
+d307 1
+d309 1
+d392 1
+d394 1
+@
+
+
+1.2
+log
+@fast merge src/usr.sbin
+@
+text
+@d1 2
+a2 1
+/*	$OpenBSD: arp.c,v 1.30 2003/06/27 22:11:39 deraadt Exp $ */
+a36 11
+#ifndef lint
+static char copyright[] =
+"@@(#) Copyright (c) 1984, 1993\n\
+	The Regents of the University of California.  All rights reserved.\n";
+#endif /* not lint */
+
+#ifndef lint
+/*static char sccsid[] = "from: @@(#)arp.c	8.2 (Berkeley) 1/2/94";*/
+static char *rcsid = "$OpenBSD: arp.c,v 1.30 2003/06/27 22:11:39 deraadt Exp $";
+#endif /* not lint */
+
+a56 1
+#include <nlist.h>
+d63 2
+d82 1
+d102 1
+a102 1
+	int ch, func, rtn;
+d106 2
+a107 4
+	func = 0;
+
+	while ((ch = getopt(argc, argv, "andsf")) != -1) {
+		switch ((char)ch) {
+d124 3
+d156 2
+d183 3
+a185 3
+	char line[100], arg[5][50], *args[5];
+	int i, retval;
+	FILE *fp;
+d195 1
+a195 1
+	while (fgets(line, sizeof(line), fp) != NULL) {
+d198 2
+a199 2
+		i = sscanf(line, "%49s %49s %49s %49s %49s", arg[0], arg[1], arg[2],
+		    arg[3], arg[4]);
+d205 2
+d224 5
+a228 4
+struct	sockaddr_in so_mask = {8, 0, 0, { 0xffffffff}};
+struct	sockaddr_inarp blank_sin = {sizeof(blank_sin), AF_INET }, sin_m;
+struct	sockaddr_dl blank_sdl = {sizeof(blank_sdl), AF_LINK }, sdl_m;
+int	expire_time, flags, export_only, doing_proxy, found_entry;
+d230 2
+a231 2
+	struct	rt_msghdr m_rtm;
+	char	m_space[512];
+d243 1
+a243 1
+	char *eaddr;
+a244 1
+	char *host = argv[0];
+a247 1
+	eaddr = argv[1];
+d257 1
+a257 1
+	if (ea == NULL) 
+d265 2
+a266 1
+			(void)gettimeofday(&time, 0);
+d273 1
+a273 2
+		}
+		else if (strncmp(argv[0], "pub", 3) == 0) {
+d276 1
+a276 2
+		}
+		else if (strncmp(argv[0], "permanent", 9) == 0) {
+d283 4
+a286 5
+		} else if (strncmp(argv[0], "trail", 5) == 0) {
+			(void)printf(
+			    "%s: Sending trailers is no longer supported\n",
+			     host);
+		}
+d289 1
+d300 1
+a300 1
+		    !(rtm->rtm_flags & RTF_GATEWAY)) {
+d302 6
+a307 2
+			case IFT_ETHER: case IFT_FDDI: case IFT_ISO88023:
+			case IFT_ISO88024: case IFT_ISO88025:
+d310 1
+a310 1
+		}
+d312 1
+a312 1
+			(void)printf("set: can only proxy for %s\n", host);
+d316 1
+a316 2
+			(void)printf(
+			    "set: proxy entry exists for non 802 device\n");
+d323 1
+d326 1
+a326 2
+		(void)printf("cannot intuit interface index and type for %s\n",
+		    host);
+d348 1
+a348 2
+		(void)printf("%s (%s) -- no entry\n", host,
+		    inet_ntoa(sin->sin_addr));
+d380 1
+a380 1
+	if (sin->sin_addr.s_addr == sin_m.sin_addr.s_addr) {
+d383 1
+a383 1
+		    !(rtm->rtm_flags & RTF_GATEWAY)) {
+d385 6
+a390 2
+			case IFT_ETHER: case IFT_FDDI: case IFT_ISO88023:
+			case IFT_ISO88024: case IFT_ISO88025:
+d393 1
+a393 2
+		}
+	}
+d403 1
+a403 1
+		(void)printf("cannot locate %s\n", host);
+d408 1
+a408 1
+	(void)printf("%s (%s) deleted\n", host, inet_ntoa(sin->sin_addr));
+d462 1
+a462 1
+	char *host;
+a463 1
+	char ifname[IF_NAMESIZE];
+d477 1
+a477 1
+	(void)printf("%s (%s) at ", host, inet_ntoa(sin->sin_addr));
+d481 1
+a481 1
+		(void)printf("(incomplete)");
+d485 1
+a485 1
+		(void)printf(" permanent");
+d487 1
+a487 1
+		(void)printf(" static");
+d489 1
+a489 1
+		(void)printf(" published (proxy only)");
+d492 1
+a492 1
+			(ROUNDUP(sdl->sdl_len) + (char *)sdl);
+d494 1
+a494 1
+			(void)printf(" published");
+d496 1
+a496 1
+			(void)printf("(weird %d)", sin->sin_len);
+d519 1
+a519 1
+	(void)printf("%02x:%02x:%02x:%02x:%02x:%02x",
+d526 7
+a532 7
+	(void)fprintf(stderr, "usage: arp [-n] hostname\n");
+	(void)fprintf(stderr, "usage: arp [-n] -a\n");
+	(void)fprintf(stderr, "usage: arp -d hostname\n");
+	(void)fprintf(stderr, "usage: arp -d -a\n");
+	(void)fprintf(stderr,
+	    "usage: arp -s hostname ether_addr [temp | permanent] [pub]\n");
+	(void)fprintf(stderr, "usage: arp -f filename\n");
+d550 1
+a550 1
+	(void)memset(&m_rtmsg, 0, sizeof(m_rtmsg));
+d579 1
+a579 1
+		(void)memcpy(cp, &s, sizeof(s));	\
+d592 1
+a592 1
+	if (write(s, (char *)&m_rtmsg, l) < 0) {
+d597 1
+a597 1
+	}
+d601 1
+d618 1
+a618 1
+	(void)memcpy(inap, hp->h_addr, sizeof(*inap));
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d200 3
+a202 1
+	while (fgets(line, 100, fp) != NULL) {
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@latest fixes from OpenBSD, last update for #8 if nothing weird happens
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: arp.c,v 1.36 2005/04/04 16:14:45 deraadt Exp $ */
+d36 11
+d67 1
+a90 1
+static int replace;	/* replace entries when adding */
+d110 1
+a110 1
+	int	ch, func = 0, rtn;
+d114 4
+a117 2
+	while ((ch = getopt(argc, argv, "andSsFf")) != -1) {
+		switch (ch) {
+a133 3
+		case 'F':
+			replace = 1;
+			break;
+a162 2
+		if (replace)
+			delete(argv[0], NULL);
+d188 3
+a190 3
+	char	 line[100], arg[5][50], *args[5];
+	int	 i, retval;
+	FILE	*fp;
+d201 2
+a202 2
+		i = sscanf(line, "%49s %49s %49s %49s %49s", arg[0], arg[1],
+		    arg[2], arg[3], arg[4]);
+a207 2
+		if (replace)
+			delete(arg[0], NULL);
+d225 4
+a228 5
+struct sockaddr_in	so_mask = { 8, 0, 0, { 0xffffffff } };
+struct sockaddr_inarp	blank_sin = { sizeof(blank_sin), AF_INET }, sin_m;
+struct sockaddr_dl	blank_sdl = { sizeof(blank_sdl), AF_LINK }, sdl_m;
+int			expire_time, flags, export_only, doing_proxy,
+			    found_entry;
+d230 2
+a231 2
+	struct rt_msghdr	m_rtm;
+	char			m_space[512];
+d243 1
+a243 1
+	char *eaddr = argv[1], *host = argv[0];
+d245 1
+d249 1
+d259 1
+a259 1
+	if (ea == NULL)
+d267 1
+a267 2
+
+			gettimeofday(&time, 0);
+d274 2
+a275 1
+		} else if (strncmp(argv[0], "pub", 3) == 0) {
+d278 2
+a279 1
+		} else if (strncmp(argv[0], "permanent", 9) == 0) {
+d286 5
+a290 4
+		} else if (strncmp(argv[0], "trail", 5) == 0)
+			printf("%s: Sending trailers is no longer supported\n",
+			    host);
+
+a292 1
+
+d303 1
+a303 1
+		    !(rtm->rtm_flags & RTF_GATEWAY))
+d305 2
+a306 6
+			case IFT_ETHER:
+			case IFT_FDDI:
+			case IFT_ISO88023:
+			case IFT_ISO88024:
+			case IFT_ISO88025:
+			case IFT_CARP:
+d309 1
+a309 1
+
+d311 1
+a311 1
+			printf("set: can only proxy for %s\n", host);
+d315 2
+a316 1
+			printf("set: proxy entry exists for non 802 device\n");
+a322 1
+
+d325 2
+a326 1
+		printf("cannot intuit interface index and type for %s\n", host);
+d348 2
+a349 1
+		printf("%s (%s) -- no entry\n", host, inet_ntoa(sin->sin_addr));
+d381 1
+a381 1
+	if (sin->sin_addr.s_addr == sin_m.sin_addr.s_addr)
+d384 1
+a384 1
+		    !(rtm->rtm_flags & RTF_GATEWAY))
+d386 2
+a387 6
+			case IFT_ETHER:
+			case IFT_FDDI:
+			case IFT_ISO88023:
+			case IFT_ISO88024:
+			case IFT_ISO88025:
+			case IFT_CARP:
+d390 2
+a391 1
+
+d401 1
+a401 1
+		printf("cannot locate %s\n", host);
+d406 1
+a406 1
+	printf("%s (%s) deleted\n", host, inet_ntoa(sin->sin_addr));
+d460 1
+a460 1
+	char ifname[IFNAMSIZ], *host;
+d462 1
+d476 1
+a476 1
+	printf("%s (%s) at ", host, inet_ntoa(sin->sin_addr));
+d480 1
+a480 1
+		printf("(incomplete)");
+d484 1
+a484 1
+		printf(" permanent");
+d486 1
+a486 1
+		printf(" static");
+d488 1
+a488 1
+		printf(" published (proxy only)");
+d491 1
+a491 1
+		    (ROUNDUP(sdl->sdl_len) + (char *)sdl);
+d493 1
+a493 1
+			printf(" published");
+d495 1
+a495 1
+			printf("(weird %d)", sin->sin_len);
+d518 1
+a518 1
+	printf("%02x:%02x:%02x:%02x:%02x:%02x",
+d525 7
+a531 7
+	fprintf(stderr, "usage: arp [-n] hostname\n");
+	fprintf(stderr, "usage: arp [-n] -a\n");
+	fprintf(stderr, "usage: arp -d hostname\n");
+	fprintf(stderr, "usage: arp -d -a\n");
+	fprintf(stderr, "usage: arp [-F] -s hostname ether_addr "
+	    "[temp | permanent] [pub]\n");
+	fprintf(stderr, "usage: arp [-F] -f filename\n");
+d549 1
+a549 1
+	memset(&m_rtmsg, 0, sizeof(m_rtmsg));
+d578 1
+a578 1
+		memcpy(cp, &s, sizeof(s));		\
+d591 1
+a591 1
+	if (write(s, (char *)&m_rtmsg, l) < 0)
+d596 1
+a596 1
+
+a599 1
+
+d616 1
+a616 1
+	memcpy(inap, hp->h_addr, sizeof(*inap));
+@
+

@@ -1,0 +1,544 @@
+head	1.9;
+access;
+symbols
+	tg-ntpd-sigusr1-branch:1.7.0.2
+	MIRBSD_10:1.6.0.2
+	MIRBSD_10_BASE:1.6
+	MIRBSD_9_BASE:1.3
+	MIRBSD_8:1.1.1.4.0.2
+	MIRBSD_8_BASE:1.1.1.4
+	cvs-200512032330:1.1.1.4
+	cvs-200510270930:1.1.1.4
+	cvs-200507211800:1.1.1.3
+	cvs-200504291700:1.1.1.2
+	cvs-200504141900:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.9
+date	2010.09.21.21.24.46;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004C992261692DCA0F;
+
+1.8
+date	2009.05.16.17.28.02;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004A0EF7192E3D2BFA;
+
+1.7
+date	2008.04.17.20.30.55;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004807B39129ECDF50;
+
+1.6
+date	2007.08.17.16.20.01;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10046C5CAC070F196DC;
+
+1.5
+date	2007.08.10.23.33.31;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10046BCF567677FCC76;
+
+1.4
+date	2006.08.18.18.05.49;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10044E6018100C580D3;
+
+1.3
+date	2006.05.28.02.46.48;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10044790F1F7E211B3F;
+
+1.2
+date	2006.03.29.13.19.29;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100442A88E5745FBEB1;
+
+1.1
+date	2005.02.05.17.30.58;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.30.58;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.14.21.05.29;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2005.07.21.21.03.20;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	560042e0092f571e;
+
+1.1.1.4
+date	2005.10.27.09.33.17;	author tg;	state Exp;
+branches;
+next	;
+commitid	734143609eed10f3;
+
+
+desc
+@@
+
+
+1.9
+log
+@use arc4random() a bit more efficiently
+@
+text
+@/**	$MirOS: src/usr.sbin/ntpd/server.c,v 1.8 2009/05/16 17:28:02 tg Exp $ */
+/*	$OpenBSD: server.c,v 1.26 2005/09/24 00:32:03 dtucker Exp $ */
+
+/*
+ * Copyright (c) 2007 Thorsten Glaser <tg@@mirbsd.de>
+ * Copyright (c) 2003, 2004 Henning Brauer <henning@@openbsd.org>
+ * Copyright (c) 2004 Alexander Guy <alexander@@openbsd.org>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF MIND, USE, DATA OR PROFITS, WHETHER
+ * IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <errno.h>
+#include <ifaddrs.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "ntpd.h"
+#include "ntp.h"
+
+__RCSID("$MirOS: src/usr.sbin/ntpd/server.c,v 1.8 2009/05/16 17:28:02 tg Exp $");
+
+int
+setup_listeners(struct servent *se, struct ntpd_conf *conf, u_int *cnt)
+{
+	struct listen_addr	*la;
+	struct ifaddrs		*ifa, *ifap;
+	struct sockaddr		*sa;
+	u_int			 new_cnt = 0;
+	int			 tos = IPTOS_LOWDELAY;
+
+	if (conf->listen_all) {
+		if (getifaddrs(&ifa) == -1)
+			fatal("getifaddrs");
+
+		for (ifap = ifa; ifap != NULL; ifap = ifap->ifa_next) {
+			sa = ifap->ifa_addr;
+
+			if (SA_LEN(sa) == 0)
+				continue;
+			if (sa == NULL ||
+			    (sa->sa_family != AF_INET &&
+			    sa->sa_family != AF_INET6))
+				continue;
+
+			if ((la = calloc(1, sizeof(struct listen_addr))) ==
+			    NULL)
+				fatal("setup_listeners calloc");
+
+			memcpy(&la->sa, sa, SA_LEN(sa));
+			TAILQ_INSERT_TAIL(&conf->listen_addrs, la, entry);
+		}
+
+		freeifaddrs(ifa);
+	}
+
+	TAILQ_FOREACH(la, &conf->listen_addrs, entry) {
+		new_cnt++;
+
+		switch (la->sa.ss_family) {
+		case AF_INET:
+			if (((struct sockaddr_in *)&la->sa)->sin_port == 0)
+				((struct sockaddr_in *)&la->sa)->sin_port =
+				    se->s_port;
+			break;
+		case AF_INET6:
+			if (((struct sockaddr_in6 *)&la->sa)->sin6_port == 0)
+				((struct sockaddr_in6 *)&la->sa)->sin6_port =
+				    se->s_port;
+			break;
+		default:
+			fatalx("king bula sez: af borked");
+		}
+
+		log_info("listening on %s",
+		    log_sockaddr((struct sockaddr *)&la->sa));
+
+		if ((la->fd = socket(la->sa.ss_family, SOCK_DGRAM, 0)) == -1)
+			fatal("socket");
+
+		if (la->sa.ss_family == AF_INET && setsockopt(la->fd,
+		    IPPROTO_IP, IP_TOS, &tos, sizeof(tos)) == -1)
+			log_warn("setsockopt IPTOS_LOWDELAY");
+
+		if (bind(la->fd, (struct sockaddr *)&la->sa,
+		    SA_LEN((struct sockaddr *)&la->sa)) == -1)
+			fatal("bind");
+	}
+
+	*cnt = new_cnt;
+
+	return (0);
+}
+
+int
+server_dispatch(int fd, struct ntpd_conf *conf)
+{
+	struct {
+		struct sockaddr_storage fsa_;
+		socklen_t fsa_len_;
+		struct ntp_msg query_, reply_;
+	} st;
+#define fsa	(st.fsa_)
+#define fsa_len	(st.fsa_len_)
+#define query	(st.query_)
+#define reply	(st.reply_)
+	ssize_t size;
+	double rectime;
+	char buf[NTP_MSGSIZE];
+
+	fsa_len = sizeof(fsa);
+	if ((size = recvfrom(fd, &buf, sizeof(buf), 0,
+	    (struct sockaddr *)&fsa, &fsa_len)) == -1) {
+		if (errno == EHOSTUNREACH || errno == EHOSTDOWN ||
+		    errno == ENETUNREACH || errno == ENETDOWN) {
+			log_warn("recvfrom %s",
+			    log_sockaddr((struct sockaddr *)&fsa));
+			return (0);
+		} else
+			fatal("recvfrom");
+	}
+
+	rectime = gettime();
+
+	if (ntp_getmsg((struct sockaddr *)&fsa, buf, size, &query) == -1)
+		return (0);
+
+	bzero(&reply, sizeof(reply));
+	if (conf->status.synced)
+		reply.status = conf->status.leap;
+	else
+		reply.status = LI_ALARM;
+	reply.status |= (query.status & VERSIONMASK);
+	if ((query.status & MODEMASK) == MODE_CLIENT)
+		reply.status |= MODE_SERVER;
+	else if ((query.status & MODEMASK) == MODE_SYM_ACT)
+		reply.status |= MODE_SYM_PAS;
+	else
+		/* reserved, broadcast, control msg, private use */
+		goto out;
+
+	reply.stratum =	conf->status.stratum;
+	reply.ppoll = query.ppoll;
+	reply.precision = conf->status.precision;
+	reply.rectime = d_to_lfp(rectime);
+	reply.reftime = d_to_lfp(conf->status.reftime);
+	reply.orgtime = query.xmttime;
+	reply.rootdelay = d_to_sfp(conf->status.rootdelay);
+
+	if (((query.status & VERSIONMASK) >> 3) > 3 && reply.stratum > 1)
+		reply.refid = conf->status.refid4;
+	else
+		reply.refid = conf->status.refid;
+
+	reply.xmttime = d_to_lfp(gettime());
+	ntp_sendmsg(fd, (struct sockaddr *)&fsa, &reply, size, 0);
+ out:
+	arc4random_pushb_fast(&st, sizeof(st));
+	return (0);
+}
+@
+
+
+1.8
+log
+@only send answer packets (server or symmetric-passive) in response
+to request packets (client or symmetric-active), but not to other
+types (broadcast, server, symmetric-passive, or one of the reserved
+or private types)
+
+submitted upstream; Message-ID: <Pine.BSM.4.64L.0905161727050.25687@@herc.mirbsd.org>
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/ntpd/server.c,v 1.7 2008/04/17 20:30:55 tg Exp $ */
+d33 1
+a33 1
+__RCSID("$MirOS: src/usr.sbin/ntpd/server.c,v 1.7 2008/04/17 20:30:55 tg Exp $");
+d170 1
+a170 1
+	arc4random_pushb(&st, sizeof (st));
+@
+
+
+1.7
+log
+@• take network address of peer into account when arc4random_pushb(3)ing
+• optimise a little while here
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/ntpd/server.c,v 1.6 2007/08/17 16:20:01 tg Exp $ */
+d33 1
+a33 1
+__RCSID("$MirOS: src/usr.sbin/ntpd/server.c,v 1.6 2007/08/17 16:20:01 tg Exp $");
+d148 2
+d151 2
+a152 1
+		reply.status |= MODE_SYM_PAS;
+d169 1
+@
+
+
+1.6
+log
+@fix the other half of the endianness problem
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/ntpd/server.c,v 1.5 2007/08/10 23:33:31 tg Exp $ */
+d33 1
+a33 1
+__RCSID("$MirOS: src/usr.sbin/ntpd/server.c,v 1.5 2007/08/10 23:33:31 tg Exp $");
+d110 12
+a121 7
+	ssize_t			 size;
+	u_int8_t		 version;
+	double			 rectime;
+	struct sockaddr_storage	 fsa;
+	socklen_t		 fsa_len;
+	struct ntp_msg		 query, reply;
+	char			 buf[NTP_MSGSIZE];
+a139 2
+	version = (query.status & VERSIONMASK) >> 3;
+
+d159 1
+a159 1
+	if (version > 3 && reply.stratum > 1)
+d166 1
+a166 8
+	/*
+	 * fabs() requires libm, so we do it like this
+	 * and hope gcc optimises it for us
+	 */
+	if (((lfp_to_d(query.xmttime) - rectime) > 12.0) ||
+	    ((lfp_to_d(query.xmttime) - rectime) < -12.0))
+		arc4random_pushb(&query.xmttime, sizeof (query.xmttime));
+	/* note this does not reduce accuracy of the replies here */
+@
+
+
+1.5
+log
+@sanitise refid handling:
+• per RFC for SNTP4 and NTP4 draft, even NTP4 Stratum-1 requests use the
+  ASCII string as reference ID, like NTP3
+• fix an endianness problem for NTP3 refids
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/ntpd/server.c,v 1.4 2006/08/18 18:05:49 tg Exp $ */
+d33 1
+a33 1
+__RCSID("$MirOS: src/usr.sbin/ntpd/server.c,v 1.4 2006/08/18 18:05:49 tg Exp $");
+d159 1
+a159 1
+		reply.refid = htonl(conf->status.refid);
+@
+
+
+1.4
+log
+@simplify and speed up by using arc4random_pushb and update a comment
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/ntpd/server.c,v 1.3 2006/05/28 02:46:48 tg Exp $ */
+d5 1
+d33 1
+a33 1
+__RCSID("$MirOS: src/usr.sbin/ntpd/server.c,v 1.3 2006/05/28 02:46:48 tg Exp $");
+d156 1
+a156 1
+	if (version > 3)
+d159 1
+a159 1
+		reply.refid = conf->status.refid;
+@
+
+
+1.3
+log
+@* small accuracy improvement by moving gettime() call
+* use 12s not 3s as min-rand-delay
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.sbin/ntpd/server.c,v 1.2 2006/03/29 13:19:29 tg Exp $ */
+d32 1
+a32 1
+__RCSID("$MirOS: src/usr.sbin/ntpd/server.c,v 1.2 2006/03/29 13:19:29 tg Exp $");
+d167 2
+a168 4
+	    ((lfp_to_d(query.xmttime) - rectime) < -12.0)) {
+		arc4random_push(query.xmttime.int_partl);
+		arc4random_push(query.xmttime.fractionl);
+	}
+@
+
+
+1.2
+log
+@when running ntpd, now OpenNTPD clients (sending out random data as their
+own xmttime*, cf. client.c line 171f) can feed the server entropy as well
+doesn't reduce accuracy, only slows down replies slightly under high load
+
+*) determined by abs(remote_xmttime - rectime) > 3.0
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d32 1
+a32 1
+__RCSID("$MirOS$");
+a151 1
+	reply.xmttime = d_to_lfp(gettime());
+d160 1
+d166 2
+a167 2
+	if (((lfp_to_d(query.xmttime) - rectime) > 3.0) ||
+	    ((lfp_to_d(query.xmttime) - rectime) < -3.0)) {
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+a2 1
+/*	$OpenBSD: server.c,v 1.20 2004/12/22 05:36:11 dtucker Exp $ */
+d32 2
+d50 5
+a54 2
+			if (sa->sa_family != AF_INET &&
+			    sa->sa_family != AF_INET6)
+d121 1
+a121 1
+		    errno == ENETDOWN) {
+d131 1
+a131 1
+	if (ntp_getmsg(buf, size, &query) == -1)
+d137 5
+a141 1
+	reply.status = conf->status.leap | (query.status & VERSIONMASK);
+d157 1
+a157 1
+		reply.refid = reply.xmttime.fractionl;
+d162 10
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@we like OpenNTPD so much we want to have current one
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: server.c,v 1.21 2005/01/28 12:01:32 dtucker Exp $ */
+d115 1
+a115 1
+		    errno == ENETUNREACH || errno == ENETDOWN) {
+@
+
+
+1.1.1.3
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: server.c,v 1.23 2005/07/05 10:09:12 dtucker Exp $ */
+d47 2
+a48 3
+			if (sa == NULL ||
+			    (sa->sa_family != AF_INET &&
+			    sa->sa_family != AF_INET6))
+d147 1
+a147 1
+		reply.refid = conf->status.refid4;
+@
+
+
+1.1.1.4
+log
+@current OpenNTPD
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: server.c,v 1.26 2005/09/24 00:32:03 dtucker Exp $ */
+a46 2
+			if (SA_LEN(sa) == 0)
+				continue;
+d126 1
+a126 1
+	if (ntp_getmsg((struct sockaddr *)&fsa, buf, size, &query) == -1)
+d132 1
+a132 5
+	if (conf->status.synced)
+		reply.status = conf->status.leap;
+	else
+		reply.status = LI_ALARM;
+	reply.status |= (query.status & VERSIONMASK);
+@
+
+

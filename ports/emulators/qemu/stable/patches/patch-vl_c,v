@@ -1,0 +1,217 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2009.10.27.13.09.51;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004AE6F12912E1C3B2;
+
+1.1
+date	2008.05.07.15.46.14;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004821CEB27BD5D7BE;
+
+
+desc
+@@
+
+
+1.2
+log
+@make “qemu -fda allinone.img -tftp /tmp/tftpboot -bootp /pxelinux.0 -s -S”
+work for MirOS bsd4grml debugging
+@
+text
+@$MirOS: ports/emulators/qemu/stable/patches/patch-vl_c,v 1.1 2008/05/07 15:46:14 tg Exp $
+--- vl.c.orig	Sun Sep  4 17:11:09 2005
++++ vl.c	Tue Oct 27 12:35:01 2009
+@@@@ -42,7 +42,7 @@@@
+ #include <dirent.h>
+ #ifdef _BSD
+ #include <sys/stat.h>
+-#ifndef __APPLE__
++#if !defined(__APPLE__) && !defined(__OpenBSD__)
+ #include <libutil.h>
+ #endif
+ #else
+@@@@ -81,6 +81,8 @@@@
+ 
+ #include "exec-all.h"
+ 
++extern const char *bootp_filename;
++
+ //#define DO_TB_FLUSH
+ 
+ #define DEFAULT_NETWORK_SCRIPT "/etc/qemu-ifup"
+@@@@ -503,10 +505,18 @@@@ int64_t cpu_get_real_ticks(void)
+ 
+ #elif defined(__i386__)
+ 
++#ifdef __OpenBSD__
++#include <machine/pctr.h>
++#endif
++
+ int64_t cpu_get_real_ticks(void)
+ {
+     int64_t val;
++#ifdef __OpenBSD__
++    val = rdtsc();
++#else
+     asm volatile ("rdtsc" : "=A" (val));
++#endif
+     return val;
+ }
+ 
+@@@@ -911,13 +921,6 @@@@ static int start_rtc_timer(void)
+     return 0;
+ }
+ 
+-#else
+-
+-static int start_rtc_timer(void)
+-{
+-    return -1;
+-}
+-
+ #endif /* !defined(__linux__) */
+ 
+ #endif /* !defined(_WIN32) */
+@@@@ -986,7 +989,9 @@@@ static void init_timers(void)
+         } else 
+ #endif /* defined(__linux__) */
+         {
++#if defined(__linux__)
+         use_itimer:
++#endif
+             pit_min_timer_count = ((uint64_t)itv.it_interval.tv_usec * 
+                                    PIT_FREQ) / 1000000;
+         }
+@@@@ -1635,6 +1640,7 @@@@ static int tun_open(char *ifname, int if
+ {
+     int fd;
+     char *dev;
++#ifndef __OpenBSD__
+     struct stat s;
+ 
+     fd = open("/dev/tap", O_RDWR);
+@@@@ -1645,6 +1651,22 @@@@ static int tun_open(char *ifname, int if
+ 
+     fstat(fd, &s);
+     dev = devname(s.st_rdev, S_IFCHR);
++#else
++    char dvn[20];
++    int n;
++
++    dev = dvn;
++    for (n = 0; n < 2147483647; ++n) {
++	snprintf(dvn, sizeof(dvn), "/dev/tun%d", n);
++	if ((fd = open(dvn, O_RDWR)) != -1)
++	    break;
++    }
++    if (fd == -1) {
++	fprintf(stderr, "warning: failed to open /dev/tunN for N = 0 .. 2147483647, no virtual network emulation\n");
++	return -1;
++    }
++    printf("Connected to host network interface: %s\n", dvn);
++#endif
+     pstrcpy(ifname, ifname_size, dev);
+ 
+     fcntl(fd, F_SETFL, O_NONBLOCK);
+@@@@ -2854,7 +2876,8 @@@@ void help(void)
+            "-tun-fd fd      use this fd as already opened tap/tun interface\n"
+ #ifdef CONFIG_SLIRP
+            "-user-net       use user mode network stack [default if no tap/tun script]\n"
+-           "-tftp prefix    allow tftp access to files starting with prefix [-user-net]\n"
++           "-tftp prefix    allow tftp access, prepend prefix to filenames [-user-net]\n"
++           "-bootp file     advertise file in BOOTP replies\n"
+ #ifndef _WIN32
+            "-smb dir        allow SMB access to files in 'dir' [-user-net]\n"
+ #endif
+@@@@ -2943,6 +2966,7 @@@@ enum {
+     QEMU_OPTION_tun_fd,
+     QEMU_OPTION_user_net,
+     QEMU_OPTION_tftp,
++    QEMU_OPTION_bootp,
+     QEMU_OPTION_smb,
+     QEMU_OPTION_redir,
+     QEMU_OPTION_dummy_net,
+@@@@ -3007,6 +3031,7 @@@@ const QEMUOption qemu_options[] = {
+ #ifdef CONFIG_SLIRP
+     { "user-net", 0, QEMU_OPTION_user_net },
+     { "tftp", HAS_ARG, QEMU_OPTION_tftp },
++    { "bootp", HAS_ARG, QEMU_OPTION_bootp },
+ #ifndef _WIN32
+     { "smb", HAS_ARG, QEMU_OPTION_smb },
+ #endif
+@@@@ -3048,7 +3073,7 @@@@ const QEMUOption qemu_options[] = {
+     /* temporary options */
+     { "pci", 0, QEMU_OPTION_pci },
+     { "cirrusvga", 0, QEMU_OPTION_cirrusvga },
+-    { NULL },
++    { NULL, 0, 0 },
+ };
+ 
+ #if defined (TARGET_I386) && defined(USE_CODE_COPY)
+@@@@ -3185,7 +3210,7 @@@@ int main(int argc, char **argv)
+         serial_devices[i][0] = '\0';
+     serial_device_index = 0;
+     
+-    pstrcpy(parallel_devices[0], sizeof(parallel_devices[0]), "vc");
++    pstrcpy(parallel_devices[0], sizeof(parallel_devices[0]), "null");
+     for(i = 1; i < MAX_PARALLEL_PORTS; i++)
+         parallel_devices[i][0] = '\0';
+     parallel_device_index = 0;
+@@@@ -3385,6 +3410,9 @@@@ int main(int argc, char **argv)
+ #ifdef CONFIG_SLIRP
+             case QEMU_OPTION_tftp:
+ 		tftp_prefix = optarg;
++                break;
++            case QEMU_OPTION_bootp:
++                bootp_filename = optarg;
+                 break;
+ #ifndef _WIN32
+             case QEMU_OPTION_smb:
+@
+
+
+1.1
+log
+@move existing qemu port (0.7.2) to emulators/qemu/stable/
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/emulators/qemu/patches/patch-vl_c,v 1.4 2006/10/02 22:18:35 tg Exp $
+d3 1
+a3 1
++++ vl.c	Mon Oct  2 21:55:32 2006
+d13 10
+a22 1
+@@@@ -503,10 +503,18 @@@@ int64_t cpu_get_real_ticks(void)
+d41 1
+a41 1
+@@@@ -911,13 +919,6 @@@@ static int start_rtc_timer(void)
+d55 1
+a55 1
+@@@@ -986,7 +987,9 @@@@ static void init_timers(void)
+d65 1
+a65 1
+@@@@ -1635,6 +1638,7 @@@@ static int tun_open(char *ifname, int if
+d73 1
+a73 1
+@@@@ -1645,6 +1649,22 @@@@ static int tun_open(char *ifname, int if
+d96 27
+a122 1
+@@@@ -3048,7 +3068,7 @@@@ const QEMUOption qemu_options[] = {
+d131 1
+a131 1
+@@@@ -3185,7 +3205,7 @@@@ int main(int argc, char **argv)
+d140 10
+@
+

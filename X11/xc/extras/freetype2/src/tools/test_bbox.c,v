@@ -1,0 +1,352 @@
+head	1.2;
+access;
+symbols
+	freetype-2_7_1:1.1.115.2
+	freetype-2_3_12:1.1.115.1
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.1.103.1
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2017.04.15.19.22.12;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10058F2723111C7BEE2;
+
+1.1
+date	2005.03.18.10.43.18;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.39;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.18;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.51;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2017.04.15.15.42.13;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.2
+log
+@first cut at a quickmerge
+@
+text
+@#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_BBOX_H
+
+
+#include <time.h>    /* for clock() */
+
+/* SunOS 4.1.* does not define CLOCKS_PER_SEC, so include <sys/param.h> */
+/* to get the HZ macro which is the equivalent.                         */
+#if defined(__sun__) && !defined(SVR4) && !defined(__SVR4)
+#include <sys/param.h>
+#define CLOCKS_PER_SEC HZ
+#endif
+
+  static long
+  get_time( void )
+  {
+    return clock() * 10000L / CLOCKS_PER_SEC;
+  }
+
+
+
+
+  /* test bbox computations */
+
+#define  XSCALE    65536
+#define  XX(x)     ((FT_Pos)(x*XSCALE))
+#define  XVEC(x,y)  { XX(x), XX(y) }
+#define  XVAL(x)   ((x)/(1.0*XSCALE))
+
+  /* dummy outline #1 */
+  static FT_Vector  dummy_vec_1[4] =
+  {
+#if 1
+    XVEC( 408.9111, 535.3164 ),
+    XVEC( 455.8887, 634.396  ),
+    XVEC( -37.8765, 786.2207 ),
+    XVEC( 164.6074, 535.3164 )
+#else
+    { (FT_Int32)0x0198E93DL , (FT_Int32)0x021750FFL },  /* 408.9111, 535.3164 */
+    { (FT_Int32)0x01C7E312L , (FT_Int32)0x027A6560L },  /* 455.8887, 634.3960 */
+    { (FT_Int32)0xFFDA1F9EL , (FT_Int32)0x0312387FL },  /* -37.8765, 786.2207 */
+    { (FT_Int32)0x00A49B7EL , (FT_Int32)0x021750FFL }   /* 164.6074, 535.3164 */
+#endif
+   };
+
+  static char  dummy_tag_1[4] =
+  {
+    FT_CURVE_TAG_ON,
+    FT_CURVE_TAG_CUBIC,
+    FT_CURVE_TAG_CUBIC,
+    FT_CURVE_TAG_ON
+  };
+
+  static short  dummy_contour_1[1] =
+  {
+    3
+  };
+
+  static FT_Outline  dummy_outline_1 =
+  {
+    1,
+    4,
+    dummy_vec_1,
+    dummy_tag_1,
+    dummy_contour_1,
+    0
+  };
+
+
+  /* dummy outline #2 */
+  static FT_Vector  dummy_vec_2[4] =
+  {
+    XVEC( 100.0, 100.0 ),
+    XVEC( 100.0, 200.0 ),
+    XVEC( 200.0, 200.0 ),
+    XVEC( 200.0, 133.0 )
+  };
+
+  static FT_Outline  dummy_outline_2 =
+  {
+    1,
+    4,
+    dummy_vec_2,
+    dummy_tag_1,
+    dummy_contour_1,
+    0
+  };
+
+
+  /* dummy outline #3 with bbox of [0 100 128 128] precisely */
+  static FT_Vector  dummy_vec_3[4] =
+  {
+    XVEC( 100.0, 127.0 ),
+    XVEC( 200.0, 127.0 ),
+    XVEC(   0.0, 136.0 ),
+    XVEC(   0.0, 100.0 )
+  };
+
+  static FT_Outline  dummy_outline_3 =
+  {
+    1,
+    4,
+    dummy_vec_3,
+    dummy_tag_1,
+    dummy_contour_1,
+    0
+  };
+
+
+  static void
+  dump_outline( FT_Outline*  outline )
+  {
+    FT_BBox  bbox;
+
+    /* compute and display cbox */
+    FT_Outline_Get_CBox( outline, &bbox );
+    printf( "cbox = [%.2f %.2f %.2f %.2f]\n",
+             XVAL( bbox.xMin ),
+             XVAL( bbox.yMin ),
+             XVAL( bbox.xMax ),
+             XVAL( bbox.yMax ) );
+
+    /* compute and display bbox */
+    FT_Outline_Get_BBox( outline, &bbox );
+    printf( "bbox = [%.2f %.2f %.2f %.2f]\n",
+             XVAL( bbox.xMin ),
+             XVAL( bbox.yMin ),
+             XVAL( bbox.xMax ),
+             XVAL( bbox.yMax ) );
+  }
+
+
+
+  static void
+  profile_outline( FT_Outline*   outline,
+                   long          repeat )
+  {
+    FT_BBox  bbox;
+    long     count;
+    long     time0;
+
+    time0 = get_time();
+    for ( count = repeat; count > 0; count-- )
+      FT_Outline_Get_CBox( outline, &bbox );
+
+    time0 = get_time() - time0;
+    printf( "time = %6.3f cbox = [%8.4f %8.4f %8.4f %8.4f]\n",
+             ((double)time0/10000.0),
+             XVAL( bbox.xMin ),
+             XVAL( bbox.yMin ),
+             XVAL( bbox.xMax ),
+             XVAL( bbox.yMax ) );
+    printf( "cbox_hex = [%08X %08X %08X %08X]\n",
+             bbox.xMin, bbox.yMin, bbox.xMax, bbox.yMax );
+
+
+    time0 = get_time();
+    for ( count = repeat; count > 0; count-- )
+      FT_Outline_Get_BBox( outline, &bbox );
+
+    time0 = get_time() - time0;
+    printf( "time = %6.3f bbox = [%8.4f %8.4f %8.4f %8.4f]\n",
+             ((double)time0/10000.0),
+             XVAL( bbox.xMin ),
+             XVAL( bbox.yMin ),
+             XVAL( bbox.xMax ),
+             XVAL( bbox.yMax ) );
+    printf( "bbox_hex = [%08X %08X %08X %08X]\n",
+             bbox.xMin, bbox.yMin, bbox.xMax, bbox.yMax );
+  }
+
+#define REPEAT  1000000L
+
+  int  main( int  argc, char**  argv )
+  {
+    printf( "outline #1\n" );
+    profile_outline( &dummy_outline_1, REPEAT );
+
+    printf( "outline #2\n" );
+    profile_outline( &dummy_outline_2, REPEAT );
+
+    printf( "outline #3\n" );
+    profile_outline( &dummy_outline_3, REPEAT );
+
+    return 0;
+  }
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d91 20
+d148 1
+a148 1
+    printf( "time = %5.2f cbox = [%.2f %.2f %.2f %.2f]\n",
+d154 2
+d163 1
+a163 1
+    printf( "time = %5.2f bbox = [%.2f %.2f %.2f %.2f]\n",
+d169 2
+d173 1
+a173 1
+#define REPEAT  100000L
+d182 4
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@a90 20
+  /* dummy outline #3 with bbox of [0 100 128 128] precisely */
+  static FT_Vector  dummy_vec_3[4] =
+  {
+    XVEC( 100.0, 127.0 ),
+    XVEC( 200.0, 127.0 ),
+    XVEC(   0.0, 136.0 ),
+    XVEC(   0.0, 100.0 )
+  };
+
+  static FT_Outline  dummy_outline_3 =
+  {
+    1,
+    4,
+    dummy_vec_3,
+    dummy_tag_1,
+    dummy_contour_1,
+    0
+  };
+
+
+d128 1
+a128 1
+    printf( "time = %6.3f cbox = [%8.4f %8.4f %8.4f %8.4f]\n",
+a133 2
+    printf( "cbox_hex = [%08X %08X %08X %08X]\n",
+             bbox.xMin, bbox.yMin, bbox.xMax, bbox.yMax );
+d141 1
+a141 1
+    printf( "time = %6.3f bbox = [%8.4f %8.4f %8.4f %8.4f]\n",
+a146 2
+    printf( "bbox_hex = [%08X %08X %08X %08X]\n",
+             bbox.xMin, bbox.yMin, bbox.xMax, bbox.yMax );
+d149 1
+a149 1
+#define REPEAT  1000000L
+a157 4
+
+    printf( "outline #3\n" );
+    profile_outline( &dummy_outline_3, REPEAT );
+
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

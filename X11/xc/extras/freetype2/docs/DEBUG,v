@@ -1,0 +1,965 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2017.04.15.19.20.42;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.46.54;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.02.26.20.04.34;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.18.47.10;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A420410DBFB162;
+
+1.1
+date	2005.03.18.10.43.01;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.10;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.01;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.34.30;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.56;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.10;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.41.44;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@Debugging within the FreeType sources
+=====================================
+
+I. Configuration macros
+-----------------------
+
+There are  several ways to enable  debugging features in a  FreeType 2
+builds.  This is  controlled through the definition  of special macros
+located in the file `ftoptions.h'.  The macros are:
+
+
+  FT_DEBUG_LEVEL_ERROR
+
+    #define this macro if you want to compile the FT_ERROR macro calls
+    to print error  messages during program execution.   This will not
+    stop  the  program.  Very  useful  to  spot invalid  fonts  during
+    development and to code workarounds for them.
+
+  FT_DEBUG_LEVEL_TRACE
+
+    #define this macro if you want to compile both macros FT_ERROR and
+    FT_TRACE.  This  also includes the variants  FT_TRACE0, FT_TRACE1,
+    FT_TRACE2, ..., FT_TRACE7.
+
+    The  trace macros  are used  to  send debugging  messages when  an
+    appropriate  `debug level'  is configured  at runtime  through the
+    FT2_DEBUG environment variable (more on this later).
+
+  FT_DEBUG_MEMORY
+
+    If this  macro is #defined, the  FreeType engine is linked  with a
+    small  but  effective debugging  memory  manager  that tracks  all
+    allocations and frees that are performed within the font engine.
+
+    When  the  FT2_DEBUG_MEMORY  environment variable  is  defined  at
+    runtime, a  call to FT_Done_FreeType will  dump memory statistics,
+    including  the  list  of  leaked memory  blocks  with  the  source
+    locations where  these were allocated.   It is always a  very good
+    idea to define this in  development builds.  This works with _any_
+    program linked to FreeType, but requires a big deal of memory (the
+    debugging memory  manager never  frees the blocks  to the  heap in
+    order to detect double frees).
+
+    When  FT2_DEBUG_MEMORY isn't  defined  at  runtime, the  debugging
+    memory manager is ignored, and performance is unaffected.
+
+
+II. Debugging macros
+--------------------
+
+Several  macros  can be  used  within  the  FreeType sources  to  help
+debugging its code:
+
+
+  1. FT_ERROR(( ... ))
+
+    This macro is used to send debug messages that indicate relatively
+    serious errors  (like broken  font files), but  will not  stop the
+    execution of the running program.   Its code is compiled only when
+    either FT_DEBUG_LEVEL_ERROR or FT_DEBUG_LEVEL_TRACE are defined in
+    `ftoption.h'.
+
+    Note that you have to use a printf-like signature, but with double
+    parentheses, like in
+
+      FT_ERROR(( "your %s is not %s\n", "foo", "bar" ));
+
+
+  2. FT_ASSERT( condition )
+
+    This macro is used to check  strong assertions at runtime.  If its
+    condition isn't TRUE, the program will abort with a panic message.
+    Its  code   is  compiled   when  either   FT_DEBUG_LEVEL_ERROR  or
+    FT_DEBUG_LEVEL_TRACE   are  defined.    You   don't  need   double
+    parentheses here.  For example
+
+      FT_ASSERT( ptr != NULL );
+
+
+  3. FT_TRACE( level, (message...) )
+
+    The  FT_TRACE  macro is  used  to  send general-purpose  debugging
+    messages during program execution.   This macro uses an *implicit*
+    macro  named  FT_COMPONENT  used  to  name  the  current  FreeType
+    component being run.
+
+    The developer  should always  define FT_COMPONENT  as appropriate,
+    for example as in
+
+      #undef  FT_COMPONENT
+      #define FT_COMPONENT  trace_io
+
+    The  value  of the  FT_COMPONENT  macro  is an  enumeration  named
+    `trace_XXXX' where `XXXX' is one of the component names defined in
+    the internal  file `internal/fttrace.h'.   If you  modify FreeType
+    source and insert new `trace_XXXX'  macro, you must register it in
+    `fttrace.h'. If  you insert or  remove many trace macros,  you can
+    check   the    undefined   or   the   unused    trace   macro   by
+    `src/tools/chktrcmp.py'.
+
+    Each such component is assigned a `debug level', ranging from 0 to
+    7,  through   the  use  of  the   FT2_DEBUG  environment  variable
+    (described below) when a program linked with FreeType starts.
+
+    When FT_TRACE is  called, its level is compared to  the one of the
+    corresponding component.  Messages with trace levels *higher* than
+    the corresponding component level are filtered and never printed.
+
+    This means  that trace messages  with level 0 are  always printed,
+    those with  level 2 are only  printed when the component  level is
+    *at least* 2.
+
+    The  second parameter  to  FT_TRACE must  contain parentheses  and
+    correspond to a printf-like call, as in
+
+      FT_TRACE( 2, ( "your %s is not %s\n", "foo", "bar" ) )
+
+    The   shortcut  macros   FT_TRACE0,  FT_TRACE1,   FT_TRACE2,  ...,
+    FT_TRACE7 can  be used with  constant level indices, and  are much
+    cleaner to use, as in
+
+      FT_TRACE2(( "your %s is not %s\n", "foo", "bar" ));
+
+
+III. Environment variables
+--------------------------
+
+The  following  environment  variables control  debugging  output  and
+behaviour of FreeType at runtime.
+
+
+  FT2_DEBUG
+
+    This  variable   is  only  used   when  FreeType  is   built  with
+    FT_DEBUG_LEVEL_TRACE  defined.  It  contains a  list of  component
+    level definitions, following this format:
+
+      component1:level1 component2:level2 component3:level3 ...
+
+    where `componentX' is the name  of a tracing component, as defined
+    in `fttrace.h', but without the  `trace_' prefix.  `levelX' is the
+    corresponding level to use at runtime.
+
+    `any'  is a  special component  name that  will be  interpreted as
+    `any/all components'.  For example, the following definitions
+
+      set FT2_DEBUG=any:2 memory:5 io:4        (on Windows)
+      export FT2_DEBUG="any:2 memory:5 io:4"   (on Linux with bash)
+
+    both stipulate that all components should have level 2, except for
+    the memory and  io components which will be set  to trace levels 5
+    and 4, respectively.
+
+
+  FT2_DEBUG_MEMORY
+
+    This environment variable,  when defined, tells FreeType  to use a
+    debugging memory manager that will  track leaking memory blocks as
+    well as other common errors like double frees.  It is also capable
+    of  reporting _where_  the  leaking blocks  were allocated,  which
+    considerably  saves  time  when  debugging new  additions  to  the
+    library.
+
+    This  code  is only  compiled  when  FreeType  is built  with  the
+    FT_DEBUG_MEMORY macro #defined in  `ftoption.h' though, it will be
+    ignored in other builds.
+
+
+  FT2_ALLOC_TOTAL_MAX
+
+    This variable is  ignored if FT2_DEBUG_MEMORY is  not defined.  It
+    allows  you  to  specify  a  maximum  heap  size  for  all  memory
+    allocations performed  by FreeType.  This  is very useful  to test
+    the robustness  of the  font engine  and programs  that use  it in
+    tight memory conditions.
+
+    If it is undefined, or if its value is not strictly positive, then
+    no allocation bounds are checked at runtime.
+
+
+  FT2_ALLOC_COUNT_MAX
+
+    This variable is  ignored if FT2_DEBUG_MEMORY is  not defined.  It
+    allows  you to  specify  a maximum  number  of memory  allocations
+    performed    by    FreeType    before    returning    the    error
+    FT_Err_Out_Of_Memory.  This  is useful  for debugging  and testing
+    the engine's robustness.
+
+    If it is undefined, or if its value is not strictly positive, then
+    no allocation bounds are checked at runtime.
+
+------------------------------------------------------------------------
+
+Copyright 2002-2016 by
+David Turner, Robert Wilhelm, and Werner Lemberg.
+
+This  file is  part  of the  FreeType  project, and  may  only be  used,
+modified,  and  distributed under  the  terms  of  the FreeType  project
+license, LICENSE.TXT.  By continuing  to use, modify, or distribute this
+file  you indicate that  you have  read the  license and  understand and
+accept it fully.
+
+
+--- end of DEBUG ---
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d7 2
+a8 2
+There  are several ways  to enable  debugging features  in a  FreeType 2
+builds.   This is controlled  through the  definition of  special macros
+d14 3
+a16 3
+    #define this macro  if you want to compile  the FT_ERROR macro calls
+    to  print error messages  during program  execution.  This  will not
+    stop  the  program.   Very  useful  to  spot  invalid  fonts  during
+d21 2
+a22 2
+    #define this macro  if you want to compile  both macros FT_ERROR and
+    FT_TRACE.   This also  includes the  variants  FT_TRACE0, FT_TRACE1,
+d25 2
+a26 2
+    The  trace  macros are  used  to  send  debugging messages  when  an
+    appropriate  `debug  level' is  configured  at  runtime through  the
+d31 2
+a32 2
+    If  this macro is  #defined, the  FreeType engine  is linked  with a
+    small  but  effective  debugging  memory  manager  that  tracks  all
+d35 8
+a42 8
+    When  the  FT2_DEBUG_MEMORY   environment  variable  is  defined  at
+    runtime,  a call  to FT_Done_FreeType  will dump  memory statistics,
+    including the list of leaked memory blocks with the source locations
+    where these were allocated.  It is always a very good idea to define
+    this in development builds.  This works with _any_ program linked to
+    FreeType, but  requires a big  deal of memory (the  debugging memory
+    manager never frees the blocks to the heap in order to detect double
+    frees).
+d44 2
+a45 2
+    When FT2_DEBUG_MEMORY isn't defined at runtime, the debugging memory
+    manager is ignored, and performance is unaffected.
+d51 2
+a52 2
+Several macros can be used within the FreeType sources to help debugging
+its code:
+d57 4
+a60 4
+    This macro is  used to send debug messages  that indicate relatively
+    serious  errors (like  broken font  files),  but will  not stop  the
+    execution of  the running program.   Its code is compiled  only when
+    either FT_DEBUG_LEVEL_ERROR  or FT_DEBUG_LEVEL_TRACE are  defined in
+d63 1
+a63 1
+    Note that you  have to use a printf-like  signature, but with double
+d71 5
+a75 5
+    This macro  is used to check  strong assertions at  runtime.  If its
+    condition isn't TRUE,  the program will abort with  a panic message.
+    Its   code   is  compiled   when   either  FT_DEBUG_LEVEL_ERROR   or
+    FT_DEBUG_LEVEL_TRACE are defined.  You don't need double parentheses
+    here.  For example
+d82 4
+a85 4
+    The  FT_TRACE  macro  is  used  to  send  general-purpose  debugging
+    messages during  program execution.   This macro uses  an *implicit*
+    macro named FT_COMPONENT used to name the current FreeType component
+    being run.
+d87 2
+a88 2
+    The developer should always  define FT_COMPONENT as appropriate, for
+    example as in
+d93 7
+a99 6
+    The  value  of  the  FT_COMPONENT  macro  is  an  enumeration  named
+    trace_XXXX where XXXX  is one of the component  names defined in the
+    internal file `freetype/internal/fttrace.h'.  If you modify FreeType
+    source  and insert  new trace_XXXX macro,  you  must register  it in
+    fttrace.h. If you insert or remove many trace macros,  you can check
+    the undefined or the unused trace macro by src/tools/chktrcmp.py.
+d101 2
+a102 2
+    Each  such component  is assigned  a `debug  level', ranging  from 0
+    to  7,  through  the  use  of  the  FT2_DEBUG  environment  variable
+d105 2
+a106 2
+    When FT_TRACE  is called, its  level is compared  to the one  of the
+    corresponding component.   Messages with trace  levels *higher* than
+d109 3
+a111 3
+    This  means that  trace messages  with level  0 are  always printed,
+    those with level 2 are only  printed when the component level is *at
+    least* 2.
+d113 1
+a113 1
+    The  second  parameter  to  FT_TRACE must  contain  parentheses  and
+d118 3
+a120 3
+    The shortcut macros  FT_TRACE0, FT_TRACE1, FT_TRACE2, ..., FT_TRACE7
+    can be  used with  constant level indices,  and are much  cleaner to
+    use, as in
+d122 1
+a122 1
+     FT_TRACE2(( "your %s is not %s\n", "foo", "bar" ));
+d128 1
+a128 1
+The  following  environment   variables  control  debugging  output  and
+d134 3
+a136 3
+    This   variable  is   only  used   when  FreeType   is   built  with
+    FT_DEBUG_LEVEL_TRACE defined.  It contains a list of component level
+    definitions, following this format:
+d138 1
+a138 1
+       component1:level1 component2:level2 component3:level3 ...
+d140 2
+a141 2
+    where `componentX' is the name of a tracing component, as defined in
+    `fttrace.h',  but  without the  `trace_'  prefix.   `levelX' is  the
+d144 1
+a144 1
+    `any'  is a  special  component  name that  will  be interpreted  as
+d147 2
+a148 2
+       set FT2_DEBUG=any:2 memory:5 io:4        (on Windows)
+       export FT2_DEBUG="any:2 memory:5 io:4"   (on Linux with bash)
+d150 3
+a152 3
+    both stipulate that  all components should have level  2, except for
+    the memory and io components which will be set to trace levels 5 and
+    4, respectively.
+d157 6
+a162 5
+    This  environment variable, when  defined, tells  FreeType to  use a
+    debugging memory  manager that will  track leaking memory  blocks as
+    well as other  common errors like double frees.   It is also capable
+    of  reporting  _where_  the  leaking blocks  were  allocated,  which
+    considerably saves time when debugging new additions to the library.
+d164 2
+a165 2
+    This  code  is  only  compiled  when  FreeType  is  built  with  the
+    FT_DEBUG_MEMORY macro  #defined in  `ftoption.h' though, it  will be
+d171 5
+a175 5
+    This  variable is ignored  if FT2_DEBUG_MEMORY  is not  defined.  It
+    allows you to specify a maximum heap size for all memory allocations
+    performed by FreeType.   This is very useful to  test the robustness
+    of  the  font  engine and  programs  that  use  it in  tight  memory
+    conditions.
+d177 1
+a177 1
+    If it is  undefined, or if its value is  not strictly positive, then
+d183 5
+a187 5
+    This  variable is ignored  if FT2_DEBUG_MEMORY  is not  defined.  It
+    allows  you  to  specify  a  maximum number  of  memory  allocations
+    performed    by     FreeType    before    returning     the    error
+    FT_Err_Out_Of_Memory.  This is useful  for debugging and testing the
+    engine's robustness.
+d189 1
+a189 1
+    If it is  undefined, or if its value is  not strictly positive, then
+d194 1
+a194 1
+Copyright 2002, 2003, 2004, 2005, 2009 by
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d95 4
+a98 1
+    internal file `freetype/internal/fttrace.h'.
+d192 1
+a192 1
+Copyright 2002, 2003, 2004, 2005 by
+@
+
+
+1.2
+log
+@automerge freetype 2.2.1
+@
+text
+@d81 1
+a81 1
+ 
+d171 1
+a171 1
+    
+d177 1
+a177 1
+  
+d183 1
+a183 1
+    
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d9 1
+a9 1
+located in the file "ftoptions.h".  The macros are:
+d23 1
+a23 1
+    FT_TRACE2, ..., FT_TRACE6.
+d26 1
+a26 1
+    appropriate  "debug  level" is  configured  at  runtime through  the
+d54 1
+d61 1
+a61 1
+    "ftoption.h".
+d64 1
+a64 1
+    parentheses, like in:
+d74 2
+a75 2
+    FT_DEBUG_LEVEL_TRACE are defined.  You don't need double-parentheses
+    here.  For example:
+d81 1
+a81 1
+
+d88 1
+a88 1
+    example as in:
+d95 1
+a95 1
+    internal file <freetype/internal/fttrace.h>.
+d97 2
+a98 2
+    Each  such component  is assigned  a "debug  level", ranging  from 0
+    to 6,  through  the  use   of  the  FT2_DEBUG  environment  variable
+d110 1
+a110 1
+    correspond to a printf-like call, as in:
+d114 1
+a114 1
+    The shortcut macros  FT_TRACE0, FT_TRACE1, FT_TRACE2_, ... FT_TRACE6
+d125 2
+a126 1
+behaviour of FreeType at runtime:
+d136 2
+a137 2
+    where "componentX" is the name of a tracing component, as defined in
+    "fttrace.h",  but  without the  "trace_"  prefix.   "levelX" is  the
+d140 2
+a141 2
+    "any"  is a  special  component  name that  will  be interpreted  as
+    "any/all components".  For example, the following definitions
+d147 3
+a149 2
+    the memory  and io components  which will be  set to trace  levels 5
+    and 4, respectively.
+d160 1
+a160 1
+    FT_DEBUG_MEMORY macro  #defined in  "ftoption.h" though, it  will be
+d163 1
+d175 1
+d185 12
+a196 1
+    no allocation bounsd are checked at runtime.
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d9 1
+a9 1
+located in the file `ftoptions.h'.  The macros are:
+d23 1
+a23 1
+    FT_TRACE2, ..., FT_TRACE7.
+d26 1
+a26 1
+    appropriate  `debug  level' is  configured  at  runtime through  the
+a53 1
+
+d60 1
+a60 1
+    `ftoption.h'.
+d63 1
+a63 1
+    parentheses, like in
+d73 2
+a74 2
+    FT_DEBUG_LEVEL_TRACE are defined.  You don't need double parentheses
+    here.  For example
+d87 1
+a87 1
+    example as in
+d94 1
+a94 1
+    internal file `freetype/internal/fttrace.h'.
+d96 2
+a97 2
+    Each  such component  is assigned  a `debug  level', ranging  from 0
+    to  7,  through  the  use  of  the  FT2_DEBUG  environment  variable
+d109 1
+a109 1
+    correspond to a printf-like call, as in
+d113 1
+a113 1
+    The shortcut macros  FT_TRACE0, FT_TRACE1, FT_TRACE2, ..., FT_TRACE7
+d124 1
+a124 2
+behaviour of FreeType at runtime.
+
+d134 2
+a135 2
+    where `componentX' is the name of a tracing component, as defined in
+    `fttrace.h',  but  without the  `trace_'  prefix.   `levelX' is  the
+d138 2
+a139 2
+    `any'  is a  special  component  name that  will  be interpreted  as
+    `any/all components'.  For example, the following definitions
+d145 2
+a146 3
+    the memory and io components which will be set to trace levels 5 and
+    4, respectively.
+
+d157 1
+a157 1
+    FT_DEBUG_MEMORY macro  #defined in  `ftoption.h' though, it  will be
+a159 1
+
+d167 1
+a167 1
+
+a170 1
+
+d172 1
+a172 1
+
+d178 1
+a178 1
+
+d180 1
+a180 12
+    no allocation bounds are checked at runtime.
+
+------------------------------------------------------------------------
+
+Copyright 2002, 2003, 2004, 2005 by
+David Turner, Robert Wilhelm, and Werner Lemberg.
+
+This  file is  part  of the  FreeType  project, and  may  only be  used,
+modified,  and  distributed under  the  terms  of  the FreeType  project
+license, LICENSE.TXT.  By continuing  to use, modify, or distribute this
+file  you indicate that  you have  read the  license and  understand and
+accept it fully.
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d9 1
+a9 1
+located in the file `ftoptions.h'.  The macros are:
+d23 1
+a23 1
+    FT_TRACE2, ..., FT_TRACE7.
+d26 1
+a26 1
+    appropriate  `debug  level' is  configured  at  runtime through  the
+a53 1
+
+d60 1
+a60 1
+    `ftoption.h'.
+d63 1
+a63 1
+    parentheses, like in
+d73 2
+a74 2
+    FT_DEBUG_LEVEL_TRACE are defined.  You don't need double parentheses
+    here.  For example
+d80 1
+a80 1
+ 
+d87 1
+a87 1
+    example as in
+d94 1
+a94 1
+    internal file `freetype/internal/fttrace.h'.
+d96 2
+a97 2
+    Each  such component  is assigned  a `debug  level', ranging  from 0
+    to  7,  through  the  use  of  the  FT2_DEBUG  environment  variable
+d109 1
+a109 1
+    correspond to a printf-like call, as in
+d113 1
+a113 1
+    The shortcut macros  FT_TRACE0, FT_TRACE1, FT_TRACE2, ..., FT_TRACE7
+d124 1
+a124 2
+behaviour of FreeType at runtime.
+
+d134 2
+a135 2
+    where `componentX' is the name of a tracing component, as defined in
+    `fttrace.h',  but  without the  `trace_'  prefix.   `levelX' is  the
+d138 2
+a139 2
+    `any'  is a  special  component  name that  will  be interpreted  as
+    `any/all components'.  For example, the following definitions
+d145 2
+a146 3
+    the memory and io components which will be set to trace levels 5 and
+    4, respectively.
+
+d157 1
+a157 1
+    FT_DEBUG_MEMORY macro  #defined in  `ftoption.h' though, it  will be
+a159 1
+
+a170 1
+
+d180 1
+a180 12
+    no allocation bounds are checked at runtime.
+
+------------------------------------------------------------------------
+
+Copyright 2002, 2003, 2004, 2005 by
+David Turner, Robert Wilhelm, and Werner Lemberg.
+
+This  file is  part  of the  FreeType  project, and  may  only be  used,
+modified,  and  distributed under  the  terms  of  the FreeType  project
+license, LICENSE.TXT.  By continuing  to use, modify, or distribute this
+file  you indicate that  you have  read the  license and  understand and
+accept it fully.
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d81 1
+a81 1
+
+d95 1
+a95 4
+    internal file `freetype/internal/fttrace.h'.  If you modify FreeType
+    source  and insert  new trace_XXXX macro,  you  must register  it in
+    fttrace.h. If you insert or remove many trace macros,  you can check
+    the undefined or the unused trace macro by src/tools/chktrcmp.py.
+d171 1
+a171 1
+
+d177 1
+a177 1
+
+d183 1
+a183 1
+
+d189 1
+a189 1
+Copyright 2002, 2003, 2004, 2005, 2009 by
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 2
+a8 2
+There are  several ways to enable  debugging features in a  FreeType 2
+builds.  This is  controlled through the definition  of special macros
+d14 3
+a16 3
+    #define this macro if you want to compile the FT_ERROR macro calls
+    to print error  messages during program execution.   This will not
+    stop  the  program.  Very  useful  to  spot invalid  fonts  during
+d21 2
+a22 2
+    #define this macro if you want to compile both macros FT_ERROR and
+    FT_TRACE.  This  also includes the variants  FT_TRACE0, FT_TRACE1,
+d25 2
+a26 2
+    The  trace macros  are used  to  send debugging  messages when  an
+    appropriate  `debug level'  is configured  at runtime  through the
+d31 2
+a32 2
+    If this  macro is #defined, the  FreeType engine is linked  with a
+    small  but  effective debugging  memory  manager  that tracks  all
+d35 8
+a42 8
+    When  the  FT2_DEBUG_MEMORY  environment variable  is  defined  at
+    runtime, a  call to FT_Done_FreeType will  dump memory statistics,
+    including  the  list  of  leaked memory  blocks  with  the  source
+    locations where  these were allocated.   It is always a  very good
+    idea to define this in  development builds.  This works with _any_
+    program linked to FreeType, but requires a big deal of memory (the
+    debugging memory  manager never  frees the blocks  to the  heap in
+    order to detect double frees).
+d44 2
+a45 2
+    When  FT2_DEBUG_MEMORY isn't  defined  at  runtime, the  debugging
+    memory manager is ignored, and performance is unaffected.
+d51 2
+a52 2
+Several  macros  can be  used  within  the  FreeType sources  to  help
+debugging its code:
+d57 4
+a60 4
+    This macro is used to send debug messages that indicate relatively
+    serious errors  (like broken  font files), but  will not  stop the
+    execution of the running program.   Its code is compiled only when
+    either FT_DEBUG_LEVEL_ERROR or FT_DEBUG_LEVEL_TRACE are defined in
+d63 1
+a63 1
+    Note that you have to use a printf-like signature, but with double
+d71 5
+a75 5
+    This macro is used to check  strong assertions at runtime.  If its
+    condition isn't TRUE, the program will abort with a panic message.
+    Its  code   is  compiled   when  either   FT_DEBUG_LEVEL_ERROR  or
+    FT_DEBUG_LEVEL_TRACE   are  defined.    You   don't  need   double
+    parentheses here.  For example
+d82 4
+a85 4
+    The  FT_TRACE  macro is  used  to  send general-purpose  debugging
+    messages during program execution.   This macro uses an *implicit*
+    macro  named  FT_COMPONENT  used  to  name  the  current  FreeType
+    component being run.
+d87 2
+a88 2
+    The developer  should always  define FT_COMPONENT  as appropriate,
+    for example as in
+d93 6
+a98 7
+    The  value  of the  FT_COMPONENT  macro  is an  enumeration  named
+    `trace_XXXX' where `XXXX' is one of the component names defined in
+    the internal  file `internal/fttrace.h'.   If you  modify FreeType
+    source and insert new `trace_XXXX'  macro, you must register it in
+    `fttrace.h'. If  you insert or  remove many trace macros,  you can
+    check   the    undefined   or   the   unused    trace   macro   by
+    `src/tools/chktrcmp.py'.
+d100 2
+a101 2
+    Each such component is assigned a `debug level', ranging from 0 to
+    7,  through   the  use  of  the   FT2_DEBUG  environment  variable
+d104 2
+a105 2
+    When FT_TRACE is  called, its level is compared to  the one of the
+    corresponding component.  Messages with trace levels *higher* than
+d108 3
+a110 3
+    This means  that trace messages  with level 0 are  always printed,
+    those with  level 2 are only  printed when the component  level is
+    *at least* 2.
+d112 1
+a112 1
+    The  second parameter  to  FT_TRACE must  contain parentheses  and
+d117 3
+a119 3
+    The   shortcut  macros   FT_TRACE0,  FT_TRACE1,   FT_TRACE2,  ...,
+    FT_TRACE7 can  be used with  constant level indices, and  are much
+    cleaner to use, as in
+d121 1
+a121 1
+      FT_TRACE2(( "your %s is not %s\n", "foo", "bar" ));
+d127 1
+a127 1
+The  following  environment  variables control  debugging  output  and
+d133 3
+a135 3
+    This  variable   is  only  used   when  FreeType  is   built  with
+    FT_DEBUG_LEVEL_TRACE  defined.  It  contains a  list of  component
+    level definitions, following this format:
+d137 1
+a137 1
+      component1:level1 component2:level2 component3:level3 ...
+d139 2
+a140 2
+    where `componentX' is the name  of a tracing component, as defined
+    in `fttrace.h', but without the  `trace_' prefix.  `levelX' is the
+d143 1
+a143 1
+    `any'  is a  special component  name that  will be  interpreted as
+d146 2
+a147 2
+      set FT2_DEBUG=any:2 memory:5 io:4        (on Windows)
+      export FT2_DEBUG="any:2 memory:5 io:4"   (on Linux with bash)
+d149 3
+a151 3
+    both stipulate that all components should have level 2, except for
+    the memory and  io components which will be set  to trace levels 5
+    and 4, respectively.
+d156 5
+a160 6
+    This environment variable,  when defined, tells FreeType  to use a
+    debugging memory manager that will  track leaking memory blocks as
+    well as other common errors like double frees.  It is also capable
+    of  reporting _where_  the  leaking blocks  were allocated,  which
+    considerably  saves  time  when  debugging new  additions  to  the
+    library.
+d162 2
+a163 2
+    This  code  is only  compiled  when  FreeType  is built  with  the
+    FT_DEBUG_MEMORY macro #defined in  `ftoption.h' though, it will be
+d169 5
+a173 5
+    This variable is  ignored if FT2_DEBUG_MEMORY is  not defined.  It
+    allows  you  to  specify  a  maximum  heap  size  for  all  memory
+    allocations performed  by FreeType.  This  is very useful  to test
+    the robustness  of the  font engine  and programs  that use  it in
+    tight memory conditions.
+d175 1
+a175 1
+    If it is undefined, or if its value is not strictly positive, then
+d181 5
+a185 5
+    This variable is  ignored if FT2_DEBUG_MEMORY is  not defined.  It
+    allows  you to  specify  a maximum  number  of memory  allocations
+    performed    by    FreeType    before    returning    the    error
+    FT_Err_Out_Of_Memory.  This  is useful  for debugging  and testing
+    the engine's robustness.
+d187 1
+a187 1
+    If it is undefined, or if its value is not strictly positive, then
+d192 1
+a192 1
+Copyright 2002-2016 by
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

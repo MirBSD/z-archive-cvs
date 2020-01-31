@@ -1,0 +1,206 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2008.08.26.18.46.03;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10048B44F800E2FF01B;
+
+1.2
+date	2005.12.29.21.26.11;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043B454825F554E34;
+
+1.1
+date	2005.03.18.15.44.55;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.44.55;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.3
+log
+@update, simplify
+@
+text
+@$MirOS: ports/devel/libusb/patches/patch-bsd_c,v 1.2 2005/12/29 21:26:11 tg Exp $
+$OpenBSD: patch-bsd_c,v 1.5 2003/11/27 04:34:26 pvalchev Exp $
+--- bsd.c.orig	Sat Mar  4 02:52:23 2006
++++ bsd.c	Tue Aug 26 18:42:45 2008
+@@@@ -454,6 +454,8 @@@@ int usb_control_msg(usb_dev_handle *dev,
+     fprintf(stderr, "usb_control_msg: %d %d %d %d %p %d %d\n",
+             requesttype, request, value, index, bytes, size, timeout);
+ 
++  memset(&req,0,sizeof(req));
++
+   req.ucr_request.bmRequestType = requesttype;
+   req.ucr_request.bRequest = request;
+   USETW(req.ucr_request.wValue, value);
+@@@@ -463,6 +465,8 @@@@ int usb_control_msg(usb_dev_handle *dev,
+   req.ucr_data = bytes;
+   req.ucr_flags = USBD_SHORT_XFER_OK;
+ 
++  if(timeout<0) timeout=0;
++
+   ret = ioctl(dev->fd, USB_SET_TIMEOUT, &timeout);
+ #if (__NetBSD__ || __OpenBSD__)
+   if (ret < 0 && errno != EINVAL)
+@@@@ -473,11 +477,18 @@@@ int usb_control_msg(usb_dev_handle *dev,
+                   strerror(errno));
+ 
+   ret = ioctl(dev->fd, USB_DO_REQUEST, &req);
+-  if (ret < 0)
++  if (ret < 0) {
++    int errno2 = errno;
+     USB_ERROR_STR(-errno, "error sending control message: %s",
+-                  strerror(errno));
++                  strerror(errno2));
++    return -errno2;
++  }
+ 
+-  return UGETW(req.ucr_request.wLength);
++  /* return UGETW(req.ucr_request.wLength); */
++   if(requesttype && USB_ENDPOINT_IN)
++	   return req.ucr_actlen;
++   else
++	   return UGETW(req.ucr_request.wLength);
+ }
+ 
+ int usb_os_find_busses(struct usb_bus **busses)
+@
+
+
+1.2
+log
+@update to latest version (quite hard)
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/libusb/patches/patch-bsd_c,v 1.1.7.1 2005/03/18 15:44:55 tg Exp $
+d3 3
+a5 3
+--- bsd.c.orig	Thu Dec 29 21:01:47 2005
++++ bsd.c	Thu Dec 29 21:03:57 2005
+@@@@ -450,6 +450,8 @@@@ int usb_control_msg(usb_dev_handle *dev,
+d14 1
+a14 3
+@@@@ -457,8 +459,10 @@@@ int usb_control_msg(usb_dev_handle *dev,
+   USETW(req.ucr_request.wLength, size);
+ 
+d16 1
+a16 2
+-  req.ucr_flags = 0;
++  req.ucr_flags = USBD_SHORT_XFER_OK;
+d23 1
+a23 1
+@@@@ -469,11 +473,18 @@@@ int usb_control_msg(usb_dev_handle *dev,
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 3
+a5 63
+--- bsd.c.orig	Mon Nov 11 18:03:54 2002
++++ bsd.c	Thu Aug 12 19:38:11 2004
+@@@@ -276,7 +276,7 @@@@ static int ensure_ep_open(usb_dev_handle
+ int usb_bulk_write(usb_dev_handle *dev, int ep, char *bytes, int size,
+                    int timeout)
+ {
+-  int fd, ret, sent = 0;
++  int fd, ret;
+ 
+   /* Ensure the endpoint address is correct */
+   ep &= ~USB_ENDPOINT_IN;
+@@@@ -298,8 +298,7 @@@@ int usb_bulk_write(usb_dev_handle *dev, 
+     USB_ERROR_STR(ret, "error setting timeout: %s",
+                   strerror(errno));
+ 
+-  do {
+-    ret = write(fd, bytes+sent, size-sent);
++    ret = write(fd, bytes, size);
+     if (ret < 0)
+ #if __FreeBSD__
+       USB_ERROR_STR(ret, "error writing to bulk endpoint %s.%d: %s",
+@@@@ -309,16 +308,13 @@@@ int usb_bulk_write(usb_dev_handle *dev, 
+                   dev->device->filename, UE_GET_ADDR(ep), strerror(errno));
+ #endif
+ 
+-    sent += ret;
+-  } while(ret > 0 && sent < size);
+-
+-  return sent;
++  return ret;
+ }
+ 
+ int usb_bulk_read(usb_dev_handle *dev, int ep, char *bytes, int size,
+                   int timeout)
+ {
+-  int fd, ret, retrieved = 0, one = 1;
++  int fd, ret, one = 1;
+ 
+   /* Ensure the endpoint address is correct */
+   ep |= USB_ENDPOINT_IN;
+@@@@ -345,8 +341,7 @@@@ int usb_bulk_read(usb_dev_handle *dev, i
+     USB_ERROR_STR(ret, "error setting short xfer: %s",
+                   strerror(errno));
+ 
+-  do {
+-    ret = read(fd, bytes+retrieved, size-retrieved);
++    ret = read(fd, bytes, size);
+     if (ret < 0)
+ #if __FreeBSD__
+       USB_ERROR_STR(ret, "error reading from bulk endpoint %s.%d: %s",
+@@@@ -355,10 +350,8 @@@@ int usb_bulk_read(usb_dev_handle *dev, i
+       USB_ERROR_STR(ret, "error reading from bulk endpoint %s.%02d: %s",
+                   dev->device->filename, UE_GET_ADDR(ep), strerror(errno));
+ #endif
+-    retrieved += ret;
+-  } while (ret > 0 && retrieved < size);
+ 
+-  return retrieved;
++  return ret;
+ }
+ 
+ int usb_control_msg(usb_dev_handle *dev, int requesttype, int request,
+@@@@ -371,6 +364,8 @@@@ int usb_control_msg(usb_dev_handle *dev,
+d14 1
+a14 1
+@@@@ -378,8 +373,10 @@@@ int usb_control_msg(usb_dev_handle *dev,
+d26 1
+a26 1
+@@@@ -390,11 +387,18 @@@@ int usb_control_msg(usb_dev_handle *dev,
+d33 1
+a33 1
+     USB_ERROR_STR(ret, "error sending control message: %s",
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

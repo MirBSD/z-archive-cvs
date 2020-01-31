@@ -1,0 +1,504 @@
+head	1.6;
+access;
+symbols
+	cvs-200910041320:1.1.1.5
+	cvs-200903221200:1.1.1.5
+	cvs-200812162015:1.1.1.5
+	cvs-200804031830:1.1.1.5
+	MIRBSD_10:1.5.0.2
+	MIRBSD_10_BASE:1.5
+	cvs-200803022030:1.1.1.5
+	cvs-200709131337:1.1.1.5
+	cvs-200709021830:1.1.1.4
+	cvs-200708201200:1.1.1.4
+	cvs-200706161500:1.1.1.4
+	cvs-200705192215:1.1.1.4
+	cvs-200704292000:1.1.1.4
+	cvs-200703080900:1.1.1.4
+	cvs-200701251600:1.1.1.4
+	cvs-200612111600:1.1.1.4
+	cvs-200611090230:1.1.1.4
+	OPENBSD_4_0:1.1.1.4
+	MIRBSD_9_BASE:1.3
+	cvs-200606162342:1.1.1.3
+	cvs-200606022000:1.1.1.3
+	cvs-200604191000:1.1.1.3
+	cvs-200602220045:1.1.1.2
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200512201942:1.1.1.1
+	cvs-200511231930:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200506221550:1.1.1.1
+	cvs-200505050030:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	cvs-200504261445:1.1.1.1
+	cvs-200504141900:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.04.15.23.06.48;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2A7A22FC699A4;
+
+1.5
+date	2007.09.13.13.52.57;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10046E940B668DE9A0B;
+
+1.4
+date	2006.09.20.21.41.08;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004511B578580E7F04;
+
+1.3
+date	2006.04.19.10.40.58;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100444613BD3A91C28B;
+
+1.2
+date	2006.02.22.01.23.53;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10043FBBD2C2C5E7D81;
+
+1.1
+date	2005.02.05.17.29.55;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.55;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.02.22.00.51.36;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	10043FBB5A933C3BB9B;
+
+1.1.1.3
+date	2006.04.19.10.15.06;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	10044460DB21E1F715C;
+
+1.1.1.4
+date	2006.09.20.19.06.50;	author tg;	state Exp;
+branches;
+next	1.1.1.5;
+commitid	10045119150397FC669;
+
+1.1.1.5
+date	2007.09.13.13.39.10;	author tg;	state Exp;
+branches;
+next	1.1.1.6;
+commitid	10046E93D7724AAC1F8;
+
+1.1.1.6
+date	2017.04.15.23.05.50;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F2A7631EC67CB2;
+
+
+desc
+@@
+
+
+1.6
+log
+@fastmerge
+@
+text
+@/* $OpenBSD: sshpty.c,v 1.28 2007/09/11 23:49:09 stevesk Exp $ */
+/*
+ * Author: Tatu Ylonen <ylo@@cs.hut.fi>
+ * Copyright (c) 1995 Tatu Ylonen <ylo@@cs.hut.fi>, Espoo, Finland
+ *                    All rights reserved
+ * Allocating a pseudo-terminal, and making it the controlling tty.
+ *
+ * As far as I am concerned, the code I have written for this software
+ * can be used freely for any purpose.  Any derived versions of this
+ * software must be clearly marked as such, and if the derived work is
+ * incompatible with the protocol description in the RFC file, it must be
+ * called by a name other than "ssh" or "Secure Shell".
+ */
+
+#include <sys/types.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <grp.h>
+#include <paths.h>
+#include <pwd.h>
+#include <stdarg.h>
+#include <string.h>
+#include <termios.h>
+#include <unistd.h>
+#include <util.h>
+
+#include "sshpty.h"
+#include "log.h"
+
+#ifndef O_NOCTTY
+#define O_NOCTTY 0
+#endif
+
+/*
+ * Allocates and opens a pty.  Returns 0 if no pty could be allocated, or
+ * nonzero if a pty was successfully allocated.  On success, open file
+ * descriptors for the pty and tty sides and the name of the tty side are
+ * returned (the buffer must be able to hold at least 64 characters).
+ */
+
+int
+pty_allocate(int *ptyfd, int *ttyfd, char *namebuf, size_t namebuflen)
+{
+	char buf[64];
+	int i;
+
+	i = openpty(ptyfd, ttyfd, buf, NULL, NULL);
+	if (i < 0) {
+		error("openpty: %.100s", strerror(errno));
+		return 0;
+	}
+	strlcpy(namebuf, buf, namebuflen);	/* possible truncation */
+	return 1;
+}
+
+/* Releases the tty.  Its ownership is returned to root, and permissions to 0666. */
+
+void
+pty_release(const char *tty)
+{
+	if (chown(tty, (uid_t) 0, (gid_t) 0) < 0)
+		error("chown %.100s 0 0 failed: %.100s", tty, strerror(errno));
+	if (chmod(tty, (mode_t) 0666) < 0)
+		error("chmod %.100s 0666 failed: %.100s", tty, strerror(errno));
+}
+
+/* Makes the tty the process's controlling tty and sets it to sane modes. */
+
+void
+pty_make_controlling_tty(int *ttyfd, const char *tty)
+{
+	int fd;
+
+	/* First disconnect from the old controlling tty. */
+#ifdef TIOCNOTTY
+	fd = open(_PATH_TTY, O_RDWR | O_NOCTTY);
+	if (fd >= 0) {
+		(void) ioctl(fd, TIOCNOTTY, NULL);
+		close(fd);
+	}
+#endif /* TIOCNOTTY */
+	if (setsid() < 0)
+		error("setsid: %.100s", strerror(errno));
+
+	/*
+	 * Verify that we are successfully disconnected from the controlling
+	 * tty.
+	 */
+	fd = open(_PATH_TTY, O_RDWR | O_NOCTTY);
+	if (fd >= 0) {
+		error("Failed to disconnect from controlling tty.");
+		close(fd);
+	}
+	/* Make it our controlling tty. */
+#ifdef TIOCSCTTY
+	debug("Setting controlling tty using TIOCSCTTY.");
+	if (ioctl(*ttyfd, TIOCSCTTY, NULL) < 0)
+		error("ioctl(TIOCSCTTY): %.100s", strerror(errno));
+#endif /* TIOCSCTTY */
+	fd = open(tty, O_RDWR);
+	if (fd < 0)
+		error("%.100s: %.100s", tty, strerror(errno));
+	else
+		close(fd);
+
+	/* Verify that we now have a controlling tty. */
+	fd = open(_PATH_TTY, O_WRONLY);
+	if (fd < 0)
+		error("open /dev/tty failed - could not set controlling tty: %.100s",
+		    strerror(errno));
+	else
+		close(fd);
+}
+
+/* Changes the window size associated with the pty. */
+
+void
+pty_change_window_size(int ptyfd, u_int row, u_int col,
+	u_int xpixel, u_int ypixel)
+{
+	struct winsize w;
+
+	/* may truncate u_int -> u_short */
+	w.ws_row = row;
+	w.ws_col = col;
+	w.ws_xpixel = xpixel;
+	w.ws_ypixel = ypixel;
+	(void) ioctl(ptyfd, TIOCSWINSZ, &w);
+}
+
+void
+pty_setowner(struct passwd *pw, const char *tty)
+{
+	struct group *grp;
+	gid_t gid;
+	mode_t mode;
+	struct stat st;
+
+	/* Determine the group to make the owner of the tty. */
+	grp = getgrnam("tty");
+	if (grp) {
+		gid = grp->gr_gid;
+		mode = 0620;
+	} else {
+		gid = pw->pw_gid;
+		mode = 0600;
+	}
+
+	/*
+	 * Change owner and mode of the tty as required.
+	 * Warn but continue if filesystem is read-only and the uids match/
+	 * tty is owned by root.
+	 */
+	if (stat(tty, &st))
+		fatal("stat(%.100s) failed: %.100s", tty,
+		    strerror(errno));
+
+	if (st.st_uid != pw->pw_uid || st.st_gid != gid) {
+		if (chown(tty, pw->pw_uid, gid) < 0) {
+			if (errno == EROFS &&
+			    (st.st_uid == pw->pw_uid || st.st_uid == 0))
+				debug("chown(%.100s, %u, %u) failed: %.100s",
+				    tty, (u_int)pw->pw_uid, (u_int)gid,
+				    strerror(errno));
+			else
+				fatal("chown(%.100s, %u, %u) failed: %.100s",
+				    tty, (u_int)pw->pw_uid, (u_int)gid,
+				    strerror(errno));
+		}
+	}
+
+	if ((st.st_mode & (S_IRWXU|S_IRWXG|S_IRWXO)) != mode) {
+		if (chmod(tty, mode) < 0) {
+			if (errno == EROFS &&
+			    (st.st_mode & (S_IRGRP | S_IROTH)) == 0)
+				debug("chmod(%.100s, 0%o) failed: %.100s",
+				    tty, (u_int)mode, strerror(errno));
+			else
+				fatal("chmod(%.100s, 0%o) failed: %.100s",
+				    tty, (u_int)mode, strerror(errno));
+		}
+	}
+}
+@
+
+
+1.5
+log
+@merge and make UMAC-64 default message integrity whatever
+@
+text
+@d146 1
+a146 1
+		mode = S_IRUSR | S_IWUSR | S_IWGRP;
+d149 1
+a149 1
+		mode = S_IRUSR | S_IWUSR | S_IWGRP | S_IWOTH;
+@
+
+
+1.4
+log
+@finish merging
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: sshpty.c,v 1.26 2006/08/03 03:34:42 deraadt Exp $ */
+d18 1
+d24 1
+a28 1
+#include <stdarg.h>
+a32 5
+/* Pty allocated with _getpty gets broken if we do I_PUSH:es to it. */
+#if defined(HAVE__GETPTY) || defined(HAVE_OPENPTY)
+#undef HAVE_DEV_PTMX
+#endif
+
+@
+
+
+1.3
+log
+@merge and clean up
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: sshpty.c,v 1.19 2006/03/25 13:17:03 djm Exp $ */
+d15 1
+a15 2
+#include "includes.h"
+
+d18 3
+a20 1
+
+d22 2
+d25 1
+d27 1
+@
+
+
+1.2
+log
+@merge; bump version; fix up manpages and includes a little
+@
+text
+@d1 1
+a15 1
+RCSID("$OpenBSD: sshpty.c,v 1.16 2006/02/20 17:19:54 stevesk Exp $");
+d44 1
+a44 1
+pty_allocate(int *ptyfd, int *ttyfd, char *namebuf, int namebuflen)
+d120 2
+a121 2
+pty_change_window_size(int ptyfd, int row, int col,
+	int xpixel, int ypixel)
+d125 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d15 1
+a15 1
+RCSID("$OpenBSD: sshpty.c,v 1.12 2004/06/21 17:36:31 avsm Exp $");
+d17 5
+d23 1
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@import OpenSSH-current
+@
+text
+@d15 1
+a15 1
+RCSID("$OpenBSD: sshpty.c,v 1.16 2006/02/20 17:19:54 stevesk Exp $");
+a16 6
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include <paths.h>
+#include <termios.h>
+a17 1
+
+@
+
+
+1.1.1.3
+log
+@I decided we'd better upgrade OpenSSH before releasing to the general public
+@
+text
+@a0 1
+/* $OpenBSD: sshpty.c,v 1.19 2006/03/25 13:17:03 djm Exp $ */
+d15 1
+d45 1
+a45 1
+pty_allocate(int *ptyfd, int *ttyfd, char *namebuf, size_t namebuflen)
+d121 2
+a122 2
+pty_change_window_size(int ptyfd, u_int row, u_int col,
+	u_int xpixel, u_int ypixel)
+a125 1
+	/* may truncate u_int -> u_short */
+@
+
+
+1.1.1.4
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: sshpty.c,v 1.26 2006/08/03 03:34:42 deraadt Exp $ */
+d15 3
+a18 1
+#include <sys/ioctl.h>
+d20 1
+a20 3
+#include <errno.h>
+#include <fcntl.h>
+#include <grp.h>
+a21 2
+#include <pwd.h>
+#include <string.h>
+a22 1
+#include <unistd.h>
+a23 1
+#include <stdarg.h>
+@
+
+
+1.1.1.5
+log
+@Import latest OpenSSH upgrades
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: sshpty.c,v 1.28 2007/09/11 23:49:09 stevesk Exp $ */
+a17 1
+
+a22 1
+#include <stdarg.h>
+d27 1
+d32 5
+@
+
+
+1.1.1.6
+log
+@backport some more security fixes
+@
+text
+@d146 1
+a146 1
+		mode = 0620;
+d149 1
+a149 1
+		mode = 0600;
+@
+
+

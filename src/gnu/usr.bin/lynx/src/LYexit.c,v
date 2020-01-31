@@ -1,0 +1,323 @@
+head	1.1;
+branch	1.1.109;
+access;
+symbols
+	lynx-2_8_8dev_16:1.1.109.4
+	lynx-2_8_8dev_15e:1.1.109.4
+	lynx-2_8_8dev_15:1.1.109.4
+	lynx-2_8_8dev_14:1.1.109.4
+	lynx-2_8_8dev_12:1.1.109.4
+	lynx-2_8_8dev_11:1.1.109.4
+	lynx-2_8_8dev_10a:1.1.109.4
+	lynx-2_8_8dev_7a:1.1.109.4
+	lynx-2_8_8dev_7:1.1.109.4
+	lynx-2_8_7rel_1:1.1.109.4
+	lynx-2_8_7dev_12:1.1.109.3
+	lynx-2_8_7dev_11a:1.1.109.2
+	MIRBSD_10:1.1.109.2.0.2
+	MIRBSD_10_BASE:1.1.109.2
+	lynx-2_8_7dev_8:1.1.109.2
+	lynx-2_8_7dev_7:1.1.109.2
+	lynx-2_8_7dev_5:1.1.109.2
+	lynx-2_8_7dev_2:1.1.109.1
+	lynx-2_8_6pre_5:1.1.109.1
+	lynx-2_8_6pre_4:1.1.109.1
+	lynx-2_8_6pre_3:1.1.109.1
+	MIRBSD_9_BASE:1.1.109.1
+	lynx-2_8_6dev_18c:1.1.109.1
+	lynx-2_8_6dev_18:1.1.109.1
+	MIRBSD_8:1.1.109.1.0.2
+	MIRBSD_8_BASE:1.1.109.1
+	lynx-2_8_6dev_16:1.1.109.1
+	lynx:1.1.109;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.03.27.22.12.14;	author tg;	state Exp;
+branches
+	1.1.109.1;
+next	;
+
+1.1.109.1
+date	2005.03.27.22.12.14;	author tg;	state Exp;
+branches;
+next	1.1.109.2;
+
+1.1.109.2
+date	2007.05.19.22.30.36;	author tg;	state Exp;
+branches;
+next	1.1.109.3;
+commitid	100464F7A1519624932;
+
+1.1.109.3
+date	2009.01.18.19.31.29;	author tg;	state Exp;
+branches;
+next	1.1.109.4;
+commitid	1004973839C3B701938;
+
+1.1.109.4
+date	2009.08.09.14.37.54;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004A7EDF4952738297;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ *	Copyright (c) 1994, University of Kansas, All Rights Reserved
+ */
+#include <HTUtils.h>
+#include <LYexit.h>
+#include <HTAlert.h>
+#ifndef VMS
+#include <LYGlobalDefs.h>
+#include <LYUtils.h>
+#include <LYSignal.h>
+#include <LYMainLoop.h>
+#endif /* !VMS */
+#include <LYStrings.h>
+#include <LYClean.h>
+
+/*
+ * Flag for outofmem macro.  - FM
+ */
+BOOL LYOutOfMemory = FALSE;
+
+/*
+ * Stack of functions to call upon exit.
+ */
+static void (*callstack[ATEXITSIZE]) (void);
+static int topOfStack = 0;
+
+/*
+ * Purpose:		Registers termination function.
+ * Arguments:		function	The function to register.
+ * Return Value:	int	0	registered
+ *				!0	no more space to register
+ * Remarks/Portability/Dependencies/Restrictions:
+ * Revision History:
+ *	06-15-94	created Lynx 2-3-1 Garrett Arch Blythe
+ */
+
+int LYatexit(void (*function) (void))
+{
+    /*
+     * Check for available space.
+     */
+    if (topOfStack == ATEXITSIZE) {
+	CTRACE((tfp, "(LY)atexit: Too many functions, ignoring one!\n"));
+	return (-1);
+    }
+
+    /*
+     * Register the function.
+     */
+    callstack[topOfStack] = function;
+    topOfStack++;
+    return (0);
+}
+
+/*
+ * Purpose:		Call the functions registered with LYatexit
+ * Arguments:		void
+ * Return Value:	void
+ * Remarks/Portability/Dependencies/Restrictions:
+ * Revision History:
+ *	06-15-94	created Lynx 2-3-1 Garrett Arch Blythe
+ */
+static void LYCompleteExit(void)
+{
+    /*
+     * Just loop through registered functions.  This is reentrant if more exits
+     * occur in the registered functions.
+     */
+    while (--topOfStack >= 0) {
+	callstack[topOfStack] ();
+    }
+}
+
+/*
+ * Purpose:		Terminates program, reports memory not freed.
+ * Arguments:		status	Exit code.
+ * Return Value:	void
+ * Remarks/Portability/Dependencies/Restrictions:
+ *	Function calls stdlib.h exit
+ * Revision History:
+ *	06-15-94	created Lynx 2-3-1 Garrett Arch Blythe
+ */
+void LYexit(int status)
+{
+#ifndef VMS			/*  On VMS, the VMSexit() handler does these. - FM */
+#ifdef _WINDOWS
+    extern CRITICAL_SECTION critSec_DNS;	/* 1998/09/03 (Thu) 22:01:56 */
+    extern CRITICAL_SECTION critSec_READ;	/* 1998/09/03 (Thu) 22:01:56 */
+
+    DeleteCriticalSection(&critSec_DNS);
+    DeleteCriticalSection(&critSec_READ);
+
+    WSACleanup();
+#endif
+    if (LYOutOfMemory == TRUE) {
+	/*
+	 * Ignore further interrupts.  - FM
+	 */
+#ifndef NOSIGHUP
+	(void) signal(SIGHUP, SIG_IGN);
+#endif /* NOSIGHUP */
+	(void) signal(SIGTERM, SIG_IGN);
+	(void) signal(SIGINT, SIG_IGN);
+#ifndef __linux__
+#ifndef DOSPATH
+	(void) signal(SIGBUS, SIG_IGN);
+#endif /* DOSPATH */
+#endif /* !__linux__ */
+	(void) signal(SIGSEGV, SIG_IGN);
+	(void) signal(SIGILL, SIG_IGN);
+
+	/*
+	 * Flush all messages.  - FM
+	 */
+	fflush(stderr);
+	fflush(stdout);
+
+	/*
+	 * Deal with curses, if on, and clean up.  - FM
+	 */
+	if (LYCursesON) {
+	    LYSleepAlert();
+	}
+	cleanup_sig(0);
+#ifndef __linux__
+#ifndef DOSPATH
+	signal(SIGBUS, SIG_DFL);
+#endif /* DOSPATH */
+#endif /* !__linux__ */
+	signal(SIGSEGV, SIG_DFL);
+	signal(SIGILL, SIG_DFL);
+    }
+#endif /* !VMS */
+
+    /*
+     * Close syslog before doing atexit-cleanup, since it may use a string
+     * that would be freed there.
+     */
+#ifdef SYSLOG_REQUESTED_URLS
+    LYCloselog();
+#endif
+
+    /*
+     * Do functions registered with LYatexit.  - GAB
+     */
+    LYCompleteExit();
+
+    LYCloseCmdLogfile();
+
+#ifdef exit
+/*  Make sure we use stdlib exit and not LYexit. - GAB
+*/
+#undef exit
+#endif /* exit */
+
+    cleanup_files();		/* if someone starts with LYNXfoo: page */
+#ifndef VMS			/*  On VMS, the VMSexit() handler does these. - FM */
+    fflush(stderr);
+    if (LYOutOfMemory == TRUE) {
+	LYOutOfMemory = FALSE;
+	printf("\r\n%s\r\n\r\n", MEMORY_EXHAUSTED_ABORT);
+	fflush(stdout);
+    }
+    LYCloseTracelog();
+#endif /* !VMS */
+    show_alloc();
+    exit(status);
+}
+
+void outofmem(const char *fname,
+	      const char *func)
+{
+    fprintf(stderr, "\n\n\n%s %s: %s\n", fname, func, MEMORY_EXHAUSTED_ABORTING);
+    LYOutOfMemory = TRUE;
+    LYexit(-1);
+}
+@
+
+
+1.1.109.1
+log
+@Lynx 2.8.6dev.11h (pre-patch) minus
+* lib
+* po
+* scripts
+@
+text
+@@
+
+
+1.1.109.2
+log
+@Finally, a new Lynx snapshot!
+@
+text
+@a1 2
+ * $LynxId: LYexit.c,v 1.33 2007/05/06 21:41:43 tom Exp $
+ *
+a2 1
+ *	(most of this file was rewritten in 1996 and 2004).
+a166 9
+
+#if defined(NCURSES_VERSION) && defined(LY_FIND_LEAKS)
+#if defined(HAVE__NC_FREE_AND_EXIT)
+    _nc_free_and_exit(status);
+#elif defined(HAVE__NC_FREEALL)
+    _nc_freeall();
+#endif
+#endif /* NCURSES_VERSION */
+
+@
+
+
+1.1.109.3
+log
+@Import Lynx 2.8.7dev.12
+@
+text
+@d2 1
+a2 1
+ * $LynxId: LYexit.c,v 1.34 2008/12/29 01:03:20 tom Exp $
+d108 1
+a108 1
+#ifdef SIGBUS
+d110 1
+a110 1
+#endif /* SIGBUS */
+d129 1
+a129 1
+#ifdef SIGBUS
+d131 1
+a131 1
+#endif /* SIGBUS */
+@
+
+
+1.1.109.4
+log
+@Woohoo, there’s a new Lynx release!
+@
+text
+@d2 1
+a2 1
+ * $LynxId: LYexit.c,v 1.35 2009/03/10 00:12:52 tom Exp $
+d90 3
+@
+
+

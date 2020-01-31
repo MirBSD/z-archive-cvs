@@ -1,0 +1,360 @@
+head	1.10;
+access;
+symbols
+	MIRBSD_10:1.5.0.2
+	MIRBSD_10_BASE:1.5;
+locks; strict;
+comment	@ * @;
+
+
+1.10
+date	2010.09.12.17.25.12;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004C8D0CFC67848FA7;
+
+1.9
+date	2010.01.14.10.35.05;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004B4EF3714CE901BC;
+
+1.8
+date	2008.08.01.14.59.57;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	100489324F4472E9C7F;
+
+1.7
+date	2008.08.01.13.46.08;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100489313B0766D4103;
+
+1.6
+date	2008.04.06.16.57.37;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10047F901172CB152C3;
+
+1.5
+date	2007.05.07.16.15.57;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100463F507166871BCE;
+
+1.4
+date	2007.05.07.15.50.40;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100463F4AE56575365A;
+
+1.3
+date	2007.03.13.18.22.53;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10045F6EC14570C78F0;
+
+1.2
+date	2007.02.28.16.11.32;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045E5A951020DE68F;
+
+1.1
+date	2007.02.12.20.59.47;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045D0D52B012FBB8B;
+
+
+desc
+@@
+
+
+1.10
+log
+@now that we have arc4random_pushb_fast, bring back but optimise zADDRND()
+@
+text
+@/*-
+ * Copyright (c) 2006, 2008
+ *	Thorsten Glaser <tg@@mirbsd.de>
+ * The adler32 algorithm is
+ * Copyright (C) 1995 Mark Adler
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ *-
+ * See also:
+ *	contrib/hosted/fwcf/adler.h
+ *	src/lib/libc/hash/adh32.c
+ *	src/kern/z/adler32s.c
+ *	src/kern/z/adler32_i386.S
+ */
+
+#include "zutil.h"
+
+#ifdef _KERNEL
+#include <sys/limits.h>
+#else
+#include <limits.h>
+#endif
+
+zRCSID("$MirOS: src/kern/z/adler32s.c,v 1.8 2008/08/01 14:59:57 tg Exp $")
+
+#define BASE	65521	/* largest prime smaller than 65536 */
+#define NMAX	5552	/* largest n: 255n(n+1)/2 + (n+1)(BASE-1) <= 2^32-1 */
+#define MINLBIT	16	/* min. number of bits required to represent BASE */
+
+#ifndef MIN
+#define MIN(a,b)	(((a) < (b)) ? (a) : (b))
+#endif
+
+#ifndef NULL
+#define NULL		((void *)0UL)
+#endif
+
+unsigned long
+adler32(unsigned long s1, const unsigned char *buf, unsigned len)
+{
+	unsigned long s2;
+	unsigned n;
+
+	/* compile-time assertion: we must fit 32 bits into an unsigned long */
+	switch (0) {
+	case 0:
+	case sizeof(unsigned long) * CHAR_BIT >= 32:
+		;
+	}
+
+	/* compile-time assertion: we must fit MINLBIT bits into an unsigned */
+	switch (0) {
+	case 0:
+	case sizeof(unsigned) * CHAR_BIT >= MINLBIT:
+		;
+	}
+
+	if (buf == NULL)
+		return (1UL);
+
+	s2 = (s1 >> 16) & 0xFFFFUL;
+	s1 &= 0xFFFFUL;
+
+	while (len) {
+		len -= (n = MIN(len, NMAX));
+		while (n--) {
+			s1 += *buf++;
+			s2 += s1;
+		}
+		s1 %= BASE;
+		s2 %= BASE;
+	}
+
+	s1 |= (s2 << 16);
+	zADDRND(s1);
+	return (s1);
+}
+@
+
+
+1.9
+log
+@Remove zADDRND() – this cuts down 'zgrep -F sshd messages.0.gz' time for
+the following file on an IBM X40 (1.4 GHz Pentium-M) dramatically:
+    0m7.24s real     0m4.01s user     0m3.23s system
+    0m0.10s real     0m0.10s user     0m0.00s system
+method  crc      date   time  compressed  uncompressed  ratio  uncompressed_name
+deflate e87edc2a Jan 14 09:00      57182        446614  87.2%  messages.0
+
+I don’t know why this is so critical a code path, but the sheer amount
+of saved CPU time (both user and system) is worth the loss.
+@
+text
+@d88 1
+@
+
+
+1.8
+log
+@merge functionality from src/lib/libz/ and __CRAZY cleanliness; fix build
+@
+text
+@d37 1
+a37 1
+zRCSID("$MirOS: src/kern/z/adler32s.c,v 1.7 2008/08/01 13:46:08 tg Exp $")
+a87 1
+	zADDRND(s1);		/* once-only evaluation of s1 not guaranteed */
+@
+
+
+1.7
+log
+@RCS ID and include police
+@
+text
+@d37 1
+a37 3
+zRCSID("$MirOS: src/kern/z/adler32s.c,v 1.6 2008/04/06 16:57:37 tg Exp $")
+
+unsigned long adler32(unsigned long, const unsigned char *, unsigned);
+@
+
+
+1.6
+log
+@arc4random_pushk
+@
+text
+@a0 2
+/* $MirOS: src/kern/z/adler32s.c,v 1.5 2007/05/07 16:15:57 tg Exp $ */
+
+a12 4
+ * Advertising materials mentioning features or use of this work must
+ * display the following acknowledgement:
+ *	This product includes material provided by Thorsten Glaser.
+ *
+d29 2
+a30 6
+#ifdef _STANDALONE
+#define zADDRND(x)	/* nothing */
+#define zRCSID(x)	/* nothing, we can't guarantee it's defined */
+#include <limits.h>
+#else
+#include <sys/param.h>
+a31 1
+#include <sys/kernel.h>
+a32 3
+#include <dev/rndvar.h>
+#define zADDRND(x)	rnd_addpool_add((uint32_t)(x) ^ (uint32_t)time.tv_sec)
+#define zRCSID(x)	__RCSID(x);
+a34 8
+#include <stdlib.h>
+#define zADDRND(x)	__extension__({				\
+	uint32_t zADDRND_x = ((uint32_t)(x));			\
+								\
+	arc4random_pushk(&zADDRND_x, sizeof (zADDRND_x));	\
+})
+#define zRCSID(x)	__RCSID(x);
+#endif
+d37 1
+a37 1
+zRCSID("$MirOS: src/kern/z/adler32s.c,v 1.5 2007/05/07 16:15:57 tg Exp $")
+@
+
+
+1.5
+log
+@• make HASH API functions for ADLER32 in libc, too (size-optimised but no asm)
+• cross-reference them all in the man pages
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32s.c,v 1.4 2007/05/07 15:50:40 tg Exp $ */
+d4 1
+a4 1
+ * Copyright (c) 2006
+d50 5
+a54 1
+#define zADDRND(x)	arc4random_push((int)(x))
+d59 1
+a59 1
+zRCSID("$MirOS: src/kern/z/adler32s.c,v 1.4 2007/05/07 15:50:40 tg Exp $")
+@
+
+
+1.4
+log
+@add xrefs
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32s.c,v 1.3 2007/03/13 18:22:53 tg Exp $ */
+d30 1
+a30 1
+ *	src/bin/md5/cksum.c
+d55 1
+a55 1
+zRCSID("$MirOS: src/kern/z/adler32s.c,v 1.3 2007/03/13 18:22:53 tg Exp $")
+@
+
+
+1.3
+log
+@fix paths in comment
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32s.c,v 1.2 2007/02/28 16:11:32 tg Exp $ */
+d30 1
+d55 1
+a55 1
+zRCSID("$MirOS: src/kern/z/adler32s.c,v 1.2 2007/02/28 16:11:32 tg Exp $")
+@
+
+
+1.2
+log
+@* fix pathnames in comment
+* C impl: RCSID is ok for kernel (gets stripped, but what the hey),
+  but not standalone (we can't be sure to use the macro, in contrast
+  to the asm impl)
+* asm impl: do rnd_addpool_add() for kernel, arc4random_push() for
+  (not kernel) and (not standalone)
+* some more comment overhaul
+
+XXX this code isn't used yet, but better should
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32s.c,v 1.1 2007/02/12 20:59:47 tg Exp $ */
+d30 2
+a31 2
+ *	kern/z/adler32s.c
+ *	kern/z/adler32_i386.S
+d54 1
+a54 1
+zRCSID("$MirOS: src/kern/z/adler32s.c,v 1.1 2007/02/12 20:59:47 tg Exp $")
+@
+
+
+1.1
+log
+@move sys/lib/libsa/adler32s.c and sys/arch/i386/stand/libz/adler32.S
+to kern/z/adler32{s.c,_i386.S} in order to be able to share them; no
+code changes yet (but there will be, e.g. a header file)
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/share/misc/licence.template,v 1.20 2006/12/11 21:04:56 tg Rel $ */
+d29 1
+a29 1
+ *	contrib/hosted/fwcf/adler.h,v
+d36 1
+a36 1
+#define zRCSID(x)	/* nothing, for space reasons */
+d45 1
+a45 1
+#define zRCSID(x)	/* nothing, for space reasons */
+d54 1
+a54 1
+zRCSID("$MirOS: src/sys/lib/libsa/adler32s.c,v 1.3 2006/12/11 23:55:06 tg Exp $")
+@
+

@@ -1,0 +1,702 @@
+head	1.10;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.2
+	MIRBSD_10:1.6.0.4
+	MIRBSD_10_BASE:1.6
+	MIRBSD_9_BASE:1.6
+	MIRBSD_8:1.4.0.2
+	MIRBSD_8_BASE:1.4
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.10
+date	2010.09.21.17.42.48;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004C98EEA9684B3BEB;
+
+1.9
+date	2010.09.12.18.19.58;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004C8D19CE4D7E4CD9;
+
+1.8
+date	2009.11.09.19.43.44;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004AF870EF5AE8038B;
+
+1.7
+date	2008.08.01.11.32.53;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004892F47624324996;
+
+1.6
+date	2006.06.11.00.15.08;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100448B6089366B48DB;
+
+1.5
+date	2006.05.26.13.40.57;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004477057B427343F7;
+
+1.4
+date	2005.08.02.11.57.31;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	308942ef5fc1b461;
+
+1.3
+date	2005.07.07.15.39.03;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1ba342cd4ca3cd1e;
+
+1.2
+date	2005.03.06.21.26.57;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.27.24;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.27.24;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.08.02.11.52.52;	author tg;	state Exp;
+branches;
+next	;
+commitid	44db42ef5ea9756b;
+
+
+desc
+@@
+
+
+1.10
+log
+@better names
+@
+text
+@/**	$MirOS: src/sys/arch/i386/i386/dkcsum.c,v 1.9 2010/09/12 18:19:58 tg Exp $ */
+/*	$OpenBSD: dkcsum.c,v 1.19 2005/08/01 16:46:55 krw Exp $	*/
+
+/*-
+ * Copyright (c) 1997 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 2004, 2005 Thorsten Glaser.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
+ * A checksumming pseudo device used to get unique labels of each disk
+ * that needs to be matched to BIOS disks.
+ */
+
+#include <sys/param.h>
+#include <sys/buf.h>
+#include <sys/conf.h>
+#include <sys/device.h>
+#include <sys/disklabel.h>
+#include <sys/fcntl.h>
+#include <sys/proc.h>
+#include <sys/reboot.h>
+#include <sys/stat.h>
+#include <sys/systm.h>
+#include <dev/rndvar.h>
+#include <zlib.h>
+
+#include <machine/biosvar.h>
+
+#define	b_cylin	b_resid
+
+dev_t dev_rawpart(struct device *);	/* XXX */
+
+extern u_int32_t bios_cksumlen;
+extern bios_diskinfo_t *bios_diskinfo;
+extern dev_t bootdev;
+
+void
+dkcsumattach(void)
+{
+	struct device *dv;
+	struct buf *bp;
+	struct bdevsw *bdsw;
+	dev_t dev, pribootdev, altbootdev;
+	int error, picked;
+	u_int32_t csum;
+	bios_diskinfo_t *bdi, *hit;
+
+	/* do nothing if no diskinfo passed from /boot, or a bad length */
+	if (bios_diskinfo == NULL || bios_cksumlen * DEV_BSIZE > MAXBSIZE)
+		return;
+
+#ifdef DEBUG
+	printf("dkcsum: bootdev=%#x\n", bootdev);
+	for (bdi = bios_diskinfo; bdi->bios_number != -1; bdi++)
+		if (bdi->bios_number & 0x80)
+			printf("dkcsum: BIOS drive %#x checksum is %#x\n",
+			    bdi->bios_number, bdi->checksum);
+#endif
+	pribootdev = altbootdev = 0;
+
+	/*
+	 * XXX What if DEV_BSIZE is changed to something else than the BIOS
+	 * blocksize?  Today, /boot doesn't cover that case so neither need
+	 * I care here.
+	 */
+	bp = geteblk(bios_cksumlen * DEV_BSIZE);	/* XXX error check?  */
+
+	TAILQ_FOREACH(dv, &alldevs, dv_list) {
+		if (dv->dv_class != DV_DISK)
+			continue;
+		bp->b_dev = dev = dev_rawpart(dv);
+		if (dev == NODEV)
+			continue;
+		bdsw = &bdevsw[major(dev)];
+
+		/*
+		 * This open operation guarantees a proper initialization
+		 * of the device, for future strategy calls.
+		 */
+		error = (*bdsw->d_open)(dev, FREAD, S_IFCHR, curproc);
+		if (error) {
+			/* XXX What to do here? */
+#ifdef DEBUG
+			printf("dkcsum: %s open failed (%d)\n",
+			    dv->dv_xname, error);
+#endif
+			continue;
+		}
+
+		/* Read blocks to cksum.  XXX maybe a d_read should be used. */
+		bp->b_blkno = 0;
+		bp->b_bcount = bios_cksumlen * DEV_BSIZE;
+		bp->b_flags = B_BUSY | B_READ;
+		bp->b_cylin = 0;
+		(*bdsw->d_strategy)(bp);
+		if ((error = biowait(bp))) {
+			/* XXX What to do here? */
+#ifdef DEBUG
+			printf("dkcsum: %s read failed (%d)\n",
+			    dv->dv_xname, error);
+#endif
+			error = (*bdsw->d_close)(dev, 0, S_IFCHR, curproc);
+#ifdef DEBUG
+			if (error)
+				printf("dkcsum: %s close failed (%d)\n",
+				    dv->dv_xname, error);
+#endif
+			continue;
+		}
+		error = (*bdsw->d_close)(dev, FREAD, S_IFCHR, curproc);
+		if (error) {
+			/* XXX What to do here? */
+#ifdef DEBUG
+			printf("dkcsum: %s closed failed (%d)\n",
+			    dv->dv_xname, error);
+#endif
+			continue;
+		}
+
+		csum = adler32(0, bp->b_data, bios_cksumlen * DEV_BSIZE);
+#ifdef DEBUG
+		printf("dkcsum: %s checksum is %#x\n", dv->dv_xname, csum);
+#endif
+
+		/* Find the BIOS device */
+		hit = 0;
+		for (bdi = bios_diskinfo; bdi->bios_number != -1; bdi++) {
+			rnd_lopool_addh(bdi, sizeof(*bdi));
+
+			/* Skip non-harddrives and bootable CD-ROMs */
+			if ((!(bdi->bios_number & 0x80)) ||
+			    (bdi->flags & BDI_EL_TORITO))
+				continue;
+			if (bdi->checksum != csum)
+				continue;
+			picked = hit || (bdi->flags & BDI_PICKED);
+			if (!picked)
+				hit = bdi;
+			printf("dkcsum: %s matches BIOS drive %#x%s (%08X)\n",
+			    dv->dv_xname, bdi->bios_number,
+			    (picked ? " IGNORED" : ""), bdi->checksum);
+		}
+
+		{
+			struct {
+				void *hit;
+				u_int32_t csum;
+				int bios_number;
+			} s;
+
+			s.hit = hit;
+			s.csum = csum;
+			if (hit)
+				s.bios_number = hit->bios_number;
+			rnd_lopool_add(&s, sizeof(s));
+		}
+
+		/*
+		 * If we have no hit, that's OK, we can see a lot more devices
+		 * than the BIOS can, so this case is pretty normal.
+		 */
+		if (!hit) {
+#ifdef DEBUG
+			printf("dkcsum: %s has no matching BIOS drive\n",
+			    dv->dv_xname);
+#endif	
+			continue;
+		}
+
+		/*
+		 * Fixup bootdev if units match.  This means that all of
+		 * hd*, sd*, wd*, will be interpreted the same.  Not 100%
+		 * backwards compatible, but sd* and wd* should be phased-
+		 * out in the bootblocks.
+		 */
+
+		/* B_TYPE dependent hd unit counting bootblocks */ 
+		if ((B_TYPE(bootdev) == B_TYPE(hit->bsd_dev)) &&
+		    (B_UNIT(bootdev) == B_UNIT(hit->bsd_dev))) {
+			int type, ctrl, adap, part, unit;
+
+			type = major(bp->b_dev);
+			adap = B_ADAPTOR(bootdev);
+			ctrl = B_CONTROLLER(bootdev);
+			unit = DISKUNIT(bp->b_dev);
+			part = B_PARTITION(bootdev);
+
+			pribootdev = MAKEBOOTDEV(type, ctrl, adap, unit, part);
+#ifdef DEBUG
+			printf("dkcsum: %s is primary boot disk\n",
+			    dv->dv_xname);
+#endif
+		}
+		/* B_TYPE independent hd unit counting bootblocks */
+		if (B_UNIT(bootdev) == (hit->bios_number & 0x7F)) {
+			int type, ctrl, adap, part, unit;
+
+			type = major(bp->b_dev);
+			adap = B_ADAPTOR(bootdev);
+			ctrl = B_CONTROLLER(bootdev);
+			unit = DISKUNIT(bp->b_dev);
+			part = B_PARTITION(bootdev);
+
+			altbootdev = MAKEBOOTDEV(type, ctrl, adap, unit, part);
+#ifdef DEBUG
+			printf("dkcsum: %s is alternate boot disk\n",
+			    dv->dv_xname);
+#endif
+		}
+
+		/* This will overwrite /boot's guess, just so you remember */
+		hit->bsd_dev = MAKEBOOTDEV(major(bp->b_dev), 0, 0,
+		    DISKUNIT(bp->b_dev), RAW_PART);
+		hit->flags |= BDI_PICKED;
+	}
+	bootdev = pribootdev ? pribootdev : altbootdev ? altbootdev : bootdev;
+
+	bp->b_flags |= B_INVAL;
+	brelse(bp);
+}
+@
+
+
+1.9
+log
+@part 1: remove the addpool, replace with dummy lopool
+do not install this, it reduces entropy
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/arch/i386/i386/dkcsum.c,v 1.8 2009/11/09 19:43:44 tg Exp $ */
+d148 1
+a148 1
+			rnd_bootpool_add(bdi, sizeof(*bdi));
+@
+
+
+1.8
+log
+@improve RNG stuff with proper hashing
+(checked arc4* stuff to avoid short cycles; OpenBSD already ensured that)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/arch/i386/i386/dkcsum.c,v 1.7 2008/08/01 11:32:53 tg Exp $ */
+d175 1
+a175 1
+			rnd_bootpool_add(&s, sizeof(s));
+@
+
+
+1.7
+log
+@merge the fix
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/arch/i386/i386/dkcsum.c,v 1.6 2006/06/11 00:15:08 tg Exp $ */
+d148 2
+a149 2
+			rnd_addpool_add((bdi->bios_number * bdi->flags)
+			    ^ (int)bdi);
+a158 2
+			else
+				rnd_addpool_add(bdi->bios_number + csum);
+d164 14
+a182 1
+			rnd_addpool_add(csum);
+@
+
+
+1.6
+log
+@* bring the sparc kernel in shape to maybe cross-compile it
+* add machine description for mirbsd-sparc to gcc
+* fix including problem
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/arch/i386/i386/dkcsum.c,v 1.5 2006/05/26 13:40:57 tg Exp $ */
+d152 1
+a152 1
+			    (bdi->flags & BDI_ELTORITO))
+@
+
+
+1.5
+log
+@reduce overhead
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/arch/i386/i386/dkcsum.c,v 1.4 2005/08/02 11:57:31 tg Exp $ */
+d45 1
+a52 2
+extern unsigned long adler32(unsigned long, const char *, unsigned);
+
+d148 1
+a148 1
+			add_timer_randomness((bdi->bios_number * bdi->flags)
+@
+
+
+1.4
+log
+@merge
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/arch/i386/i386/dkcsum.c,v 1.3 2005/07/07 15:39:03 tg Exp $ */
+d161 1
+a161 2
+				rnd_addpool_add((bdi->bios_number + csum)
+				    ^ arc4random());
+d172 1
+a172 1
+			rnd_addpool_add((0x100 + csum) ^ arc4random());
+@
+
+
+1.3
+log
+@unbreak compile (define adler32() locally)
+@
+text
+@d1 2
+a2 2
+/**	$MirOS: src/sys/arch/i386/i386/dkcsum.c,v 1.2 2005/03/06 21:26:57 tg Exp $ */
+/*	$OpenBSD: dkcsum.c,v 1.11 2003/06/03 20:31:07 deraadt Exp $	*/
+d6 1
+a6 1
+ * Copyright (c) 2004 Thorsten Glaser.
+d59 1
+a59 1
+dkcsumattach()
+d64 2
+a65 2
+	dev_t dev;
+	int error;
+d73 9
+d83 1
+a83 1
+	 * XXX Whatif DEV_BSIZE is changed to something else than the BIOS
+d89 1
+a89 1
+	for (dv = alldevs.tqh_first; dv; dv = dv->dv_list.tqe_next) {
+d104 4
+a107 3
+			if (error != EIO)
+				printf("dkcsum: open of %s failed (%d)\n",
+				    dv->dv_xname, error);
+d117 1
+a117 1
+		if (biowait(bp)) {
+d119 2
+a120 1
+			printf("dkcsum: read of %s failed (%d)\n",
+d122 1
+d124 1
+d126 1
+a126 1
+				printf("dkcsum: close of %s failed (%d)\n",
+d128 1
+d134 2
+a135 1
+			printf("dkcsum: close of %s failed (%d)\n",
+d137 1
+d143 1
+a143 1
+		printf("dkcsum: checksum of %s is %x\n", dv->dv_xname, csum);
+d155 11
+a165 16
+#ifdef DEBUG
+			printf("dkcsum: "
+			    "attempting to match with BIOS drive %x csum %x\n",
+			    bdi->bios_number, bdi->checksum);
+#endif
+			if (bdi->checksum == csum) {
+				if (!hit && !(bdi->flags & BDI_PICKED))
+					hit = bdi;
+				else {
+					rnd_addpool_add((bdi->bios_number
+					    + csum) ^ arc4random());
+					/* XXX add other heuristics here.  */
+					printf("dkcsum: warning: "
+					    "dup BSD->BIOS disk mapping\n");
+				}
+			}
+d172 1
+a172 8
+		if (hit) {
+			rnd_addpool_add((hit->bios_number + csum)
+			    ^ arc4random());
+#ifdef DIAGNOSTIC
+			printf("dkcsum: %s matched BIOS disk %x\n",
+			    dv->dv_xname, hit->bios_number);
+#endif
+		} else {
+d174 2
+a175 2
+#ifdef DIAGNOSTIC
+			printf("dkcsum: %s had no matching BIOS disk\n",
+d177 1
+a177 1
+#endif
+d181 2
+a182 1
+		/* Fixup bootdev if units match.  This means that all of
+d187 19
+a208 1
+			/* Translate to MAKEBOOTDEV() style */
+d215 5
+a219 1
+			bootdev = MAKEBOOTDEV(type, ctrl, adap, unit, part);
+d227 2
+@
+
+
+1.2
+log
+@* merge src/sys/
+  (at least the better part of it)
+* revert IPv6 networking to OpenBSD, since
+  I didn't get IPV4_MAPPED addresses working :(
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+a46 2
+#define	_BSD_STANDXX
+#include <lib/libz/zlib.h>
+d52 2
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d6 1
+d44 1
+d47 1
+a47 1
+
+d133 5
+a137 2
+			/* Skip non-harddrives */
+			if (!(bdi->bios_number & 0x80))
+d148 2
+d162 2
+d169 1
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@sync
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: dkcsum.c,v 1.19 2005/08/01 16:46:55 krw Exp $	*/
+d56 1
+a56 1
+dkcsumattach(void)
+d61 2
+a62 2
+	dev_t dev, pribootdev, altbootdev;
+	int error, picked;
+a69 9
+#ifdef DEBUG
+	printf("dkcsum: bootdev=%#x\n", bootdev);
+	for (bdi = bios_diskinfo; bdi->bios_number != -1; bdi++)
+		if (bdi->bios_number & 0x80)
+			printf("dkcsum: BIOS drive %#x checksum is %#x\n",
+			    bdi->bios_number, bdi->checksum);
+#endif
+	pribootdev = altbootdev = 0;
+
+d71 1
+a71 1
+	 * XXX What if DEV_BSIZE is changed to something else than the BIOS
+d77 1
+a77 1
+	TAILQ_FOREACH(dv, &alldevs, dv_list) {
+d92 3
+a94 4
+#ifdef DEBUG
+			printf("dkcsum: %s open failed (%d)\n",
+			    dv->dv_xname, error);
+#endif
+d104 1
+a104 1
+		if ((error = biowait(bp))) {
+d106 1
+a106 2
+#ifdef DEBUG
+			printf("dkcsum: %s read failed (%d)\n",
+a107 1
+#endif
+a108 1
+#ifdef DEBUG
+d110 1
+a110 1
+				printf("dkcsum: %s close failed (%d)\n",
+a111 1
+#endif
+d117 1
+a117 2
+#ifdef DEBUG
+			printf("dkcsum: %s closed failed (%d)\n",
+a118 1
+#endif
+d124 1
+a124 1
+		printf("dkcsum: %s checksum is %#x\n", dv->dv_xname, csum);
+d133 14
+a146 8
+			if (bdi->checksum != csum)
+				continue;
+			picked = hit || (bdi->flags & BDI_PICKED);
+			if (!picked)
+				hit = bdi;
+			printf("dkcsum: %s matches BIOS drive %#x%s\n",
+			    dv->dv_xname, bdi->bios_number,
+			    (picked ? " IGNORED" : ""));
+d153 8
+a160 3
+		if (!hit) {
+#ifdef DEBUG
+			printf("dkcsum: %s has no matching BIOS drive\n",
+d162 1
+a162 1
+#endif	
+d166 1
+a166 2
+		/*
+		 * Fixup bootdev if units match.  This means that all of
+a170 19
+
+		/* B_TYPE dependent hd unit counting bootblocks */ 
+		if ((B_TYPE(bootdev) == B_TYPE(hit->bsd_dev)) &&
+		    (B_UNIT(bootdev) == B_UNIT(hit->bsd_dev))) {
+			int type, ctrl, adap, part, unit;
+
+			type = major(bp->b_dev);
+			adap = B_ADAPTOR(bootdev);
+			ctrl = B_CONTROLLER(bootdev);
+			unit = DISKUNIT(bp->b_dev);
+			part = B_PARTITION(bootdev);
+
+			pribootdev = MAKEBOOTDEV(type, ctrl, adap, unit, part);
+#ifdef DEBUG
+			printf("dkcsum: %s is primary boot disk\n",
+			    dv->dv_xname);
+#endif
+		}
+		/* B_TYPE independent hd unit counting bootblocks */
+d174 1
+d181 1
+a181 5
+			altbootdev = MAKEBOOTDEV(type, ctrl, adap, unit, part);
+#ifdef DEBUG
+			printf("dkcsum: %s is alternate boot disk\n",
+			    dv->dv_xname);
+#endif
+a188 2
+	bootdev = pribootdev ? pribootdev : altbootdev ? altbootdev : bootdev;
+
+@
+

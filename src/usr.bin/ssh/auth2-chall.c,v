@@ -1,0 +1,668 @@
+head	1.4;
+access;
+symbols
+	cvs-200910041320:1.1.1.8
+	cvs-200903221200:1.1.1.8
+	cvs-200812162015:1.1.1.8
+	cvs-200804031830:1.1.1.7
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	cvs-200803022030:1.1.1.7
+	cvs-200709131337:1.1.1.6
+	cvs-200709021830:1.1.1.6
+	cvs-200708201200:1.1.1.6
+	cvs-200706161500:1.1.1.6
+	cvs-200705192215:1.1.1.6
+	cvs-200704292000:1.1.1.6
+	cvs-200703080900:1.1.1.6
+	cvs-200701251600:1.1.1.6
+	cvs-200612111600:1.1.1.5
+	cvs-200611090230:1.1.1.5
+	OPENBSD_4_0:1.1.1.5
+	MIRBSD_9_BASE:1.1.1.4
+	cvs-200606162342:1.1.1.4
+	cvs-200606022000:1.1.1.4
+	cvs-200604191000:1.1.1.4
+	cvs-200602220045:1.1.1.3
+	MIRBSD_8:1.1.1.3.0.2
+	MIRBSD_8_BASE:1.1.1.3
+	cvs-200512201942:1.1.1.3
+	cvs-200511231930:1.1.1.3
+	cvs-200507211800:1.1.1.3
+	cvs-200506221550:1.1.1.2
+	cvs-200505050030:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	cvs-200504261445:1.1.1.1
+	cvs-200504141900:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2008.12.16.22.13.26;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10049482819766381ED;
+
+1.3
+date	2008.12.16.20.55.19;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100494815C97ECEEDBF;
+
+1.2
+date	2008.03.02.21.14.18;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10047CB18BB506A8527;
+
+1.1
+date	2005.02.05.17.29.52;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.52;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.06.22.15.56.24;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	181342b98a38fe99;
+
+1.1.1.3
+date	2005.07.21.21.00.23;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	560042e0092f571e;
+
+1.1.1.4
+date	2006.04.19.10.15.02;	author tg;	state Exp;
+branches;
+next	1.1.1.5;
+commitid	10044460DB21E1F715C;
+
+1.1.1.5
+date	2006.09.20.19.06.47;	author tg;	state Exp;
+branches;
+next	1.1.1.6;
+commitid	10045119150397FC669;
+
+1.1.1.6
+date	2007.01.25.16.12.52;	author tg;	state Exp;
+branches;
+next	1.1.1.7;
+commitid	10045B8D7100791C016;
+
+1.1.1.7
+date	2008.03.02.20.40.41;	author tg;	state Exp;
+branches;
+next	1.1.1.8;
+commitid	10047CB10DD30FAF062;
+
+1.1.1.8
+date	2008.12.16.20.15.31;	author tg;	state Exp;
+branches;
+next	;
+commitid	10049480C7A2701F5C0;
+
+
+desc
+@@
+
+
+1.4
+log
+@really merge OpenSSH-current into MirBSD Secure SHell 10uA4
+@
+text
+@/* $OpenBSD: auth2-chall.c,v 1.34 2008/12/09 04:32:22 djm Exp $ */
+/*
+ * Copyright (c) 2001 Markus Friedl.  All rights reserved.
+ * Copyright (c) 2001 Per Allansson.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+
+#include <stdio.h>
+#include <string.h>
+
+#include "xmalloc.h"
+#include "ssh2.h"
+#include "key.h"
+#include "hostfile.h"
+#include "auth.h"
+#include "buffer.h"
+#include "packet.h"
+#include "dispatch.h"
+#include "log.h"
+
+__RCSID("$MirOS: src/usr.bin/ssh/auth2-chall.c,v 1.3 2008/12/16 20:55:19 tg Exp $");
+
+static int auth2_challenge_start(Authctxt *);
+static int send_userauth_info_request(Authctxt *);
+static void input_userauth_info_response(int, u_int32_t, void *);
+
+#ifdef BSD_AUTH
+extern KbdintDevice bsdauth_device;
+#endif
+
+KbdintDevice *devices[] = {
+#ifdef BSD_AUTH
+	&bsdauth_device,
+#endif
+	NULL
+};
+
+typedef struct KbdintAuthctxt KbdintAuthctxt;
+struct KbdintAuthctxt
+{
+	char *devices;
+	void *ctxt;
+	KbdintDevice *device;
+	u_int nreq;
+};
+
+static KbdintAuthctxt *
+kbdint_alloc(const char *devs)
+{
+	KbdintAuthctxt *kbdintctxt;
+	Buffer b;
+	int i;
+
+	kbdintctxt = xmalloc(sizeof(KbdintAuthctxt));
+	if (strcmp(devs, "") == 0) {
+		buffer_init(&b);
+		for (i = 0; devices[i]; i++) {
+			if (buffer_len(&b) > 0)
+				buffer_append(&b, ",", 1);
+			buffer_append(&b, devices[i]->name,
+			    strlen(devices[i]->name));
+		}
+		buffer_append(&b, "\0", 1);
+		kbdintctxt->devices = xstrdup(buffer_ptr(&b));
+		buffer_free(&b);
+	} else {
+		kbdintctxt->devices = xstrdup(devs);
+	}
+	debug("kbdint_alloc: devices '%s'", kbdintctxt->devices);
+	kbdintctxt->ctxt = NULL;
+	kbdintctxt->device = NULL;
+	kbdintctxt->nreq = 0;
+
+	return kbdintctxt;
+}
+static void
+kbdint_reset_device(KbdintAuthctxt *kbdintctxt)
+{
+	if (kbdintctxt->ctxt) {
+		kbdintctxt->device->free_ctx(kbdintctxt->ctxt);
+		kbdintctxt->ctxt = NULL;
+	}
+	kbdintctxt->device = NULL;
+}
+static void
+kbdint_free(KbdintAuthctxt *kbdintctxt)
+{
+	if (kbdintctxt->device)
+		kbdint_reset_device(kbdintctxt);
+	if (kbdintctxt->devices) {
+		xfree(kbdintctxt->devices);
+		kbdintctxt->devices = NULL;
+	}
+	xfree(kbdintctxt);
+}
+/* get next device */
+static int
+kbdint_next_device(KbdintAuthctxt *kbdintctxt)
+{
+	size_t len;
+	char *t;
+	int i;
+
+	if (kbdintctxt->device)
+		kbdint_reset_device(kbdintctxt);
+	do {
+		len = kbdintctxt->devices ?
+		    strcspn(kbdintctxt->devices, ",") : 0;
+
+		if (len == 0)
+			break;
+		for (i = 0; devices[i]; i++)
+			if (strncmp(kbdintctxt->devices, devices[i]->name, len) == 0)
+				kbdintctxt->device = devices[i];
+		t = kbdintctxt->devices;
+		kbdintctxt->devices = t[len] ? xstrdup(t+len+1) : NULL;
+		xfree(t);
+		debug2("kbdint_next_device: devices %s", kbdintctxt->devices ?
+		    kbdintctxt->devices : "<empty>");
+	} while (kbdintctxt->devices && !kbdintctxt->device);
+
+	return kbdintctxt->device ? 1 : 0;
+}
+
+/*
+ * try challenge-response, set authctxt->postponed if we have to
+ * wait for the response.
+ */
+int
+auth2_challenge(Authctxt *authctxt, char *devs)
+{
+	debug("auth2_challenge: user=%s devs=%s",
+	    authctxt->user ? authctxt->user : "<nouser>",
+	    devs ? devs : "<no devs>");
+
+	if (authctxt->user == NULL || !devs)
+		return 0;
+	if (authctxt->kbdintctxt == NULL)
+		authctxt->kbdintctxt = kbdint_alloc(devs);
+	return auth2_challenge_start(authctxt);
+}
+
+/* unregister kbd-int callbacks and context */
+void
+auth2_challenge_stop(Authctxt *authctxt)
+{
+	/* unregister callback */
+	dispatch_set(SSH2_MSG_USERAUTH_INFO_RESPONSE, NULL);
+	if (authctxt->kbdintctxt != NULL) {
+		kbdint_free(authctxt->kbdintctxt);
+		authctxt->kbdintctxt = NULL;
+	}
+}
+
+/* side effect: sets authctxt->postponed if a reply was sent*/
+static int
+auth2_challenge_start(Authctxt *authctxt)
+{
+	KbdintAuthctxt *kbdintctxt = authctxt->kbdintctxt;
+
+	debug2("auth2_challenge_start: devices %s",
+	    kbdintctxt->devices ?  kbdintctxt->devices : "<empty>");
+
+	if (kbdint_next_device(kbdintctxt) == 0) {
+		auth2_challenge_stop(authctxt);
+		return 0;
+	}
+	debug("auth2_challenge_start: trying authentication method '%s'",
+	    kbdintctxt->device->name);
+
+	if ((kbdintctxt->ctxt = kbdintctxt->device->init_ctx(authctxt)) == NULL) {
+		auth2_challenge_stop(authctxt);
+		return 0;
+	}
+	if (send_userauth_info_request(authctxt) == 0) {
+		auth2_challenge_stop(authctxt);
+		return 0;
+	}
+	dispatch_set(SSH2_MSG_USERAUTH_INFO_RESPONSE,
+	    &input_userauth_info_response);
+
+	authctxt->postponed = 1;
+	return 0;
+}
+
+static int
+send_userauth_info_request(Authctxt *authctxt)
+{
+	KbdintAuthctxt *kbdintctxt;
+	char *name, *instr, **prompts;
+	u_int i, *echo_on;
+
+	kbdintctxt = authctxt->kbdintctxt;
+	if (kbdintctxt->device->query(kbdintctxt->ctxt,
+	    &name, &instr, &kbdintctxt->nreq, &prompts, &echo_on))
+		return 0;
+
+	packet_start(SSH2_MSG_USERAUTH_INFO_REQUEST);
+	packet_put_cstring(name);
+	packet_put_cstring(instr);
+	packet_put_cstring("");		/* language not used */
+	packet_put_int(kbdintctxt->nreq);
+	for (i = 0; i < kbdintctxt->nreq; i++) {
+		packet_put_cstring(prompts[i]);
+		packet_put_char(echo_on[i]);
+	}
+	packet_send();
+	packet_write_wait();
+
+	for (i = 0; i < kbdintctxt->nreq; i++)
+		xfree(prompts[i]);
+	xfree(prompts);
+	xfree(echo_on);
+	xfree(name);
+	xfree(instr);
+	return 1;
+}
+
+static void
+input_userauth_info_response(int type, u_int32_t seq, void *ctxt)
+{
+	Authctxt *authctxt = ctxt;
+	KbdintAuthctxt *kbdintctxt;
+	int authenticated = 0, res;
+	u_int i, nresp;
+	char **response = NULL, *method;
+
+	if (authctxt == NULL)
+		fatal("input_userauth_info_response: no authctxt");
+	kbdintctxt = authctxt->kbdintctxt;
+	if (kbdintctxt == NULL || kbdintctxt->ctxt == NULL)
+		fatal("input_userauth_info_response: no kbdintctxt");
+	if (kbdintctxt->device == NULL)
+		fatal("input_userauth_info_response: no device");
+
+	authctxt->postponed = 0;	/* reset */
+	nresp = packet_get_int();
+	if (nresp != kbdintctxt->nreq)
+		fatal("input_userauth_info_response: wrong number of replies");
+	if (nresp > 100)
+		fatal("input_userauth_info_response: too many replies");
+	if (nresp > 0) {
+		response = xcalloc(nresp, sizeof(char *));
+		for (i = 0; i < nresp; i++)
+			response[i] = packet_get_string(NULL);
+	}
+	packet_check_eom();
+
+	res = kbdintctxt->device->respond(kbdintctxt->ctxt, nresp, response);
+
+	for (i = 0; i < nresp; i++) {
+		memset(response[i], 'r', strlen(response[i]));
+		xfree(response[i]);
+	}
+	if (response)
+		xfree(response);
+
+	switch (res) {
+	case 0:
+		/* Success! */
+		authenticated = authctxt->valid ? 1 : 0;
+		break;
+	case 1:
+		/* Authentication needs further interaction */
+		if (send_userauth_info_request(authctxt) == 1)
+			authctxt->postponed = 1;
+		break;
+	default:
+		/* Failure! */
+		break;
+	}
+
+	xasprintf(&method, "keyboard-interactive/%s", kbdintctxt->device->name);
+
+	if (!authctxt->postponed) {
+		if (authenticated) {
+			auth2_challenge_stop(authctxt);
+		} else {
+			/* start next device */
+			/* may set authctxt->postponed */
+			auth2_challenge_start(authctxt);
+		}
+	}
+	userauth_finish(authctxt, authenticated, method);
+	xfree(method);
+}
+
+void
+privsep_challenge_enable(void)
+{
+#ifdef BSD_AUTH
+	extern KbdintDevice mm_bsdauth_device;
+	/* As long as SSHv1 has devices[0] hard coded this is fine */
+	devices[0] = &mm_bsdauth_device;
+#endif
+}
+@
+
+
+1.3
+log
+@fastmerge, do not use yet!
+@
+text
+@d42 1
+a42 1
+__RCSID("$MirOS: src/usr.bin/ssh/auth2-chall.c,v 1.2 2008/03/02 21:14:18 tg Exp $");
+a313 1
+#endif
+a314 1
+#ifdef BSD_AUTH
+@
+
+
+1.2
+log
+@merge’n’fix
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: auth2-chall.c,v 1.33 2007/09/21 08:15:29 djm Exp $ */
+d42 1
+a42 1
+__RCSID("$MirOS$");
+d245 1
+a245 1
+	int authenticated = 0, res, len;
+d294 1
+a294 5
+	len = strlen("keyboard-interactive") + 2 +
+		strlen(kbdintctxt->device->name);
+	method = xmalloc(len);
+	snprintf(method, len, "keyboard-interactive/%s",
+	    kbdintctxt->device->name);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a25 2
+#include "includes.h"
+RCSID("$OpenBSD: auth2-chall.c,v 1.22 2005/01/19 13:11:47 dtucker Exp $");
+d27 6
+d34 2
+a38 1
+#include "xmalloc.h"
+d42 2
+a49 4
+#else
+#ifdef SKEY
+extern KbdintDevice skey_device;
+#endif
+a54 4
+#else
+#ifdef SKEY
+	&skey_device,
+#endif
+d140 1
+a140 1
+		   kbdintctxt->devices : "<empty>");
+d170 1
+a170 1
+	if (authctxt->kbdintctxt != NULL)  {
+d212 1
+a212 2
+	int i;
+	u_int *echo_on;
+d245 2
+a246 2
+	int i, authenticated = 0, res, len;
+	u_int nresp;
+d264 1
+a264 1
+		response = xmalloc(nresp * sizeof(char *));
+a318 3
+#ifdef SKEY
+	extern KbdintDevice mm_skey_device;
+#endif
+a321 4
+#else
+#ifdef SKEY
+	devices[0] = &mm_skey_device;
+#endif
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@most current OpenSSH.com
+@
+text
+@d26 1
+a26 1
+RCSID("$OpenBSD: auth2-chall.c,v 1.23 2005/06/17 02:44:32 djm Exp $");
+d212 2
+a213 1
+	u_int i, *echo_on;
+d246 2
+a247 2
+	int authenticated = 0, res, len;
+	u_int i, nresp;
+@
+
+
+1.1.1.3
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d26 1
+a26 1
+RCSID("$OpenBSD: auth2-chall.c,v 1.24 2005/07/17 07:17:54 djm Exp $");
+d140 1
+a140 1
+		    kbdintctxt->devices : "<empty>");
+@
+
+
+1.1.1.4
+log
+@I decided we'd better upgrade OpenSSH before releasing to the general public
+@
+text
+@a0 1
+/* $OpenBSD: auth2-chall.c,v 1.27 2006/03/25 13:17:01 djm Exp $ */
+d26 1
+d264 1
+a264 1
+		response = xcalloc(nresp, sizeof(char *));
+@
+
+
+1.1.1.5
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: auth2-chall.c,v 1.31 2006/08/05 08:28:24 dtucker Exp $ */
+d26 1
+a27 6
+#include <sys/types.h>
+
+#include <stdio.h>
+#include <string.h>
+
+#include "xmalloc.h"
+a28 2
+#include "key.h"
+#include "hostfile.h"
+d32 1
+d318 1
+a318 1
+#else
+a321 1
+#endif
+@
+
+
+1.1.1.6
+log
+@update OpenSSH, while we're at it…
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: auth2-chall.c,v 1.32 2007/01/03 03:01:40 stevesk Exp $ */
+d176 1
+a176 1
+	if (authctxt->kbdintctxt != NULL) {
+@
+
+
+1.1.1.7
+log
+@newer openssh
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: auth2-chall.c,v 1.33 2007/09/21 08:15:29 djm Exp $ */
+d46 1
+d48 5
+d55 1
+d57 5
+d322 1
+d324 5
+d330 1
+d332 5
+@
+
+
+1.1.1.8
+log
+@OpenSSH-current
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: auth2-chall.c,v 1.34 2008/12/09 04:32:22 djm Exp $ */
+d239 1
+a239 1
+	int authenticated = 0, res;
+d288 5
+a292 1
+	xasprintf(&method, "keyboard-interactive/%s", kbdintctxt->device->name);
+@
+
+

@@ -1,0 +1,660 @@
+head	1.6;
+access;
+symbols
+	MIRBSD_10:1.3.0.4
+	MIRBSD_10_BASE:1.3
+	MIRBSD_9_BASE:1.3
+	MIRBSD_8:1.3.0.2
+	MIRBSD_8_BASE:1.3
+	cvs-1_12_13:1.1.101.2
+	cvs-1_12_12:1.1.101.2
+	FSF:1.1.101;
+locks; strict;
+comment	@# @;
+
+
+1.6
+date	2016.11.08.21.12.06;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058223FBF6F5AF092;
+
+1.5
+date	2010.09.19.19.42.56;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004C9667C83946BB2E;
+
+1.4
+date	2010.09.16.20.55.56;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004C928463526833A8;
+
+1.3
+date	2005.04.19.20.58.16;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.03.13.15.50.34;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.03.06.15.17.49;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.03.06.15.17.49;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.04.19.20.33.14;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.6
+log
+@versioning/author/project
+@
+text
+@#! @@PERL@@
+# $MirOS: src/gnu/usr.bin/cvs/doc/mkman.pl,v 1.5 2010/09/19 19:42:56 tg Exp $
+#
+# Generate a man page from sections of a Texinfo manual.
+#
+# Copyright 2004 The Free Software Foundation,
+#                Derek R. Price,
+#                & Ximbiot <http://ximbiot.com>
+# Copyright (c) 2004, 2010 mirabilos <m@@mirbsd.org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software Foundation,
+# Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+
+
+
+# Need Perl 5.005 or greater for re 'eval'.
+require 5.005;
+
+# The usual.
+use strict;
+use IO::File;
+
+
+
+###
+### GLOBALS
+###
+my $texi_num = 0; # Keep track of how many texinfo files have been encountered.
+my @@parent;       # This needs to be global to be used inside of a regex later.
+my $nk;           # Ditto.
+my $ret;          # The RE match Type, used in debug prints.
+my $debug = 0;    # Debug mode?
+
+
+
+###
+### FUNCTIONS
+###
+sub debug_print
+{
+	print @@_ if $debug;
+}
+
+
+
+sub keyword_mode
+{
+	my ($keyword, $file) = @@_;
+
+	return "\\fR"
+		if $keyword =~ /^(|r|t)$/;
+	return "\\fB"
+		if $keyword =~ /^(strong|sc|code|file|samp)$/;
+	return "\\fI"
+		if $keyword =~ /^(emph|var|dfn)$/;
+	die "no handler for keyword '$keyword', found at line $. of file '$file'\n";
+}
+
+
+
+# Return replacement for \@@$keyword{$content}.
+sub do_keyword
+{
+	my ($file, $parent, $keyword, $content) = @@_;
+
+	return "node \\(aq$content\\(aq in the CVS manual"
+		if $keyword =~ /^ref$/;
+	return "See node \\(aq$content\\(aq in the CVS manual"
+		if $keyword =~ /^xref$/;
+	return "see node \\(aq$content\\(aq in the CVS manual"
+		if $keyword =~ /^pxref$/;
+	return "\\fP\\fP$content"
+		if $keyword =~ /^splitrcskeyword$/;
+
+	my $endmode = keyword_mode $parent;
+	my $startmode = keyword_mode $keyword, $file;
+
+	return "$startmode$content$endmode";
+}
+
+
+
+###
+### MAIN
+###
+for my $file (@@ARGV)
+{
+	my $fh = new IO::File "< $file"
+		or die "Failed to open file '$file': $!";
+
+	if ($file !~ /\.(texinfo|texi|txi)$/)
+	{
+		print stderr "Passing '$file' through unprocessed.\n";
+		# Just cat any file that doesn't look like a Texinfo source.
+		while (my $line = $fh->getline)
+		{
+			print $line;
+		}
+		next;
+	}
+
+	print stderr "Processing '$file'.\n";
+	$texi_num++;
+	my $gotone = 0;
+	my $inblank = 0;
+	my $indent = 0;
+	my $inexample = 0;
+	my $inmenu = 0;
+	my $intable = 0;
+	my $last_header = "";
+	my @@table_headers;
+	my @@table_footers;
+	my $table_header = "";
+	my $table_footer = "";
+	my $last;
+	while ($_ = $fh->getline)
+	{
+		if (!$gotone && /^\@@c ----- START MAN $texi_num -----$/)
+		{
+			$gotone = 1;
+			next;
+		}
+
+		# Skip ahead until our man section.
+		next unless $gotone;
+
+		# If we find the end tag we are done.
+		last if /^\@@c ----- END MAN $texi_num -----$/;
+
+		# Need to do this everywhere.  i.e., before we print example
+		# lines, since literal back slashes can appear there too.
+		s/\\/\\\\/g;
+		s/^\./\\&./;
+		s/([\s])\./$1\\&./;
+		s/'/\\(aq/g;
+		s/`/\\`/g;
+		s/(?<!-)---(?!-)/\\(em/g;
+		s/\@@bullet({}|\b)/\\(bu/g;
+		s/\@@dots({}|\b)/\\&.../g;
+
+		# Hack for GNU groff with nroff -Tutf8
+		s/-/\\-/g;
+
+		# Examples should be indented and otherwise untouched
+		if (/^\@@example$/)
+		{
+			$indent += 2;
+			print qq{.SP\n.PD 0\n};
+			$inexample = 1;
+			next;
+		}
+		if ($inexample)
+		{
+			if (/^\@@end example$/)
+			{
+				$indent -= 2;
+				print qq{\n.PD\n.IP "" $indent\n};
+				$inexample = 0;
+				next;
+			}
+			if (/^[ 	]*$/)
+			{
+				print ".SP\n";
+				next;
+			}
+
+			# Preserve the newline.
+			$_ = qq{.IP "" $indent\n} . $_;
+		}
+
+		# Compress blank lines into a single line.  This and its
+		# corresponding skip purposely bracket the @@menu and comment
+		# removal so that blanks on either side of a menu are
+		# compressed after the menu is removed.
+		if (/^[ 	]*$/)
+		{
+			$inblank = 1;
+			next;
+		}
+
+		# Not used
+		if (/^\@@(ignore|menu)$/)
+		{
+			$inmenu++;
+			next;
+		}
+		# Delete menu contents.
+		if ($inmenu)
+		{
+			next unless /^\@@end (ignore|menu)$/;
+			$inmenu--;
+			next;
+		}
+
+		# Remove comments
+		next if /^\@@c(omment)?\b/;
+
+		# Ignore includes.
+		next if /^\@@include\b/;
+
+		# It's okay to ignore this keyword - we're not using any
+		# first-line indent commands at all.
+		next if s/^\@@noindent\s*$//;
+
+		# @@need is only significant in printed manuals.
+		next if s/^\@@need\s+.*$//;
+
+		# If we didn't hit the previous check and $inblank is set, then
+		# we just finished with some number of blanks.  Print the man
+		# page blank symbol before continuing processing of this line.
+		if ($inblank)
+		{
+			print ".SP\n";
+			$inblank = 0;
+		}
+
+		# Chapter headers.
+		$last_header = $1 if s/^\@@node\s+(.*)$/.SH "$1"/;
+		if (/^\@@appendix\w*\s+(.*)$/)
+		{
+			my $content = $1;
+			$content =~ s/^$last_header(\\\(em|\s+)?//;
+			next if $content =~ /^\s*$/;
+			s/^\@@appendix\w*\s+.*$/.SS "$content"/;
+		}
+
+		# Tables are similar to examples, except we need to handle the
+		# keywords.
+		if (/^\@@(itemize|table)(\s+(.*))?$/)
+		{
+			$indent += 2;
+			push @@table_headers, $table_header;
+			push @@table_footers, $table_footer;
+			my $content = $3;
+			if (/^\@@itemize/)
+			{
+				my $bullet = $content;
+				$table_header = qq{.IP "$bullet" $indent\n};
+				$table_footer = "";
+			}
+			else
+			{
+				my $hi = $indent - 2;
+				$table_header = qq{.IP "" $hi\n};
+				$table_footer = qq{\n.IP "" $indent};
+				if ($content)
+				{
+					$table_header .= "$content\{";
+					$table_footer = "\}$table_footer";
+				}
+			}
+			$intable++;
+			next;
+		}
+
+		if ($intable)
+		{
+			if (/^\@@end (itemize|table)$/)
+			{
+				$table_header = pop @@table_headers;
+				$table_footer = pop @@table_footers;
+				$indent -= 2;
+				$intable--;
+				next;
+			}
+			s/^\@@itemx?(\s+(.*))?$/$table_header$2$table_footer/;
+			# Fall through so the rest of the table lines are
+			# processed normally.
+		}
+
+		# Index entries.
+		s/^\@@cindex\s+(.*)$/.IX "$1"/;
+
+		$_ = "$last$_" if $last;
+		undef $last;
+
+		# Trap keywords
+		$nk = qr/
+				\@@(\w+)\{
+				(?{ debug_print "$ret MATCHED $&\nPUSHING $1\n";
+				    push @@parent, $1; })      # Keep track of the last keyword
+				                              # keyword we encountered.
+				((?>
+					[^{}]|(?<=\@@)[{}]     # Non-braces...
+						|             #    ...or...
+					(??{ $nk })           # ...nested keywords...
+				)*)                           # ...without backtracking.
+				\}
+				(?{ debug_print "$ret MATCHED $&\nPOPPING ",
+				                pop (@@parent), "\n"; })            # Lose track of the current keyword.
+			/x;
+
+		$ret = "m//";
+		if (/\@@\w+\{(?:[^{}]|(?<=\@@)[{}]|(??{ $nk }))*$/)
+		{
+			# If there is an opening keyword on this line without a
+			# close bracket, we need to find the close bracket
+			# before processing the line.  Set $last to append the
+			# next line in the next pass.
+			$last = $_;
+			next;
+		}
+
+		# Okay, the following works somewhat counter-intuitively.  $nk
+		# processes the whole line, so @@parent gets loaded properly,
+		# then, since no closing brackets have been found for the
+		# outermost matches, the innermost matches match and get
+		# replaced first.
+		#
+		# For example:
+		#
+		# Processing the line:
+		#
+		#   yadda yadda @@code{yadda @@var{foo} yadda @@var{bar} yadda}
+		#
+		# Happens something like this:
+		#
+		# 1. Ignores "yadda yadda "
+		# 2. Sees "@@code{" and pushes "code" onto @@parent.
+		# 3. Ignores "yadda " (backtracks and ignores "yadda yadda
+		#                      @@code{yadda "?)
+		# 4. Sees "@@var{" and pushes "var" onto @@parent.
+		# 5. Sees "foo}", pops "var", and realizes that "@@var{foo}"
+		#    matches the overall pattern ($nk).
+		# 6. Replaces "@@var{foo}" with the result of:
+		#
+		#      do_keyword $file, $parent[$#parent], $1, $2;
+		#
+		#    which would be "\Ifoo\B", in this case, because "var"
+		#    signals a request for italics, or "\I", and "code" is
+		#    still on the stack, which means the previous style was
+		#    bold, or "\B".
+		#
+		# Then the while loop restarts and a similar series of events
+		# replaces "@@var{bar}" with "\Ibar\B".
+		#
+		# Then the while loop restarts and a similar series of events
+		# replaces "@@code{yadda \Ifoo\B yadda \Ibar\B yadda}" with
+		# "\Byadda \Ifoo\B yadda \Ibar\B yadda\R".
+		#
+		$ret = "s///";
+		@@parent = ("");
+		while (s/$nk/do_keyword $file, $parent[$#parent], $1, $2/e)
+		{
+			# Do nothing except reset our last-replacement
+			# tracker - the replacement regex above is handling
+			# everything else.
+			debug_print "FINAL MATCH $&\n";
+			@@parent = ("");
+		}
+
+		# Finally, unprotect texinfo special characters.
+		s/\@@://g;
+		s/\@@([{}])/$1/g;
+
+		# Verify we haven't left commands unprocessed.
+		die "Unprocessed command at line $. of file '$file': "
+		    . ($1 ? "$1\n" : "<EOL>\n")
+			if /^(?>(?:[^\@@]|\@@\@@)*)\@@(\w+|.|$)/;
+
+		# Unprotect @@@@.
+		s/\@@\@@/\@@/g;
+
+		# And print whatever's left.
+		print $_;
+	}
+}
+@
+
+
+1.5
+log
+@merge from ports/devel/cvs
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/devel/cvs/patches/patch-doc_mkman_pl,v 1.2 2010/09/16 17:05:44 tg Exp $
+d9 1
+@
+
+
+1.4
+log
+@begin attempting to synchronise with the port
+@
+text
+@@
+
+
+1.3
+log
+@initial fubar'ing of the CVS port
+this won't even build right now...
+@
+text
+@d2 1
+d66 1
+a66 1
+	die "no handler for keyword \`$keyword', found at line $. of file \`$file'\n";
+d76 6
+a81 2
+	return "see node \`$content\\(aq in the CVS manual"
+		if $keyword =~ /^(p?x)?ref$/;
+d99 1
+a99 1
+		or die "Failed to open file \`$file': $!";
+d103 1
+a103 1
+		print stderr "Passing \`$file' through unprocessed.\n";
+d112 1
+a112 1
+	print stderr "Processing \`$file'.\n";
+d151 3
+d367 1
+a367 1
+		die "Unprocessed command at line $. of file \`$file': "
+@
+
+
+1.2
+log
+@merge src/gnu except binutils, lynx and generated files
+@
+text
+@d39 3
+d48 7
+a279 1
+		my $nk;
+d282 2
+a283 1
+				(?{ push @@parent, $1 })       # Keep track of the last keyword
+d285 5
+a289 5
+				((?:
+					(?> (?:[^{}]|(?<=\@@)[{}])*) # Non-braces without backtracking
+						|
+					(??{ $nk })                 # Nested keywords
+				)*)
+d291 2
+a292 1
+				(?{ pop (@@parent) })            # Lose track of the current keyword.
+d295 49
+d347 1
+a347 1
+			# Do nothing except replace our last-replacement
+d350 1
+a352 10
+		s/$nk/do_keyword $file, $parent[$#parent], $1, $2/ge;
+
+		if (/\@@\w+\{/)
+		{
+			# If there is still an opening keyword left, we need to
+			# find the close bracket.  Set $last to append the next
+			# line in the next pass.
+			$last = $_;
+			next;
+		}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d270 2
+a271 1
+		my $nk = qr/
+@
+
+
+1.1.101.1
+log
+@GNU CVS 1.12.11 with the following directories removed:
+- contrib/pam
+- emx
+- os2
+- tools
+- vms
+- windows-NT
+- zlib
+@
+text
+@@
+
+
+1.1.101.2
+log
+@GNU CVS 1.12.12 "should" fix security issues
+@
+text
+@a38 3
+my $nk;           # Ditto.
+my $ret;          # The RE match Type, used in debug prints.
+my $debug = 0;    # Debug mode?
+a44 7
+sub debug_print
+{
+	print @@_ if $debug;
+}
+
+
+
+d270 1
+a270 1
+		$nk = qr/
+d272 1
+a272 2
+				(?{ debug_print "$ret MATCHED $&\nPUSHING $1\n";
+				    push @@parent, $1; })      # Keep track of the last keyword
+d274 5
+a278 5
+				((?>
+					[^{}]|(?<=\@@)[{}]     # Non-braces...
+						|             #    ...or...
+					(??{ $nk })           # ...nested keywords...
+				)*)                           # ...without backtracking.
+d280 1
+a280 2
+				(?{ debug_print "$ret MATCHED $&\nPOPPING ",
+				                pop (@@parent), "\n"; })            # Lose track of the current keyword.
+a282 49
+		$ret = "m//";
+		if (/\@@\w+\{(?:[^{}]|(?<=\@@)[{}]|(??{ $nk }))*$/)
+		{
+			# If there is an opening keyword on this line without a
+			# close bracket, we need to find the close bracket
+			# before processing the line.  Set $last to append the
+			# next line in the next pass.
+			$last = $_;
+			next;
+		}
+
+		# Okay, the following works somewhat counter-intuitively.  $nk
+		# processes the whole line, so @@parent gets loaded properly,
+		# then, since no closing brackets have been found for the
+		# outermost matches, the innermost matches match and get
+		# replaced first.
+		#
+		# For example:
+		#
+		# Processing the line:
+		#
+		#   yadda yadda @@code{yadda @@var{foo} yadda @@var{bar} yadda}
+		#
+		# Happens something like this:
+		#
+		# 1. Ignores "yadda yadda "
+		# 2. Sees "@@code{" and pushes "code" onto @@parent.
+		# 3. Ignores "yadda " (backtracks and ignores "yadda yadda
+		#                      @@code{yadda "?)
+		# 4. Sees "@@var{" and pushes "var" onto @@parent.
+		# 5. Sees "foo}", pops "var", and realizes that "@@var{foo}"
+		#    matches the overall pattern ($nk).
+		# 6. Replaces "@@var{foo}" with the result of:
+		#
+		#      do_keyword $file, $parent[$#parent], $1, $2;
+		#
+		#    which would be "\Ifoo\B", in this case, because "var"
+		#    signals a request for italics, or "\I", and "code" is
+		#    still on the stack, which means the previous style was
+		#    bold, or "\B".
+		#
+		# Then the while loop restarts and a similar series of events
+		# replaces "@@var{bar}" with "\Ibar\B".
+		#
+		# Then the while loop restarts and a similar series of events
+		# replaces "@@code{yadda \Ifoo\B yadda \Ibar\B yadda}" with
+		# "\Byadda \Ifoo\B yadda \Ibar\B yadda\R".
+		#
+		$ret = "s///";
+d286 1
+a286 1
+			# Do nothing except reset our last-replacement
+a288 1
+			debug_print "FINAL MATCH $&\n";
+d291 10
+@
+

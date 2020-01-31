@@ -1,0 +1,321 @@
+head	1.11;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.11
+date	2015.11.13.17.45.15;	author tg;	state dead;
+branches;
+next	1.10;
+commitid	100564621B370C943EB;
+
+1.10
+date	2015.09.12.14.23.22;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	10055F435730B2CE3A0;
+
+1.9
+date	2015.09.07.20.12.35;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10055EDEFCD4C9BF75A;
+
+1.8
+date	2015.08.16.17.37.00;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10055D0CA5271D5C657;
+
+1.7
+date	2015.08.13.22.02.28;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10055CD14084AEA0364;
+
+1.6
+date	2015.08.09.20.22.39;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10055C7B6935144E137;
+
+1.5
+date	2015.05.31.02.27.37;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100556A714A40B21C5F;
+
+1.4
+date	2015.05.29.22.25.59;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005568E78650A0839E;
+
+1.3
+date	2014.12.04.23.07.31;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005480E94A3DCE4D1A;
+
+1.2
+date	2014.12.03.19.30.13;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100547F64C155188056;
+
+1.1
+date	2014.12.03.02.06.35;	author tg;	state Exp;
+branches;
+next	;
+commitid	100547E703C2C7AA6C9;
+
+
+desc
+@@
+
+
+1.11
+log
+@Munzee is just getting ridiculous, remove it entirely
+@
+text
+@#!/bin/mksh
+# $MirOS: www/users/tg/munzeedl,v 1.10 2015/09/12 14:23:22 tg Exp $
+#-
+# Copyright © 2014, 2015
+#	mirabilos <tg@@mirbsd.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un‐
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person’s immediate fault when using the work as intended.
+#-
+# Known issues:
+# - edit first line of output then run that through mksh
+# - intermixing with caches is… challenging… at right places, insert
+#   「(( ++curfinds ))」 lines
+# - not even FTC can be scanned for, so nTF is always unset (or “0”,
+#   but, these you got to do manually)
+
+user=mirabilos
+if [[ $1 = -d ]]; then
+	p=deploys
+	a=deployed
+	shift
+	num=${1:-1}
+else
+	p=captures
+	a=captured
+	num=${1:-0}
+fi
+[[ $num = +([0-9]) ]] || exit 1
+
+cd "$(dirname "$0")"
+
+set -A dates
+set -A pointses
+set -A ids
+set -A names
+i=0
+
+n=-1
+hasmore=1
+while (( hasmore )); do
+	(( ++n )) && sleep 3
+	ftp -4 -o munzeedl.tmp https://www.munzee.com/m/$user/$p/$n/ >&2
+	<munzeedl.tmp sed $'s/<section>/\\\n/g' | \
+	    perl -ne 'print "$3|$4|$5|$1|$2\n" if ($_ =~ m,^.*<a class="munzee-id" href="/(m/[^"]*)/">([^<]*)</a>.*data-'$a'-at="(2[0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])T([^"]*)".*<div class="stat"> <div class="number"> ([0-9]+) .*$,);' |&
+	hasmore=0
+	while IFS=\| read -pr date time points id name; do
+		hasmore=1
+		dates[i]=${date:8:2}.${date:5:2}.${date::4},$time
+		pointses[i]=$points
+		ids[i]=$id
+		name=${name##+([	 ])}
+		names[i++]=${name%%+([	 ])}
+		print -ru2 "D: $date $points $id \"$name\""
+	done
+	(( hasmore = ((num && (i >= num)) ? 0 : hasmore) ))
+done
+rm -f munzeedl.tmp
+
+print -ru2 Generating output...
+if [[ -s munzeedl.out ]]; then
+	print -ru2 WARNING: munzeedl.out exists, appending!
+	print "# appending on $(date)" >>munzeedl.out
+else
+	print curfinds=0 >munzeedl.out
+fi
+while (( i-- )); do
+	cat <<-EOF
+		print -r -- "ID: \$((++curfinds))"
+		# ${dates[i]#*,}
+		cat <<'EOI'
+			Date: ${dates[i]%%,*}
+			Waypoint: ${ids[i]}
+			Title: ${names[i]}
+			Points: ${pointses[i]}
+			----
+		EOI
+EOF
+done | grep -v '^Points: 5$' >>munzeedl.out
+@
+
+
+1.10
+log
+@until done right, make munzeedl append
+@
+text
+@d2 1
+a2 1
+# $MirOS: www/users/tg/munzeedl,v 1.3 2014/12/04 23:07:31 tg Exp $
+@
+
+
+1.9
+log
+@quick hack; should be unified
+@
+text
+@d72 6
+a77 1
+print curfinds=0 >munzeedl.out
+@
+
+
+1.8
+log
+@omit points=5 for munzee
+@
+text
+@d30 10
+a39 1
+num=${1:-0}
+d54 1
+a54 1
+	ftp -4 -o munzeedl.tmp https://www.munzee.com/m/$user/captures/$n/ >&2
+d56 1
+a56 1
+	    perl -ne 'print "$3|$4|$5|$1|$2\n" if ($_ =~ m,^.*<a class="munzee-id" href="/(m/[^"]*)/">([^<]*)</a>.*data-captured-at="(2[0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])T([^"]*)".*<div class="stat"> <div class="number"> ([0-9]+) .*$,);' |&
+@
+
+
+1.7
+log
+@Munzee switch to https
+@
+text
+@d76 1
+a76 1
+done >>munzeedl.out
+@
+
+
+1.6
+log
+@sleep 3s for each page during full munzeedl; do it and a munzdiff; sync
+@
+text
+@d45 1
+a45 1
+	ftp -4 -o munzeedl.tmp http://www.munzee.com/m/$user/captures/$n/ >&2
+@
+
+
+1.5
+log
+@• munzeedl: LTRIM$(Title$) as well as implicit RTRIM$(Title$) ≘ ^K]
+• munzbadg: automatically get badges for wptg.hts
+• munzdiff: compare munzeedl.out with WPtg.inc (mostly…)
+• some more, some corrections
+@
+text
+@d5 1
+a5 1
+#	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+d44 2
+a45 1
+	ftp -4 -o munzeedl.tmp http://www.munzee.com/m/$user/captures/$((++n))/ >&2
+@
+
+
+1.4
+log
+@apparently they don’t like IP, so force Legacy IP for now
+@
+text
+@d4 2
+a5 2
+# Copyright © 2014
+#	Thorsten Glaser <tg@@mirbsd.org>
+d53 2
+a54 1
+		names[i++]=$name
+@
+
+
+1.3
+log
+@geselliger Abend mit sportlichem Rahmenprogramm
+@
+text
+@d2 1
+a2 1
+# $MirOS: www/users/tg/munzeedl,v 1.2 2014/12/03 19:30:13 tg Exp $
+d44 1
+a44 1
+	ftp -o munzeedl.tmp http://www.munzee.com/m/$user/captures/$((++n))/ >&2
+@
+
+
+1.2
+log
+@so, planting one and limiting downloads… maybe should parse the activity
+feed instead, to get deploys too?
+@
+text
+@d2 1
+a2 1
+# $MirOS: www/users/tg/munzeedl,v 1.1 2014/12/03 02:06:35 tg Exp $
+d21 7
+d46 1
+a46 1
+	    perl -ne 'print "$3|$4|$1|$2\n" if ($_ =~ m,^.*<a class="munzee-id" href="/(m/[^"]*)/">([^<]*)</a>.*data-captured-at="(2[0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])T.*<div class="stat"> <div class="number"> ([0-9]+) .*$,);' |&
+d48 1
+a48 1
+	while IFS=\| read -pr date points id name; do
+d50 1
+a50 1
+		dates[i]=${date:8:2}.${date:5:2}.${date::4}
+d65 1
+d67 1
+a67 1
+			Date: ${dates[i]}
+@
+
+
+1.1
+log
+@is it really all about numbers?
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $
+d23 2
+d49 1
+@
+

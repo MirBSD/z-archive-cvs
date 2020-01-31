@@ -1,0 +1,498 @@
+head	1.4;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.4
+	sendmail-8_14_7:1.1.127.3
+	sendmail-8_14_6:1.1.127.2
+	sendmail-8_14_5-ERRATA-1:1.1.127.2
+	mbsd-20101220_mergebase:1.2
+	sendmail-8_14_5:1.1.127.2
+	cvs-201107021500:1.1.1.3
+	cvs-20101220:1.1.1.2
+	mbsd-20101220:1.2.0.2
+	cvs-201012191730:1.1.1.1
+	sendmail-8_14_5_Beta0:1.1.127.2
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.1
+	cvs-200805071200:1.1.1.1
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	cvs-200803022030:1.1.1.1
+	cvs-200707152000:1.1.1.1
+	cvs-200704292000:1.1.1.1
+	cvs-200702051700:1.1.1.1
+	cvs-200609121900:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200606151800:1.1.1.1
+	cvs-200603231300:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2014.06.09.15.17.15;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005395CFC65E5646F1;
+
+1.3
+date	2013.08.06.20.36.53;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10052015E562892E658;
+
+1.2
+date	2010.12.19.17.18.09;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004D0E3E2D1286B3DF;
+
+1.1
+date	2005.02.05.17.24.22;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.22;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2011.07.02.14.59.47;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.3
+date	2011.07.02.15.17.39;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F36A10B5CA95B;
+
+1.1.127.1
+date	2010.12.19.14.45.52;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2010.12.19.14.56.33;	author tg;	state Exp;
+branches;
+next	1.1.127.3;
+commitid	1004D0E1D294DE25888;
+
+1.1.127.3
+date	2013.08.06.20.27.55;	author tg;	state Exp;
+branches;
+next	1.1.127.4;
+commitid	10052015BDF0FDDCF84;
+
+1.1.127.4
+date	2014.06.09.14.29.24;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.4
+log
+@merge
+@
+text
+@/*
+ *  Copyright (c) 1999-2001, 2004, 2010, 2013 Proofpoint, Inc. and its suppliers.
+ *	All rights reserved.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ *
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: sm_gethost.c,v 8.32 2013-11-22 20:51:36 ca Exp $")
+
+#include <sendmail.h>
+#if NETINET || NETINET6
+# include <arpa/inet.h>
+#endif /* NETINET || NETINET6 */
+#include "libmilter.h"
+
+/*
+**  MI_GETHOSTBY{NAME,ADDR} -- compatibility routines for gethostbyXXX
+**
+**	Some operating systems have wierd problems with the gethostbyXXX
+**	routines.  For example, Solaris versions at least through 2.3
+**	don't properly deliver a canonical h_name field.  This tries to
+**	work around these problems.
+**
+**	Support IPv6 as well as IPv4.
+*/
+
+#if NETINET6 && NEEDSGETIPNODE
+
+static struct hostent *sm_getipnodebyname __P((const char *, int, int, int *));
+
+# ifndef AI_ADDRCONFIG
+#  define AI_ADDRCONFIG	0	/* dummy */
+# endif /* ! AI_ADDRCONFIG */
+# ifndef AI_ALL
+#  define AI_ALL	0	/* dummy */
+# endif /* ! AI_ALL */
+# ifndef AI_DEFAULT
+#  define AI_DEFAULT	0	/* dummy */
+# endif /* ! AI_DEFAULT */
+
+static struct hostent *
+sm_getipnodebyname(name, family, flags, err)
+	const char *name;
+	int family;
+	int flags;
+	int *err;
+{
+	bool resv6 = true;
+	struct hostent *h;
+
+	if (family == AF_INET6)
+	{
+		/* From RFC2133, section 6.1 */
+		resv6 = bitset(RES_USE_INET6, _res.options);
+		_res.options |= RES_USE_INET6;
+	}
+	SM_SET_H_ERRNO(0);
+	h = gethostbyname(name);
+	if (family == AF_INET6 && !resv6)
+		_res.options &= ~RES_USE_INET6;
+
+	/* the function is supposed to return only the requested family */
+	if (h != NULL && h->h_addrtype != family)
+	{
+# if NETINET6
+		freehostent(h);
+# endif /* NETINET6 */
+		h = NULL;
+		*err = NO_DATA;
+	}
+	else
+		*err = h_errno;
+	return h;
+}
+
+void
+freehostent(h)
+	struct hostent *h;
+{
+	/*
+	**  Stub routine -- if they don't have getipnodeby*(),
+	**  they probably don't have the free routine either.
+	*/
+
+	return;
+}
+#else /* NEEDSGETIPNODE && NETINET6 */
+#define sm_getipnodebyname getipnodebyname 
+#endif /* NEEDSGETIPNODE && NETINET6 */
+
+struct hostent *
+mi_gethostbyname(name, family)
+	char *name;
+	int family;
+{
+	struct hostent *h = NULL;
+#if (SOLARIS > 10000 && SOLARIS < 20400) || (defined(SOLARIS) && SOLARIS < 204) || (defined(sony_news) && defined(__svr4))
+# if SOLARIS == 20300 || SOLARIS == 203
+	static struct hostent hp;
+	static char buf[1000];
+	extern struct hostent *_switch_gethostbyname_r();
+
+	h = _switch_gethostbyname_r(name, &hp, buf, sizeof(buf), &h_errno);
+# else /* SOLARIS == 20300 || SOLARIS == 203 */
+	extern struct hostent *__switch_gethostbyname();
+
+	h = __switch_gethostbyname(name);
+# endif /* SOLARIS == 20300 || SOLARIS == 203 */
+#else /* (SOLARIS > 10000 && SOLARIS < 20400) || (defined(SOLARIS) && SOLARIS < 204) || (defined(sony_news) && defined(__svr4)) */
+# if NETINET6
+#  ifndef SM_IPNODEBYNAME_FLAGS
+    /* For IPv4-mapped addresses, use: AI_DEFAULT|AI_ALL */
+#   define SM_IPNODEBYNAME_FLAGS	AI_ADDRCONFIG
+#  endif /* SM_IPNODEBYNAME_FLAGS */
+
+	int flags = SM_IPNODEBYNAME_FLAGS;
+	int err;
+# endif /* NETINET6 */
+
+# if NETINET6
+#  if ADDRCONFIG_IS_BROKEN
+	flags &= ~AI_ADDRCONFIG;
+#  endif /* ADDRCONFIG_IS_BROKEN */
+	h = sm_getipnodebyname(name, family, flags, &err);
+	SM_SET_H_ERRNO(err);
+# else /* NETINET6 */
+	h = gethostbyname(name);
+# endif /* NETINET6 */
+
+#endif /* (SOLARIS > 10000 && SOLARIS < 20400) || (defined(SOLARIS) && SOLARIS < 204) || (defined(sony_news) && defined(__svr4)) */
+
+	/* the function is supposed to return only the requested family */
+	if (h != NULL && h->h_addrtype != family)
+	{
+# if NETINET6
+		freehostent(h);
+# endif /* NETINET6 */
+		h = NULL;
+		SM_SET_H_ERRNO(NO_DATA);
+	}
+	return h;
+}
+
+#if NETINET6
+/*
+**  MI_INET_PTON -- convert printed form to network address.
+**
+**	Wrapper for inet_pton() which handles IPv6: labels.
+**
+**	Parameters:
+**		family -- address family
+**		src -- string
+**		dst -- destination address structure
+**
+**	Returns:
+**		1 if the address was valid
+**		0 if the address wasn't parseable
+**		-1 if error
+*/
+
+int
+mi_inet_pton(family, src, dst)
+	int family;
+	const char *src;
+	void *dst;
+{
+	if (family == AF_INET6 &&
+	    strncasecmp(src, "IPv6:", 5) == 0)
+		src += 5;
+	return inet_pton(family, src, dst);
+}
+#endif /* NETINET6 */
+@
+
+
+1.3
+log
+@merge
+@
+text
+@d2 1
+a2 1
+ *  Copyright (c) 1999-2001, 2004, 2010, 2013 Sendmail, Inc. and its suppliers.
+d12 1
+a12 1
+SM_RCSID("@@(#)$Id: sm_gethost.c,v 8.30 2013/02/22 22:43:33 gshapiro Exp $")
+d65 12
+a76 1
+	*err = h_errno;
+d135 10
+@
+
+
+1.2
+log
+@merge newer sendmail; fix and correct; reduce upstream diffs; prep for deb
+@
+text
+@d2 1
+a2 1
+ *  Copyright (c) 1999-2001, 2004, 2010 Sendmail, Inc. and its suppliers.
+d12 1
+a12 1
+SM_RCSID("@@(#)$Id: sm_gethost.c,v 8.29 2010/07/27 01:09:31 ca Exp $")
+d104 6
+a109 1
+	int flags = AI_DEFAULT|AI_ALL;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 1
+a2 1
+ *  Copyright (c) 1999-2001, 2004 Sendmail, Inc. and its suppliers.
+d12 1
+a12 1
+SM_RCSID("@@(#)$Sendmail: sm_gethost.c,v 8.27 2004/08/20 21:12:37 ca Exp $")
+d33 1
+a33 1
+static struct hostent *getipnodebyname __P((char *, int, int, int *));
+d46 2
+a47 2
+getipnodebyname(name, family, flags, err)
+	char *name;
+d80 2
+d112 1
+a112 1
+	h = getipnodebyname(name, family, flags, &err);
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d12 1
+a12 1
+SM_RCSID("@@(#)$Id: sm_gethost.c,v 8.27 2004/08/20 21:12:37 ca Exp $")
+@
+
+
+1.1.127.2
+log
+@Import sendmail.8.14.5.Beta0.tar.gz
+@
+text
+@d2 1
+a2 1
+ *  Copyright (c) 1999-2001, 2004, 2010 Sendmail, Inc. and its suppliers.
+d12 1
+a12 1
+SM_RCSID("@@(#)$Id: sm_gethost.c,v 8.29 2010/07/27 01:09:31 ca Exp $")
+d33 1
+a33 1
+static struct hostent *sm_getipnodebyname __P((const char *, int, int, int *));
+d46 2
+a47 2
+sm_getipnodebyname(name, family, flags, err)
+	const char *name;
+a79 2
+#else /* NEEDSGETIPNODE && NETINET6 */
+#define sm_getipnodebyname getipnodebyname 
+d110 1
+a110 1
+	h = sm_getipnodebyname(name, family, flags, &err);
+@
+
+
+1.1.127.3
+log
+@Update
+@
+text
+@d2 1
+a2 1
+ *  Copyright (c) 1999-2001, 2004, 2010, 2013 Sendmail, Inc. and its suppliers.
+d12 1
+a12 1
+SM_RCSID("@@(#)$Id: sm_gethost.c,v 8.30 2013/02/22 22:43:33 gshapiro Exp $")
+d104 1
+a104 6
+#  ifndef SM_IPNODEBYNAME_FLAGS
+    /* For IPv4-mapped addresses, use: AI_DEFAULT|AI_ALL */
+#   define SM_IPNODEBYNAME_FLAGS	AI_ADDRCONFIG
+#  endif /* SM_IPNODEBYNAME_FLAGS */
+
+	int flags = SM_IPNODEBYNAME_FLAGS;
+@
+
+
+1.1.127.4
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ *  Copyright (c) 1999-2001, 2004, 2010, 2013 Proofpoint, Inc. and its suppliers.
+d12 1
+a12 1
+SM_RCSID("@@(#)$Id: sm_gethost.c,v 8.32 2013-11-22 20:51:36 ca Exp $")
+d65 1
+a65 12
+
+	/* the function is supposed to return only the requested family */
+	if (h != NULL && h->h_addrtype != family)
+	{
+# if NETINET6
+		freehostent(h);
+# endif /* NETINET6 */
+		h = NULL;
+		*err = NO_DATA;
+	}
+	else
+		*err = h_errno;
+a123 10
+
+	/* the function is supposed to return only the requested family */
+	if (h != NULL && h->h_addrtype != family)
+	{
+# if NETINET6
+		freehostent(h);
+# endif /* NETINET6 */
+		h = NULL;
+		SM_SET_H_ERRNO(NO_DATA);
+	}
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d12 1
+a12 1
+SM_RCSID("@@(#)$Id: sm_gethost.c,v 8.27 2004/08/20 21:12:37 ca Exp $")
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD’s sendmail 8.14.5, RCS IDs properly sedded back
+@
+text
+@d2 1
+a2 1
+ *  Copyright (c) 1999-2001, 2004, 2010 Sendmail, Inc. and its suppliers.
+d12 1
+a12 1
+SM_RCSID("@@(#)$Id: sm_gethost.c,v 8.29 2010/07/27 01:09:31 ca Exp $")
+d33 1
+a33 1
+static struct hostent *sm_getipnodebyname __P((const char *, int, int, int *));
+d46 2
+a47 2
+sm_getipnodebyname(name, family, flags, err)
+	const char *name;
+a79 2
+#else /* NEEDSGETIPNODE && NETINET6 */
+#define sm_getipnodebyname getipnodebyname 
+d110 1
+a110 1
+	h = sm_getipnodebyname(name, family, flags, &err);
+@
+
+

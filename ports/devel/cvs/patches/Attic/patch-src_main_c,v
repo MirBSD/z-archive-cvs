@@ -1,0 +1,742 @@
+head	1.11;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.11
+date	2012.02.11.19.29.59;	author tg;	state dead;
+branches;
+next	1.10;
+commitid	1004F36C11F02848ED5;
+
+1.10
+date	2011.06.11.03.55.36;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004DF2E74A6938C5EF;
+
+1.9
+date	2011.05.06.23.17.28;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004DC4819C685DDCFE;
+
+1.8
+date	2010.09.18.23.14.07;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004C9547CD4D455210;
+
+1.7
+date	2010.09.15.23.41.21;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004C9159AB6B64B332;
+
+1.6
+date	2010.09.15.21.32.17;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004C913B7469879AF8;
+
+1.5
+date	2010.09.15.20.57.01;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004C9132F41004B31C;
+
+1.4
+date	2009.09.06.11.51.01;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004AA3A2295C6D49FB;
+
+1.3
+date	2007.03.10.23.53.50;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10045F344D65465EF23;
+
+1.2
+date	2006.10.02.06.12.44;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004520ADF205A34FFC;
+
+1.1
+date	2006.10.02.05.59.17;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004520AAAB453C7791;
+
+
+desc
+@@
+
+
+1.11
+log
+@update the CVS package in MirPorts (to match base and Debian)
+
+• since the Debian cvs source package was taken over by this one,
+  reverse things and use the Debian *.diff.gz to get our patches
+  from ;-) saves tracking things in CVS thrice
+• since the Debian cvs binary package contains PDF documentation
+  generated from something with our patches, ship it instead of
+  the one from the vanilla CVS distfile
+• ship cvs-switchroot(1) from Debian, which is just a fancy name
+  for mircvs://src/scripts/mnt-cvsroot and has a manpage
+• move stuff from PREFIX/share/cvs to PREFIX/share/doc/cvs as is proper
+• fix regression testsuite on MirBSD as much as possible (same as base)
+@
+text
+@$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.10 2011/06/11 03:55:36 tg Exp $
+--- src/main.c.orig	Sun Oct  2 15:16:59 2005
++++ src/main.c	Sat Jun 11 03:34:58 2011
+@@@@ -24,6 +24,12 @@@@
+ #include "strftime.h"
+ #include "xgethostname.h"
+ 
++#ifdef USE_LIBBSD
++uint32_t arc4random(void);
++#endif
++
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.10 2011/06/11 03:55:36 tg Exp $");
++
+ const char *program_name;
+ const char *program_path;
+ const char *cvs_cmd_name;
+@@@@ -170,6 +176,7 @@@@ static const struct cmd
+ #ifdef SERVER_SUPPORT
+     { "server",   NULL,       NULL,        server,    CVS_CMD_MODIFIES_REPOSITORY | CVS_CMD_USES_WORK_DIR },
+ #endif
++    { "suck",     NULL,       NULL,        suck,      0 },
+     { "status",   "st",       "stat",      cvsstatus, CVS_CMD_USES_WORK_DIR },
+     { "tag",      "ta",       "freeze",    cvstag,    CVS_CMD_MODIFIES_REPOSITORY | CVS_CMD_USES_WORK_DIR },
+     { "unedit",   NULL,       NULL,        unedit,    CVS_CMD_MODIFIES_REPOSITORY | CVS_CMD_USES_WORK_DIR },
+@@@@ -283,6 +290,7 @@@@ static const char *const opt_usage[] =
+     "    -q           Cause CVS to be somewhat quiet.\n",
+     "    -r           Make checked-out files read-only.\n",
+     "    -w           Make checked-out files read-write (default).\n",
++    "    -g           Force group-write permissions on checked-out files.\n",
+     "    -n           Do not execute anything that will change the disk.\n",
+     "    -t           Show trace of program execution (repeat for more\n",
+     "                 verbosity) -- try with -n.\n",
+@@@@ -465,39 +473,7 @@@@ enum {COMMITID_RAW_SIZE = (sizeof(time_t
+ static char const alphabet[62] =
+   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+ 
+-/* Divide BUF by D, returning the remainder.  Replace BUF by the
+-   quotient.  BUF[0] is the most significant part of BUF.
+-   D must not exceed UINT_MAX >> CHAR_BIT.  */
+-static unsigned int
+-divide_by (unsigned char buf[COMMITID_RAW_SIZE], unsigned int d)
+-{
+-    unsigned int carry = 0;
+-    int i;
+-    for (i = 0; i < COMMITID_RAW_SIZE; i++)
+-    {
+-	unsigned int byte = buf[i];
+-	unsigned int dividend = (carry << CHAR_BIT) + byte;
+-	buf[i] = dividend / d;
+-	carry = dividend % d;
+-    }
+-    return carry;
+-}
+ 
+-static void
+-convert (char const input[COMMITID_RAW_SIZE], char *output)
+-{
+-    static char const zero[COMMITID_RAW_SIZE] = { 0, };
+-    unsigned char buf[COMMITID_RAW_SIZE];
+-    size_t o = 0;
+-    memcpy (buf, input, COMMITID_RAW_SIZE);
+-    while (memcmp (buf, zero, COMMITID_RAW_SIZE) != 0)
+-	output[o++] = alphabet[divide_by (buf, sizeof alphabet)];
+-    if (! o)
+-	output[o++] = '0';
+-    output[o] = '\0';
+-}
+-
+-
+ int
+ main (int argc, char **argv)
+ {
+@@@@ -511,7 +487,7 @@@@ main (int argc, char **argv)
+     int help = 0;		/* Has the user asked for help?  This
+ 				   lets us support the `cvs -H cmd'
+ 				   convention to give help for cmd. */
+-    static const char short_options[] = "+QqrwtnRvb:T:e:d:Hfz:s:xa";
++    static const char short_options[] = "+QqrwgtnRvb:T:e:d:Hfz:s:xal";
+     static struct option long_options[] =
+     {
+         {"help", 0, NULL, 'H'},
+@@@@ -658,6 +634,13 @@@@ main (int argc, char **argv)
+ 	    case 'w':
+ 		cvswrite = 1;
+ 		break;
++	    case 'g':
++		/*
++		 * Force full write permissions for the group.
++		 * See the user's manual for details and dangers.
++		 */
++		umask(umask(S_IRWXG|S_IRWXO) & S_IRWXO);
++		break;
+ 	    case 't':
+ 		trace++;
+ 		break;
+@@@@ -669,6 +652,9 @@@@ main (int argc, char **argv)
+ 		noexec = 1;
+ 		logoff = 1;
+ 		break;
++	    case 'l':
++		/* no-op to simply ignore the old -l option */
++		break;
+ 	    case 'v':
+ 		(void) fputs ("\n", stdout);
+ 		version (0, NULL);    
+@@@@ -676,6 +662,7 @@@@ main (int argc, char **argv)
+ 		(void) fputs ("\
+ Copyright (C) 2005 Free Software Foundation, Inc.\n\
+ \n\
++Portions contributed by Thorsten Glaser for the MirOS Project.\n\
+ Senior active maintainers include Larry Jones, Derek R. Price,\n\
+ and Mark D. Baushke.  Please see the AUTHORS and README files from the CVS\n\
+ distribution kit for a complete list of contributors and copyrights.\n",
+@@@@ -764,57 +751,12 @@@@ distribution kit for a complete list of 
+     if (argc < 1)
+ 	usage (usg);
+ 
+-    if (readonlyfs && !really_quiet) {
+-	error (0, 0,
+-	       "WARNING: Read-only repository access mode selected via `cvs -R'.\n\
+-Using this option to access a repository which some users write to may\n\
+-cause intermittent sandbox corruption.");
+-    }
+-
+     /* Calculate the cvs global session ID */
+ 
+-    {
+-	char buf[COMMITID_RAW_SIZE] = { 0, };
+-	char out[COMMITID_RAW_SIZE * 2];
+-	ssize_t len = 0;
+-	time_t rightnow = time (NULL);
+-	char *startrand = buf + sizeof (time_t);
+-	unsigned char *p = (unsigned char *) startrand;
+-	size_t randbytes = RANDOM_BYTES;
+-	int flags = O_RDONLY;
+-	int fd;
+-#ifdef O_NOCTTY
+-	flags |= O_NOCTTY;
+-#endif
+-	if (rightnow != (time_t)-1)
+-		while (rightnow > 0) {
+-		    *--p = rightnow % (UCHAR_MAX + 1);
+-		    rightnow /= UCHAR_MAX + 1;
+-		}
+-	else {
+-	    /* try to use more random data */
+-	    randbytes = COMMITID_RAW_SIZE;
+-	    startrand = buf;
+-	}
+-	fd = open ("/dev/urandom", flags);
+-	if (fd >= 0) {
+-	    len = read (fd, startrand, randbytes);
+-	    close (fd);
+-	}
+-	if (len <= 0) {
+-	    /* no random data was available so use pid */
+-	    long int pid = (long int)getpid ();
+-	    p = (unsigned char *) (startrand + sizeof (pid));
+-	    while (pid > 0) {
+-		*--p = pid % (UCHAR_MAX + 1);
+-		pid /= UCHAR_MAX + 1;
+-	    }
+-	}
+-	convert(buf, out);
+-	global_session_id = strdup (out);
+-    }
++    global_session_id = Xasprintf("1%010llX%04X%04X",
++      (unsigned long long)time(NULL),
++      (int)(getpid() & 0xFFFF), (int)(arc4random() & 0xFFFF));
+ 
+-
+     TRACE (TRACE_FUNCTION, "main: Session ID is %s", global_session_id);
+ 
+     /* Look up the command name. */
+@@@@ -1011,7 +953,7 @@@@ cause intermittent sandbox corruption.")
+ 	    /* Now we've reconciled CVSROOT from the command line, the
+ 	       CVS/Root file, and the environment variable.  Do the
+ 	       last sanity checks on the variable. */
+-	    if (!CVSroot_parsed)
++	    if (!CVSroot_parsed && cm->func != version)
+ 	    {
+ 		error (0, 0,
+ 		       "No CVSROOT specified!  Please use the `-d' option");
+@@@@ -1043,6 +985,11 @@@@ cause intermittent sandbox corruption.")
+ 
+ 	assert (current_parsed_root == NULL);
+ 
++	/* Handle running 'cvs version' with no CVSROOT.  */
++
++	if (cm->func == version && !CVSroot_parsed)
++	    server_active = !0;
++
+ 	/* If we're running the server, we want to execute this main
+ 	   loop once and only once (we won't be serving multiple roots
+ 	   from this connection, so there's no need to do it more than
+@@@@ -1244,7 +1191,7 @@@@ parse_tagdate (char **tag, char **date, 
+ 	if (*++p)
+ 	{
+ 	    if (*date) free (*date);
+-	    *date = Make_Date (p);
++	    *date = strcmp (p, "BASE") ? Make_Date (p) : xstrdup (p);
+ 	}
+     }
+     else if (strlen (input))
+@@@@ -1285,7 +1232,7 @@@@ date_from_time_t (time_t unixtime)
+ 	ftm = localtime (&unixtime);
+ 
+     (void) sprintf (date, DATEFORM,
+-		    ftm->tm_year + (ftm->tm_year < 100 ? 0 : 1900),
++		    (long)ftm->tm_year + (ftm->tm_year < 100 ? 0L : 1900L),
+ 		    ftm->tm_mon + 1, ftm->tm_mday, ftm->tm_hour,
+ 		    ftm->tm_min, ftm->tm_sec);
+     ret = xstrdup (date);
+@@@@ -1315,8 +1262,9 @@@@ date_to_internet (char *dest, const char
+ void
+ date_to_tm (struct tm *dest, const char *source)
+ {
++    int y;
+     if (sscanf (source, SDATEFORM,
+-		&dest->tm_year, &dest->tm_mon, &dest->tm_mday,
++		&y, &dest->tm_mon, &dest->tm_mday,
+ 		&dest->tm_hour, &dest->tm_min, &dest->tm_sec)
+ 	    != 6)
+ 	/* Is there a better way to handle errors here?  I made this
+@@@@ -1324,9 +1272,7 @@@@ date_to_tm (struct tm *dest, const char 
+ 	   deal with fatal errors.  */
+ 	error (0, 0, "internal error: bad date %s", source);
+ 
+-    if (dest->tm_year > 100)
+-	dest->tm_year -= 1900;
+-
++    dest->tm_year = y - ((y > 100) ? 1900 : 0);
+     dest->tm_mon -= 1;
+ }
+ 
+@@@@ -1348,10 +1294,10 @@@@ tm_to_internet (char *dest, const struct
+       {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+ 	 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+     
+-    sprintf (dest, "%d %s %d %02d:%02d:%02d -0000", source->tm_mday,
++    sprintf (dest, "%d %s %ld %02d:%02d:%02d -0000", source->tm_mday,
+ 	     source->tm_mon < 0 || source->tm_mon > 11
+                ? "???" : month_names[source->tm_mon],
+-	     source->tm_year + 1900, source->tm_hour, source->tm_min,
++	     (long)source->tm_year + 1900, source->tm_hour, source->tm_min,
+              source->tm_sec);
+ }
+ 
+@
+
+
+1.10
+log
+@update and bring them in sync
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.9 2011/05/06 23:17:28 tg Exp $
+d12 1
+a12 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.9 2011/05/06 23:17:28 tg Exp $");
+@
+
+
+1.9
+log
+@refresh
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.8 2010/09/18 23:14:07 tg Exp $
+d3 1
+a3 1
++++ src/main.c	Fri May  6 21:03:03 2011
+d9 1
+a9 1
++#include <bsd/bsd.h>
+d12 1
+a12 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.8 2010/09/18 23:14:07 tg Exp $");
+d17 9
+a25 1
+@@@@ -283,6 +289,7 @@@@ static const char *const opt_usage[] =
+d33 1
+a33 1
+@@@@ -465,39 +472,7 @@@@ enum {COMMITID_RAW_SIZE = (sizeof(time_t
+d73 1
+a73 1
+@@@@ -511,7 +486,7 @@@@ main (int argc, char **argv)
+d82 1
+a82 1
+@@@@ -658,6 +633,13 @@@@ main (int argc, char **argv)
+d96 1
+a96 1
+@@@@ -669,6 +651,9 @@@@ main (int argc, char **argv)
+d106 1
+a106 1
+@@@@ -676,6 +661,7 @@@@ main (int argc, char **argv)
+d114 1
+a114 1
+@@@@ -764,57 +750,12 @@@@ distribution kit for a complete list of 
+d167 3
+a169 3
++    global_session_id = Xasprintf ("1%010llX%04X%04X", (uint64_t)time (NULL),
++				   (int)(getpid() & 0xFFFF),
++				   (int)(arc4random() & 0xFFFF));
+d175 1
+a175 1
+@@@@ -1011,7 +952,7 @@@@ cause intermittent sandbox corruption.")
+d184 1
+a184 1
+@@@@ -1043,6 +984,11 @@@@ cause intermittent sandbox corruption.")
+d196 1
+a196 1
+@@@@ -1244,7 +1190,7 @@@@ parse_tagdate (char **tag, char **date, 
+d205 1
+a205 1
+@@@@ -1285,7 +1231,7 @@@@ date_from_time_t (time_t unixtime)
+d214 1
+a214 1
+@@@@ -1315,8 +1261,9 @@@@ date_to_internet (char *dest, const char
+d225 1
+a225 1
+@@@@ -1324,9 +1271,7 @@@@ date_to_tm (struct tm *dest, const char 
+d236 1
+a236 1
+@@@@ -1348,10 +1293,10 @@@@ tm_to_internet (char *dest, const struct
+@
+
+
+1.8
+log
+@• apply 90zlib-read-compressed.diff from Debian, with the following
+  explanation from DragonFly BSD via MidnightBSD (thanks laffer1):
+  zlib.c: byte by byte to fix infinity waiting on some zlib operations while using compression.
+• add MidnightBSD’s global “-g” option: force group-writable permissions
+• merge patch for backwards annotation from DragonFly BSD via MidnightBSD
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.7 2010/09/15 23:41:21 tg Exp $
+d3 1
+a3 1
++++ src/main.c	Sat Sep 18 22:56:07 2010
+d12 1
+a12 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.7 2010/09/15 23:41:21 tg Exp $");
+d167 22
+a188 1
+@@@@ -1244,7 +1185,7 @@@@ parse_tagdate (char **tag, char **date, 
+d197 1
+a197 1
+@@@@ -1285,7 +1226,7 @@@@ date_from_time_t (time_t unixtime)
+d206 1
+a206 1
+@@@@ -1315,8 +1256,9 @@@@ date_to_internet (char *dest, const char
+d217 1
+a217 1
+@@@@ -1324,9 +1266,7 @@@@ date_to_tm (struct tm *dest, const char 
+d228 1
+a228 1
+@@@@ -1348,10 +1288,10 @@@@ tm_to_internet (char *dest, const struct
+@
+
+
+1.7
+log
+@oh well… warning freeness (-Wall -Werror on MirBSD, some on MirDebian)
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.6 2010/09/15 21:32:17 tg Exp $
+d3 1
+a3 1
++++ src/main.c	Wed Sep 15 23:31:33 2010
+d12 1
+a12 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.6 2010/09/15 21:32:17 tg Exp $");
+d17 9
+a25 1
+@@@@ -465,39 +471,7 @@@@ enum {COMMITID_RAW_SIZE = (sizeof(time_t
+d65 1
+a65 1
+@@@@ -511,7 +485,7 @@@@ main (int argc, char **argv)
+d70 1
+a70 1
++    static const char short_options[] = "+QqrwtnRvb:T:e:d:Hfz:s:xal";
+d74 15
+a88 1
+@@@@ -669,6 +643,9 @@@@ main (int argc, char **argv)
+d98 1
+a98 1
+@@@@ -676,6 +653,7 @@@@ main (int argc, char **argv)
+d106 1
+a106 1
+@@@@ -764,57 +742,12 @@@@ distribution kit for a complete list of 
+d167 1
+a167 1
+@@@@ -1244,7 +1177,7 @@@@ parse_tagdate (char **tag, char **date, 
+d176 1
+a176 1
+@@@@ -1285,7 +1218,7 @@@@ date_from_time_t (time_t unixtime)
+d185 1
+a185 1
+@@@@ -1315,8 +1248,9 @@@@ date_to_internet (char *dest, const char
+d196 1
+a196 1
+@@@@ -1324,9 +1258,7 @@@@ date_to_tm (struct tm *dest, const char 
+d207 1
+a207 1
+@@@@ -1348,10 +1280,10 @@@@ tm_to_internet (char *dest, const struct
+@
+
+
+1.6
+log
+@support using libbsd
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.5 2010/09/15 20:57:01 tg Exp $
+d3 1
+a3 1
++++ src/main.c	Wed Sep 15 21:30:44 2010
+d9 1
+a9 1
++#include <bsd/random.h>
+d12 1
+a12 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.5 2010/09/15 20:57:01 tg Exp $");
+@
+
+
+1.5
+log
+@WIP port (will be worked on more, commit for safety)
+
+Some changes, in this order:
+• re-sync with MirOS base cvs
+• reduce diff against upstream
+• apply cvs-datetime.patch from Arkadiusz Miskiewicz <arekm>
+  via Concurrent Versions System - Bugs: bug #21523, can't parse date/time: =UTC when commiting file (workaround/fix attached)
+• apply (only those considered somewhat sane) patches from Debian cvs_1:1.12.13-12
+  – 11_check_method_crash
+  – 12_rcs2log_POSIX_sort
+  – 14_ext_expansion
+  – 15_PATH_MAX_check
+  – 20_readdir_errno
+  – 21_getcwd_chroot
+  – 25_import-n-X
+  – 51_newlines_in_commit_template (partially)
+  – 55_keyword_alphanumerics (modified)
+  – 62_cvsrc_whitespace
+  – 65_login_cvspass_message
+  – 69_ext_allowroot (modified)
+  – 71_cvsbug_tmpfix
+  – 81_fix_-l (modified)
+  – 85_normalize_correct_roots
+  – 86_server_wrapper (modified)
+  – 93_homedir (modified)
+  – 95_flag_conflicted_copies
+  – 96_manpage_fixes (partially)
+  – 97_cvs.info.typo (partially)
+  – 98_fix_sparc_sigbus.diff
+• document Debian’s changes in the Texinfo manual
+• modify mkman.pl to produce more correct looking output
+• point to texinfo HTML document from HTML manpage
+• fix fseeko configure.in test
+• correct bugs in Debian’s changes
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 2
+a4 2
++++ src/main.c	Wed Sep 15 19:36:15 2010
+@@@@ -24,6 +24,8 @@@@
+d8 5
+a12 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.4 2009/09/06 11:51:01 tg Exp $");
+d17 1
+a17 1
+@@@@ -465,39 +467,7 @@@@ enum {COMMITID_RAW_SIZE = (sizeof(time_t
+d57 1
+a57 1
+@@@@ -511,7 +481,7 @@@@ main (int argc, char **argv)
+d66 1
+a66 1
+@@@@ -669,6 +639,9 @@@@ main (int argc, char **argv)
+d76 1
+a76 1
+@@@@ -676,6 +649,7 @@@@ main (int argc, char **argv)
+d84 1
+a84 1
+@@@@ -764,57 +738,12 @@@@ distribution kit for a complete list of 
+d145 1
+a145 1
+@@@@ -1244,7 +1173,7 @@@@ parse_tagdate (char **tag, char **date, 
+d154 1
+a154 1
+@@@@ -1285,7 +1214,7 @@@@ date_from_time_t (time_t unixtime)
+d163 1
+a163 1
+@@@@ -1315,8 +1244,9 @@@@ date_to_internet (char *dest, const char
+d174 1
+a174 1
+@@@@ -1324,9 +1254,7 @@@@ date_to_tm (struct tm *dest, const char 
+d185 1
+a185 1
+@@@@ -1348,10 +1276,10 @@@@ tm_to_internet (char *dest, const struct
+@
+
+
+1.4
+log
+@apply cid 1004AA2AEDB55018A46 (-rtag:BASE support) here as well
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.3 2007/03/10 23:53:50 tg Exp $
+d3 1
+a3 1
++++ src/main.c	Sun Sep  6 11:31:06 2009
+d8 1
+a8 1
++__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/main.c,v 1.9 2009/09/05 18:33:40 tg Exp $");
+d53 20
+a72 1
+@@@@ -676,6 +646,7 @@@@ main (int argc, char **argv)
+d80 1
+a80 1
+@@@@ -764,57 +735,12 @@@@ distribution kit for a complete list of 
+d134 2
+a135 2
++				   (int)getpid() & 0xFFFF,
++				   (int)arc4random() & 0xFFFF);
+d141 1
+a141 1
+@@@@ -1244,7 +1170,7 @@@@ parse_tagdate (char **tag, char **date, 
+d150 1
+a150 1
+@@@@ -1285,7 +1211,7 @@@@ date_from_time_t (time_t unixtime)
+d159 1
+a159 1
+@@@@ -1315,8 +1241,9 @@@@ date_to_internet (char *dest, const char
+d170 1
+a170 1
+@@@@ -1324,9 +1251,7 @@@@ date_to_tm (struct tm *dest, const char 
+d181 1
+a181 1
+@@@@ -1348,10 +1273,10 @@@@ tm_to_internet (char *dest, const struct
+@
+
+
+1.3
+log
+@sync the cvs port and the cvs in the base system;
+RCSID stuff like in commitid 10045F33CB2157CFEAE
+@
+text
+@d1 3
+a3 3
+$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.2 2006/10/02 06:12:44 tg Exp $
+--- src/main.c.orig	Sat Mar 10 23:14:20 2007
++++ src/main.c	Sat Mar 10 23:14:14 2007
+d8 1
+a8 1
++__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/main.c,v 1.7 2005/12/06 23:30:40 tg Exp $");
+d122 9
+@
+
+
+1.2
+log
+@-Wall free on MirOS
+@
+text
+@d1 13
+a13 4
+$MirOS: ports/devel/cvs/patches/patch-src_main_c,v 1.1 2006/10/02 05:59:17 tg Exp $
+--- src/main.c.orig	Sun Oct  2 15:16:59 2005
++++ src/main.c	Mon Oct  2 06:11:15 2006
+@@@@ -465,39 +465,7 @@@@ enum {COMMITID_RAW_SIZE = (sizeof(time_t
+d53 1
+a53 1
+@@@@ -676,6 +644,7 @@@@ main (int argc, char **argv)
+d61 1
+a61 1
+@@@@ -764,57 +733,12 @@@@ distribution kit for a complete list of 
+d122 1
+a122 1
+@@@@ -1285,7 +1209,7 @@@@ date_from_time_t (time_t unixtime)
+d127 1
+a127 1
++		    (int)ftm->tm_year + (ftm->tm_year < 100 ? 0 : 1900),
+d131 1
+a131 1
+@@@@ -1315,8 +1239,9 @@@@ date_to_internet (char *dest, const char
+d142 1
+a142 1
+@@@@ -1324,9 +1249,7 @@@@ date_to_tm (struct tm *dest, const char 
+d153 6
+a158 2
+@@@@ -1351,7 +1274,7 @@@@ tm_to_internet (char *dest, const struct
+     sprintf (dest, "%d %s %d %02d:%02d:%02d -0000", source->tm_mday,
+d162 1
+a162 1
++	     (int)source->tm_year + 1900, source->tm_hour, source->tm_min,
+@
+
+
+1.1
+log
+@add cvs port, compiles fine and warning-free on MirOS-current;
+other OSes not tested, older MirOS may have issues (mktime, regex/wctype)
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 42
+a44 2
++++ src/main.c	Mon Oct  2 04:40:37 2006
+@@@@ -676,6 +676,7 @@@@ main (int argc, char **argv)
+d52 1
+a52 1
+@@@@ -764,57 +765,12 @@@@ distribution kit for a complete list of 
+d113 1
+a113 1
+@@@@ -1285,7 +1241,7 @@@@ date_from_time_t (time_t unixtime)
+d122 1
+a122 1
+@@@@ -1315,8 +1271,9 @@@@ date_to_internet (char *dest, const char
+d133 1
+a133 1
+@@@@ -1324,9 +1281,7 @@@@ date_to_tm (struct tm *dest, const char 
+d144 1
+a144 1
+@@@@ -1351,7 +1306,7 @@@@ tm_to_internet (char *dest, const struct
+@
+

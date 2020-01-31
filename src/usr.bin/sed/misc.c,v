@@ -1,0 +1,386 @@
+head	1.3;
+access;
+symbols
+	cvs-201711200100:1.1.1.4
+	cvs-201603041800:1.1.1.3
+	MIRBSD_10:1.1.1.2.0.4
+	MIRBSD_10_BASE:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2017.11.20.01.23.57;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005A122EB84015709A;
+
+1.2
+date	2016.03.04.19.42.26;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10056D9E53B4077740C;
+
+1.1
+date	2005.02.05.17.29.49;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.49;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.21.00.16;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2016.03.04.18.49.12;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	10056D9D8B662032B91;
+
+1.1.1.4
+date	2017.11.20.01.07.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005A122AFA44AA870F;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge; appears to be okay-ish in the testsuite with termwidth = 60;
+@
+text
+@/*	$OpenBSD: misc.c,v 1.12 2017/01/20 10:26:16 krw Exp $	*/
+
+/*-
+ * Copyright (c) 2016
+ *	mirabilos <m@@mirbsd.org>
+ * Copyright (c) 1992 Diomidis Spinellis.
+ * Copyright (c) 1992, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Diomidis Spinellis of Imperial College, University of London.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+
+#include <errno.h>
+#include <regex.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+
+#include "defs.h"
+#include "extern.h"
+
+__RCSID("$MirOS: src/usr.bin/sed/misc.c,v 1.2 2016/03/04 19:42:26 tg Exp $");
+
+/*
+ * malloc with result test
+ */
+void *
+xmalloc(size_t size)
+{
+	void *p;
+
+	if ((p = malloc(size)) == NULL)
+		error(FATAL, "%s", strerror(errno));
+	return (p);
+}
+
+void *
+xreallocarray(void *o, size_t nmemb, size_t size)
+{
+	void *p;
+
+	if ((p = reallocarray(o, nmemb, size)) == NULL)
+		error(FATAL, "%s", strerror(errno));
+	return (p);
+}
+
+/*
+ * realloc with result test
+ */
+void *
+xrealloc(void *p, size_t size)
+{
+
+	if ((p = realloc(p, size)) == NULL)
+		error(FATAL, "%s", strerror(errno));
+	return (p);
+}
+
+/*
+ * Return a string for a regular expression error passed.  This is a overkill,
+ * because of the silly semantics of regerror (we can never know the size of
+ * the buffer).
+ */
+char *
+strregerror(int errcode, regex_t *preg)
+{
+	static char *oe;
+	size_t s;
+
+	free(oe);
+	s = regerror(errcode, preg, NULL, 0);
+	oe = xmalloc(s);
+	(void)regerror(errcode, preg, oe, s);
+	return (oe);
+}
+
+/*
+ * Error reporting function
+ */
+__dead void
+error(int severity, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	(void)fprintf(stderr, "sed: ");
+	switch (severity) {
+	case COMPILE:
+		(void)fprintf(stderr, "%lu: %s: ", linenum, fname);
+	}
+	(void)vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	(void)fprintf(stderr, "\n");
+	exit(1);
+}
+
+void
+warning(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	(void)fprintf(stderr, "sed: ");
+	(void)fprintf(stderr, "%lu: %s: ", linenum, fname);
+	(void)vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	(void)fprintf(stderr, "\n");
+}
+@
+
+
+1.2
+log
+@fullmerge
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.11 2015/10/26 14:08:47 mmcc Exp $	*/
+d50 1
+a50 1
+__RCSID("$MirOS$");
+d108 1
+a108 1
+void
+a115 1
+	case WARNING:
+a121 2
+	if (severity == WARNING)
+		return;
+d123 13
+a135 1
+	/* NOTREACHED */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.5 2003/06/03 02:56:16 millert Exp $	*/
+d4 2
+a37 5
+#ifndef lint
+/* from: static char sccsid[] = "@@(#)misc.c	8.1 (Berkeley) 6/6/93"; */
+static char *rcsid = "$OpenBSD: misc.c,v 1.5 2003/06/03 02:56:16 millert Exp $";
+#endif /* not lint */
+
+d50 2
+d56 1
+a56 2
+xmalloc(size)
+	u_int size;
+d61 11
+a71 1
+		err(FATAL, "%s", strerror(errno));
+d79 1
+a79 3
+xrealloc(p, size)
+	void *p;
+	u_int size;
+a80 2
+	if (p == NULL)			/* Compatibility hack. */
+		return (xmalloc(size));
+d83 1
+a83 1
+		err(FATAL, "%s", strerror(errno));
+d93 1
+a93 3
+strregerror(errcode, preg)
+	int errcode;
+	regex_t *preg;
+d98 2
+a99 3
+	if (oe != NULL)
+		free(oe);
+	s = regerror(errcode, preg, "", 0);
+d109 1
+a109 1
+err(int severity, const char *fmt, ...)
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.6 2004/07/20 03:50:26 deraadt Exp $	*/
+d38 1
+a38 1
+static char *rcsid = "$OpenBSD: misc.c,v 1.6 2004/07/20 03:50:26 deraadt Exp $";
+d57 2
+a58 1
+xmalloc(u_int size)
+d71 3
+a73 1
+xrealloc(void *p, u_int size)
+d89 3
+a91 1
+strregerror(int errcode, regex_t *preg)
+@
+
+
+1.1.1.3
+log
+@Import newer sed(1) from OpenBSD, hoping for bugfixes
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.11 2015/10/26 14:08:47 mmcc Exp $	*/
+d36 5
+d57 1
+a57 1
+xmalloc(size_t size)
+d62 1
+a62 11
+		error(FATAL, "%s", strerror(errno));
+	return (p);
+}
+
+void *
+xreallocarray(void *o, size_t nmemb, size_t size)
+{
+	void *p;
+
+	if ((p = reallocarray(o, nmemb, size)) == NULL)
+		error(FATAL, "%s", strerror(errno));
+d70 1
+a70 1
+xrealloc(void *p, size_t size)
+d72 2
+d76 1
+a76 1
+		error(FATAL, "%s", strerror(errno));
+d91 2
+a92 1
+	free(oe);
+d103 1
+a103 1
+error(int severity, const char *fmt, ...)
+@
+
+
+1.1.1.4
+log
+@update sed(1) from OpenBSD
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.12 2017/01/20 10:26:16 krw Exp $	*/
+d104 1
+a104 1
+__dead void
+d112 1
+d119 2
+d122 1
+a122 13
+}
+
+void
+warning(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	(void)fprintf(stderr, "sed: ");
+	(void)fprintf(stderr, "%lu: %s: ", linenum, fname);
+	(void)vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	(void)fprintf(stderr, "\n");
+@
+
+

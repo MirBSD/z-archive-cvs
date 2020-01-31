@@ -1,0 +1,398 @@
+head	1.7;
+access;
+symbols
+	tg:1.6.0.2;
+locks; strict;
+comment	@# @;
+
+
+1.7
+date	2008.11.08.23.03.50;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10049161AC72620EAF0;
+
+1.6
+date	2006.09.20.22.24.50;	author tg;	state Exp;
+branches
+	1.6.2.1;
+next	1.5;
+commitid	1004511BFAD3427E1F6;
+
+1.5
+date	2005.12.15.14.24.19;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10043A17C743029E031;
+
+1.4
+date	2005.10.07.19.43.08;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	4d104346cfdbb276;
+
+1.3
+date	2005.10.01.19.00.17;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	537d433edcbb0f8b;
+
+1.2
+date	2005.05.04.23.24.45;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	80427959ccdbba;
+
+1.1
+date	2005.03.18.15.49.47;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.6.2.1
+date	2008.09.04.19.26.53;	author tg;	state Exp;
+branches;
+next	;
+commitid	10048C03682334B5F0F;
+
+1.1.7.1
+date	2005.03.18.15.49.47;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.7
+log
+@more mass conversions, including ancient eMail addresses
+@
+text
+@#!@@SHELL@@
+# $MirOS: ports/mailnews/pine/files/pine.smime,v 1.6 2006/09/20 22:24:50 tg Exp $
+#-
+# Copyright (c) 2003, 2004
+#	Thorsten "mirabilos" Glaser <tg@@mirbsd.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+# express, or implied, to the maximum extent permitted by applicable
+# law, without malicious intent or gross negligence; in no event may
+# licensor, an author or contributor be held liable for any indirect
+# or other damage, or direct damage except proven a consequence of a
+# direct error of said person and intended use of this work, loss or
+# other issues arising in any way out of its use, even if advised of
+# the possibility of such damage or existence of a defect.
+#-
+# S/MIME support for pine, main module
+#
+# Documentation:
+# Set pine up so it uses this script as its mail submission agent
+# (use sendmail-path=@@PREFIX@@/bin/pine.smime option in .pinerc)
+# You can pass additional args to sendmail by setenv SMIMEARGS.
+# Start pine via the pine.smime.init script, it will ask you
+# for your password you protected your S/MIME key with.
+# The key and cert have to reside in ~/.etc/ssh/mime.{key,cer}
+# If you want to add e.g. your CA Certificate(s) to the signed
+# messages, as other mailers usually do, use ~/.etc/ssh/mime.ca
+# Add "X-SMIME: NO" to your pine user-defined headers to ease later use.
+#
+# To send a signed mail, press ^R (Rich Headers) in Composer and change
+# "X-SMIME: No" to a value not containing "NO" or "OPAQ" (case-insensitive).
+# If you choose OPAQ, the clear-signing will be deactivated, i.e.
+# the message will only be visible to S/MIME capable clients.
+#
+# If you receive a S/MIME mail, do the following manually, because
+# there is no way to automate it in pine:
+# press | (PIPE), set to RAW if not yet set (press ^W), set
+# the command to the following and execute:
+#  openssl smime -verify
+# To decrypt an incoming message, you may use
+#  openssl smime -decrypt -certfile ~/.etc/ssh/mime.cer -inkey ~/.etc/ssh/mime.key
+# Note: "Verification Successful\n" can be anywhere in the viewer body
+#  because it is put to stderr and pine is, err, slightly buggy.
+#  So you should use the unverified part of the message, or, for opaquely
+#  signed messages, s/Verification Successful\n// after saving.
+#
+# Support for encrypting outgoing messages is not planned until there is
+# some way to retrieve information from within this script.
+# Probably it could be done by a header.
+#
+# If something goes wrong, you'll find a file called ~/smime.log
+
+
+R=$(mktemp /tmp/pine.smime.XXXXXXXXXX) || exit 1
+S=$(mktemp /tmp/pine.smime.XXXXXXXXXX) || { rm -f $R; exit 1; }
+T=$(mktemp /tmp/pine.smime.XXXXXXXXXX) || { rm -f $R $S; exit 1; }
+trap 'rm -f $R $S $T ; exit 0' 0
+trap 'rm -f $R $S $T ; exit 1' 1 2 3 5 13 15
+
+MACH="$(uname -mslrM)" || MACH="$(uname -mslr)" || MACH="$(uname -msr)"
+
+echo "Received: by S/MIME Plugin for ${MACH}; $(date)" >$R
+cat >$S
+ed -s $S <<-EOF
+	1,/^$/-1W $R
+	1,/^$/d
+	wq
+EOF
+
+grep -Ei '(^Content-)|(^MIME)' $R >$T || \
+	echo 'Content-Type: text/plain; charset=iso-8859-1' >$T
+
+echo "" >>$T
+cat $S >>$T
+Q=NO
+QP=""
+grep -i '^X-SMIME:' $R >$S && Q=OK
+grep -i OPAQ $S >/dev/null && QP="-nodetach"
+grep -i NO $S >/dev/null && Q=NO
+grep -Eiv '(^Content-)|(^MIME)|(^X-SMIME:)' $R >$S
+
+cat $T >$R
+[[ -n $SMIMEPWD ]] && QP="$QP -passin file:$SMIMEPWD"
+if [[ $Q = OK && -e ~/.etc/ssh/mime.key ]]; then
+	openssl smime -sign -rc2-128 -signer ~/.etc/ssh/mime.cer -in $T \
+	  -certfile ~/.etc/ssh/mime.ca -inkey ~/.etc/ssh/mime.key $QP -out $R \
+	  2>~/smime.log || Q=FAILED
+	[[ $Q = FAILED ]] || rm -f ~/smime.log
+	echo "X-Autoconverted: to S/MIME-signed  status $Q" >>$S
+fi
+unset QP
+cat $S $R >$T
+
+tr -d '' <$T | sed -e 's,$,,' | sendmail ${SMIMEARGS} -oem -oi -t
+@
+
+
+1.6
+log
+@catch signal 5 too, idea from original lynx "oldlynx" sample script, thanks TD
+while here, update licences where I can
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/mailnews/pine/files/pine.smime,v 1.5 2005/12/15 14:24:19 tg Exp $
+d5 1
+a5 1
+#	Thorsten "mirabile" Glaser <tg@@mirbsd.de>
+@
+
+
+1.6.2.1
+log
+@bring in hacks with which I’ve been writing (outgoing) PGP/MIME mails,
+for now… the incoming script is even hackier
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/mailnews/pine/files/pine.smime,v 1.6 2006/09/20 22:24:50 tg Exp $
+d4 2
+a5 2
+# Copyright (c) 2003, 2004, 2008
+#	Thorsten "mirabilos" Glaser <tg@@mirbsd.de>
+d7 15
+a21 14
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un-
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person's immediate fault when using the work as intended.
+d23 1
+a23 1
+# S/MIME and PGP/MIME support for pine, main module
+a34 2
+# Add "X-PGPMIME: sucks" to your pine user-defined headers to enable PGP/MIME
+# for outgoing encrypted mails.
+a58 4
+#XXX not for production use yet (requires gpgml script for encrypting
+#XXX inside mailer, instead of full MIME parsing)
+#XXX missing: keyid selector
+#XXX use: “gpg -k --with-colons --fixed-list-mode --with-fingerprint 「x」”
+d66 1
+a66 1
+MACH="$(uname -mslr 2>&-)" || MACH="$(uname -msr)"
+d69 1
+a69 1
+tr -d '' >$S
+d100 1
+a100 59
+grep -qi '^X-PGPMIME:.*sucks' $T && if grep -q \
+    '^-----BEGIN PGP MESSAGE-----' $T; then
+	cte=
+	inhdr=1
+	inpgp=0
+	tr -d '' <$T |&
+	print -n >$R
+	while IFS= read -pr line; do
+		if (( inpgp == 2 )); then
+			print -r -- "$line" >>$R
+			continue
+		fi
+		typeset -l lline="$line"
+
+		if (( inhdr )); then
+			if [[ $lline = @@(content-transfer-encoding:)* ]]; then
+				cte=$line
+				continue
+			fi
+			[[ $lline = @@(content-type:)* ]] && continue
+			if [[ -z $line ]]; then
+				inhdr=0
+				print 'Content-Type: multipart/encrypted;' \
+				    'protocol="application/pgp-encrypted";' \
+				    'boundary="PGP/MIME_sucks"'
+				print Content-Disposition: inline
+				inpgp=1
+			fi
+		fi
+		(( inpgp )) && if [[ $lline = \
+		    @@(-----begin pgp message-----)* ]]; then
+			print PGP_MIME_sucks_hard
+			print
+			print -- --PGP/MIME_sucks
+			print Content-Type: application/pgp-encrypted
+			print Content-Disposition: attachment
+			print
+			print Version: 1
+			print
+			print -- --PGP/MIME_sucks
+			print Content-Type: application/octet-stream
+			print 'Content-Disposition: inline;' \
+			    'filename="msg.asc"'
+			[[ -n $cte ]] && print -r $cte
+			print
+		fi
+		print -r -- "$line"
+		(( inpgp )) && if [[ $lline = \
+		    @@(-----end pgp message-----)* ]]; then
+			print
+			print -- --PGP/MIME_sucks--
+			print
+			inpgp=2
+		fi
+	done >$S
+	sed -e '/^PGP_MIME_sucks_hard/r'$R -e //d $S >$T
+fi
+
+sendmail ${SMIMEARGS} -oem -oi -t <$T
+@
+
+
+1.5
+log
+@* remove remnants of libc-client.so
+* honour SYSCONFDIR, LOCALBASE, TRUEPREFIX
+* certificate now in SYSCONFDIR/ssl/*.pem instead
+* bump versions on all packages
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.4 2005/12/15 02:46:54 tg Rel $
+d21 1
+a21 1
+# the possibility of such damage or existence of a nontrivial bug.
+d64 1
+a64 1
+trap 'rm -f $R $S $T ; exit 1' 1 2 3 13 15
+@
+
+
+1.4
+log
+@replace /usr/local with @@PREFIX@@ too
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/mailnews/pine/files/pine.smime,v 1.3 2005/10/01 19:00:17 tg Exp $
+d5 1
+a5 1
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+d14 8
+a21 7
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+@
+
+
+1.3
+log
+@* replace /bin/ksh with @@SHELL@@ and fix it at build time
+* clean up install process while here
+* bump patchlevel for subpackages touched
+@
+text
+@d2 1
+a2 1
+# $MirOS: ports/mailnews/pine/files/pine.smime,v 1.2 2005/05/04 23:24:45 tg Exp $
+d26 1
+a26 1
+# (use sendmail-path=/usr/local/bin/pine.smime option in .pinerc)
+@
+
+
+1.2
+log
+@update licence boilerplate
+@
+text
+@d1 2
+a2 2
+#!/bin/ksh
+# $MirOS: src/share/misc/licence.template,v 1.2 2005/03/03 19:43:30 tg Rel $
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 1
+a2 1
+# $MirOS$
+d8 5
+a12 5
+# tion, including unlimited rights to use, publically perform, modi-
+# fy, merge, distribute, sell, give away or sublicence, provided the
+# above copyright notices, these terms and the disclaimer are retai-
+# ned in all redistributions, or reproduced in accompanying documen-
+# tation or other materials provided with binary redistributions.
+d20 1
+a20 1
+# of covered work, even if advised of the possibility of such damage.
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

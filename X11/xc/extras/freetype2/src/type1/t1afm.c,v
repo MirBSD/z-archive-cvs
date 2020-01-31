@@ -1,0 +1,1692 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.22.21;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.48.35;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.02.26.20.05.12;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.25.12;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.22;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.19;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.57;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.22;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.21;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.04;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  t1afm.c                                                                */
+/*                                                                         */
+/*    AFM support for Type 1 fonts (body).                                 */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include "t1afm.h"
+#include FT_INTERNAL_DEBUG_H
+#include FT_INTERNAL_STREAM_H
+#include FT_INTERNAL_POSTSCRIPT_AUX_H
+#include "t1errors.h"
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_t1afm
+
+
+  FT_LOCAL_DEF( void )
+  T1_Done_Metrics( FT_Memory     memory,
+                   AFM_FontInfo  fi )
+  {
+    FT_FREE( fi->KernPairs );
+    fi->NumKernPair = 0;
+
+    FT_FREE( fi->TrackKerns );
+    fi->NumTrackKern = 0;
+
+    FT_FREE( fi );
+  }
+
+
+  /* read a glyph name and return the equivalent glyph index */
+  static FT_Int
+  t1_get_index( const char*  name,
+                FT_Offset    len,
+                void*        user_data )
+  {
+    T1_Font  type1 = (T1_Font)user_data;
+    FT_Int   n;
+
+
+    /* PS string/name length must be < 16-bit */
+    if ( len > 0xFFFFU )
+      return 0;
+
+    for ( n = 0; n < type1->num_glyphs; n++ )
+    {
+      char*  gname = (char*)type1->glyph_names[n];
+
+
+      if ( gname && gname[0] == name[0]        &&
+           ft_strlen( gname ) == len           &&
+           ft_strncmp( gname, name, len ) == 0 )
+        return n;
+    }
+
+    return 0;
+  }
+
+
+#undef  KERN_INDEX
+#define KERN_INDEX( g1, g2 )  ( ( (FT_ULong)(g1) << 16 ) | (g2) )
+
+
+  /* compare two kerning pairs */
+  FT_CALLBACK_DEF( int )
+  compare_kern_pairs( const void*  a,
+                      const void*  b )
+  {
+    AFM_KernPair  pair1 = (AFM_KernPair)a;
+    AFM_KernPair  pair2 = (AFM_KernPair)b;
+
+    FT_ULong  index1 = KERN_INDEX( pair1->index1, pair1->index2 );
+    FT_ULong  index2 = KERN_INDEX( pair2->index1, pair2->index2 );
+
+
+    if ( index1 > index2 )
+      return 1;
+    else if ( index1 < index2 )
+      return -1;
+    else
+      return 0;
+  }
+
+
+  /* parse a PFM file -- for now, only read the kerning pairs */
+  static FT_Error
+  T1_Read_PFM( FT_Face       t1_face,
+               FT_Stream     stream,
+               AFM_FontInfo  fi )
+  {
+    FT_Error      error  = FT_Err_Ok;
+    FT_Memory     memory = stream->memory;
+    FT_Byte*      start;
+    FT_Byte*      limit;
+    FT_Byte*      p;
+    AFM_KernPair  kp;
+    FT_Int        width_table_length;
+    FT_CharMap    oldcharmap;
+    FT_CharMap    charmap;
+    FT_Int        n;
+
+
+    start = (FT_Byte*)stream->cursor;
+    limit = (FT_Byte*)stream->limit;
+
+    /* Figure out how long the width table is.          */
+    /* This info is a little-endian short at offset 99. */
+    p = start + 99;
+    if ( p + 2 > limit )
+    {
+      error = FT_THROW( Unknown_File_Format );
+      goto Exit;
+    }
+    width_table_length = FT_PEEK_USHORT_LE( p );
+
+    p += 18 + width_table_length;
+    if ( p + 0x12 > limit || FT_PEEK_USHORT_LE( p ) < 0x12 )
+      /* extension table is probably optional */
+      goto Exit;
+
+    /* Kerning offset is 14 bytes from start of extensions table. */
+    p += 14;
+    p = start + FT_PEEK_ULONG_LE( p );
+
+    if ( p == start )
+      /* zero offset means no table */
+      goto Exit;
+
+    if ( p + 2 > limit )
+    {
+      error = FT_THROW( Unknown_File_Format );
+      goto Exit;
+    }
+
+    fi->NumKernPair = FT_PEEK_USHORT_LE( p );
+    p += 2;
+    if ( p + 4 * fi->NumKernPair > limit )
+    {
+      error = FT_THROW( Unknown_File_Format );
+      goto Exit;
+    }
+
+    /* Actually, kerning pairs are simply optional! */
+    if ( fi->NumKernPair == 0 )
+      goto Exit;
+
+    /* allocate the pairs */
+    if ( FT_QNEW_ARRAY( fi->KernPairs, fi->NumKernPair ) )
+      goto Exit;
+
+    /* now, read each kern pair */
+    kp    = fi->KernPairs;
+    limit = p + 4 * fi->NumKernPair;
+
+    /* PFM kerning data are stored by encoding rather than glyph index, */
+    /* so find the PostScript charmap of this font and install it       */
+    /* temporarily.  If we find no PostScript charmap, then just use    */
+    /* the default and hope it is the right one.                        */
+    oldcharmap = t1_face->charmap;
+    charmap    = NULL;
+
+    for ( n = 0; n < t1_face->num_charmaps; n++ )
+    {
+      charmap = t1_face->charmaps[n];
+      /* check against PostScript pseudo platform */
+      if ( charmap->platform_id == 7 )
+      {
+        error = FT_Set_Charmap( t1_face, charmap );
+        if ( error )
+          goto Exit;
+        break;
+      }
+    }
+
+    /* Kerning info is stored as:             */
+    /*                                        */
+    /*   encoding of first glyph (1 byte)     */
+    /*   encoding of second glyph (1 byte)    */
+    /*   offset (little-endian short)         */
+    for ( ; p < limit; p += 4 )
+    {
+      kp->index1 = FT_Get_Char_Index( t1_face, p[0] );
+      kp->index2 = FT_Get_Char_Index( t1_face, p[1] );
+
+      kp->x = (FT_Int)FT_PEEK_SHORT_LE(p + 2);
+      kp->y = 0;
+
+      kp++;
+    }
+
+    if ( oldcharmap )
+      error = FT_Set_Charmap( t1_face, oldcharmap );
+    if ( error )
+      goto Exit;
+
+    /* now, sort the kern pairs according to their glyph indices */
+    ft_qsort( fi->KernPairs, fi->NumKernPair, sizeof ( AFM_KernPairRec ),
+              compare_kern_pairs );
+
+  Exit:
+    if ( error )
+    {
+      FT_FREE( fi->KernPairs );
+      fi->NumKernPair = 0;
+    }
+
+    return error;
+  }
+
+
+  /* parse a metrics file -- either AFM or PFM depending on what */
+  /* it turns out to be                                          */
+  FT_LOCAL_DEF( FT_Error )
+  T1_Read_Metrics( FT_Face    t1_face,
+                   FT_Stream  stream )
+  {
+    PSAux_Service  psaux;
+    FT_Memory      memory  = stream->memory;
+    AFM_ParserRec  parser;
+    AFM_FontInfo   fi      = NULL;
+    FT_Error       error   = FT_ERR( Unknown_File_Format );
+    T1_Face        face    = (T1_Face)t1_face;
+    T1_Font        t1_font = &face->type1;
+
+
+    if ( face->afm_data )
+    {
+      FT_TRACE1(( "T1_Read_Metrics:"
+                  " Freeing previously attached metrics data.\n" ));
+      T1_Done_Metrics( memory, (AFM_FontInfo)face->afm_data );
+
+      face->afm_data = NULL;
+    }
+
+    if ( FT_NEW( fi )                   ||
+         FT_FRAME_ENTER( stream->size ) )
+      goto Exit;
+
+    fi->FontBBox  = t1_font->font_bbox;
+    fi->Ascender  = t1_font->font_bbox.yMax;
+    fi->Descender = t1_font->font_bbox.yMin;
+
+    psaux = (PSAux_Service)face->psaux;
+    if ( psaux->afm_parser_funcs )
+    {
+      error = psaux->afm_parser_funcs->init( &parser,
+                                             stream->memory,
+                                             stream->cursor,
+                                             stream->limit );
+
+      if ( !error )
+      {
+        parser.FontInfo  = fi;
+        parser.get_index = t1_get_index;
+        parser.user_data = t1_font;
+
+        error = psaux->afm_parser_funcs->parse( &parser );
+        psaux->afm_parser_funcs->done( &parser );
+      }
+    }
+
+    if ( FT_ERR_EQ( error, Unknown_File_Format ) )
+    {
+      FT_Byte*  start = stream->cursor;
+
+
+      /* MS Windows allows versions up to 0x3FF without complaining */
+      if ( stream->size > 6                              &&
+           start[1] < 4                                  &&
+           FT_PEEK_ULONG_LE( start + 2 ) == stream->size )
+        error = T1_Read_PFM( t1_face, stream, fi );
+    }
+
+    if ( !error )
+    {
+      t1_font->font_bbox = fi->FontBBox;
+
+      t1_face->bbox.xMin =   fi->FontBBox.xMin            >> 16;
+      t1_face->bbox.yMin =   fi->FontBBox.yMin            >> 16;
+      /* no `U' suffix here to 0xFFFF! */
+      t1_face->bbox.xMax = ( fi->FontBBox.xMax + 0xFFFF ) >> 16;
+      t1_face->bbox.yMax = ( fi->FontBBox.yMax + 0xFFFF ) >> 16;
+
+      /* no `U' suffix here to 0x8000! */
+      t1_face->ascender  = (FT_Short)( ( fi->Ascender  + 0x8000 ) >> 16 );
+      t1_face->descender = (FT_Short)( ( fi->Descender + 0x8000 ) >> 16 );
+
+      if ( fi->NumKernPair )
+      {
+        t1_face->face_flags |= FT_FACE_FLAG_KERNING;
+        face->afm_data       = fi;
+        fi                   = NULL;
+      }
+    }
+
+    FT_FRAME_EXIT();
+
+  Exit:
+    if ( fi )
+      T1_Done_Metrics( memory, fi );
+
+    return error;
+  }
+
+
+  /* find the kerning for a given glyph pair */
+  FT_LOCAL_DEF( void )
+  T1_Get_Kerning( AFM_FontInfo  fi,
+                  FT_UInt       glyph1,
+                  FT_UInt       glyph2,
+                  FT_Vector*    kerning )
+  {
+    AFM_KernPair  min, mid, max;
+    FT_ULong      idx = KERN_INDEX( glyph1, glyph2 );
+
+
+    /* simple binary search */
+    min = fi->KernPairs;
+    max = min + fi->NumKernPair - 1;
+
+    while ( min <= max )
+    {
+      FT_ULong  midi;
+
+
+      mid  = min + ( max - min ) / 2;
+      midi = KERN_INDEX( mid->index1, mid->index2 );
+
+      if ( midi == idx )
+      {
+        kerning->x = mid->x;
+        kerning->y = mid->y;
+
+        return;
+      }
+
+      if ( midi < idx )
+        min = mid + 1;
+      else
+        max = mid - 1;
+    }
+
+    kerning->x = 0;
+    kerning->y = 0;
+  }
+
+
+  FT_LOCAL_DEF( FT_Error )
+  T1_Get_Track_Kerning( FT_Face    face,
+                        FT_Fixed   ptsize,
+                        FT_Int     degree,
+                        FT_Fixed*  kerning )
+  {
+    AFM_FontInfo  fi = (AFM_FontInfo)( (T1_Face)face )->afm_data;
+    FT_UInt       i;
+
+
+    if ( !fi )
+      return FT_THROW( Invalid_Argument );
+
+    for ( i = 0; i < fi->NumTrackKern; i++ )
+    {
+      AFM_TrackKern  tk = fi->TrackKerns + i;
+
+
+      if ( tk->degree != degree )
+        continue;
+
+      if ( ptsize < tk->min_ptsize )
+        *kerning = tk->min_kern;
+      else if ( ptsize > tk->max_ptsize )
+        *kerning = tk->max_kern;
+      else
+      {
+        *kerning = FT_MulDiv( ptsize - tk->min_ptsize,
+                              tk->max_kern - tk->min_kern,
+                              tk->max_ptsize - tk->min_ptsize ) +
+                   tk->min_kern;
+      }
+    }
+
+    return FT_Err_Ok;
+  }
+
+
+/* END */
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 by */
+d21 1
+a21 1
+#include "t1errors.h"
+d24 1
+d111 1
+a111 1
+    FT_Error      error = T1_Err_Ok;
+a124 1
+    p     = start;
+d131 1
+a131 1
+      error = T1_Err_Unknown_File_Format;
+d151 1
+a151 1
+      error = T1_Err_Unknown_File_Format;
+d159 1
+a159 1
+      error = T1_Err_Unknown_File_Format;
+d172 2
+a173 2
+    kp             = fi->KernPairs;
+    limit          = p + 4 * fi->NumKernPair;
+d200 1
+a200 1
+    for ( ; p < limit ; p += 4 )
+d211 1
+a211 1
+    if ( oldcharmap != NULL )
+d238 1
+a238 1
+    FT_Memory      memory = stream->memory;
+d240 5
+a244 3
+    AFM_FontInfo   fi;
+    FT_Error       error = T1_Err_Unknown_File_Format;
+    T1_Font        t1_font = &( (T1_Face)t1_face )->type1;
+d246 8
+d263 2
+a264 2
+    psaux = (PSAux_Service)( (T1_Face)t1_face )->psaux;
+    if ( psaux && psaux->afm_parser_funcs )
+d282 1
+a282 1
+    if ( error == T1_Err_Unknown_File_Format )
+d311 2
+a312 2
+        ( (T1_Face)t1_face )->afm_data = fi;
+        fi = NULL;
+d319 1
+a319 1
+    if ( fi != NULL )
+d375 1
+a375 1
+    FT_Int        i;
+d379 1
+a379 1
+      return T1_Err_Invalid_Argument;
+d402 1
+a402 1
+    return T1_Err_Ok;
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006, 2007 by             */
+d53 1
+a53 1
+                FT_UInt      len,
+d60 4
+d95 6
+a100 1
+    return (int)( index1 - index2 );
+d288 9
+a296 7
+      t1_face->bbox.xMin =   fi->FontBBox.xMin             >> 16;
+      t1_face->bbox.yMin =   fi->FontBBox.yMin             >> 16;
+      t1_face->bbox.xMax = ( fi->FontBBox.xMax + 0xFFFFU ) >> 16;
+      t1_face->bbox.yMax = ( fi->FontBBox.yMax + 0xFFFFU ) >> 16;
+
+      t1_face->ascender  = (FT_Short)( ( fi->Ascender  + 0x8000U ) >> 16 );
+      t1_face->descender = (FT_Short)( ( fi->Descender + 0x8000U ) >> 16 );
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006 by                   */
+d76 1
+a76 1
+#define KERN_INDEX( g1, g2 )  ( ( (FT_ULong)g1 << 16 ) | g2 )
+d196 1
+a196 1
+      kp->x = (FT_Int)FT_PEEK_USHORT_LE(p + 2);
+d236 3
+a238 8
+    if ( FT_NEW( fi ) )
+      return error;
+
+    if ( FT_FRAME_ENTER( stream->size ) )
+    {
+      FT_FREE( fi );
+      return error;
+    }
+d268 1
+d270 1
+a270 1
+           start[0] == 0x00 && start[1] == 0x01          &&
+d291 1
+d297 4
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003 by                                     */
+d21 1
+d23 1
+a23 1
+#include FT_INTERNAL_TYPE1_TYPES_H
+d37 2
+a38 2
+  T1_Done_AFM( FT_Memory  memory,
+               T1_AFM*    afm )
+d40 2
+a41 4
+    FT_FREE( afm->kern_pairs );
+    afm->num_pairs = 0;
+    FT_FREE( afm );
+  }
+d43 2
+d46 2
+a47 6
+#undef  IS_KERN_PAIR
+#define IS_KERN_PAIR( p )  ( p[0] == 'K' && p[1] == 'P' )
+
+#define IS_ALPHANUM( c )  ( ft_isalnum( c ) || \
+                            c == '_'        || \
+                            c == '.'        )
+d51 4
+a54 54
+  static FT_UInt
+  afm_atoindex( FT_Byte**  start,
+                FT_Byte*   limit,
+                T1_Font    type1 )
+  {
+    FT_Byte*    p = *start;
+    FT_PtrDist  len;
+    FT_UInt     result = 0;
+    char        temp[64];
+
+
+    /* skip whitespace */
+    while ( ( *p == ' ' || *p == '\t' || *p == ':' || *p == ';' ) &&
+            p < limit                                             )
+      p++;
+    *start = p;
+
+    /* now, read glyph name */
+    while ( IS_ALPHANUM( *p ) && p < limit )
+      p++;
+
+    len = p - *start;
+
+    if ( len > 0 && len < 64 )
+    {
+      FT_Int  n;
+
+
+      /* copy glyph name to intermediate array */
+      FT_MEM_COPY( temp, *start, len );
+      temp[len] = 0;
+
+      /* lookup glyph name in face array */
+      for ( n = 0; n < type1->num_glyphs; n++ )
+      {
+        char*  gname = (char*)type1->glyph_names[n];
+
+
+        if ( gname && gname[0] == temp[0] && ft_strcmp( gname, temp ) == 0 )
+        {
+          result = n;
+          break;
+        }
+      }
+    }
+    *start = p;
+    return result;
+  }
+
+
+  /* read an integer */
+  static int
+  afm_atoi( FT_Byte**  start,
+            FT_Byte*   limit )
+d56 2
+a57 3
+    FT_Byte*  p    = *start;
+    int       sum  = 0;
+    int       sign = 1;
+d60 1
+a60 2
+    /* skip everything that is not a number */
+    while ( p < limit && !isdigit( *p ) )
+d62 1
+a62 3
+      sign = 1;
+      if ( *p == '-' )
+        sign = -1;
+a63 2
+      p++;
+    }
+d65 4
+a68 4
+    while ( p < limit && isdigit( *p ) )
+    {
+      sum = sum * 10 + ( *p - '0' );
+      p++;
+a69 1
+    *start = p;
+d71 1
+a71 1
+    return sum * sign;
+d84 2
+a85 2
+    T1_Kern_Pair*  pair1 = (T1_Kern_Pair*)a;
+    T1_Kern_Pair*  pair2 = (T1_Kern_Pair*)b;
+d87 2
+a88 2
+    FT_ULong  index1 = KERN_INDEX( pair1->glyph1, pair1->glyph2 );
+    FT_ULong  index2 = KERN_INDEX( pair2->glyph1, pair2->glyph2 );
+d95 5
+a99 4
+  /* parse an AFM file -- for now, only read the kerning pairs */
+  FT_LOCAL_DEF( FT_Error )
+  T1_Read_AFM( FT_Face    t1_face,
+               FT_Stream  stream )
+d101 10
+a110 9
+    FT_Error       error;
+    FT_Memory      memory = stream->memory;
+    FT_Byte*       start;
+    FT_Byte*       limit;
+    FT_Byte*       p;
+    FT_Int         count = 0;
+    T1_Kern_Pair*  pair;
+    T1_Font        type1 = &((T1_Face)t1_face)->type1;
+    T1_AFM*        afm   = 0;
+a112 3
+    if ( FT_FRAME_ENTER( stream->size ) )
+      return error;
+
+d117 4
+a120 4
+    /* we are now going to count the occurences of `KP' or `KPX' in */
+    /* the AFM file                                                 */
+    count = 0;
+    for ( p = start; p < limit - 3; p++ )
+d122 30
+a151 2
+      if ( IS_KERN_PAIR( p ) )
+        count++;
+d155 1
+a155 1
+    if ( count == 0 )
+d159 1
+a159 1
+    if ( FT_NEW( afm ) || FT_NEW_ARRAY( afm->kern_pairs, count ) )
+d163 2
+a164 2
+    pair           = afm->kern_pairs;
+    afm->num_pairs = count;
+d166 6
+a171 2
+    /* save in face object */
+    ((T1_Face)t1_face)->afm_data = afm;
+d173 1
+a173 3
+    t1_face->face_flags |= FT_FACE_FLAG_KERNING;
+
+    for ( p = start; p < limit - 3; p++ )
+d175 3
+a177 1
+      if ( IS_KERN_PAIR( p ) )
+d179 6
+a184 1
+        FT_Byte*  q;
+d186 9
+d196 2
+a197 4
+        /* skip keyword (KP or KPX) */
+        q = p + 2;
+        if ( *q == 'X' )
+          q++;
+d199 2
+a200 3
+        pair->glyph1    = afm_atoindex( &q, limit, type1 );
+        pair->glyph2    = afm_atoindex( &q, limit, type1 );
+        pair->kerning.x = afm_atoi( &q, limit );
+d202 4
+a205 7
+        pair->kerning.y = 0;
+        if ( p[2] != 'X' )
+          pair->kerning.y = afm_atoi( &q, limit );
+
+        pair++;
+      }
+    }
+d208 1
+a208 1
+    ft_qsort( afm->kern_pairs, count, sizeof ( T1_Kern_Pair ),
+d213 84
+a296 1
+      FT_FREE( afm );
+d306 4
+a309 4
+  T1_Get_Kerning( T1_AFM*     afm,
+                  FT_UInt     glyph1,
+                  FT_UInt     glyph2,
+                  FT_Vector*  kerning )
+d311 1
+a311 1
+    T1_Kern_Pair  *min, *mid, *max;
+d316 2
+a317 2
+    min = afm->kern_pairs;
+    max = min + afm->num_pairs - 1;
+d325 1
+a325 1
+      midi = KERN_INDEX( mid->glyph1, mid->glyph2 );
+d329 3
+a331 1
+        *kerning = mid->kerning;
+d346 38
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006, 2007 by             */
+a20 1
+#include "t1errors.h"
+d22 1
+a22 1
+#include FT_INTERNAL_POSTSCRIPT_AUX_H
+d36 2
+a37 2
+  T1_Done_Metrics( FT_Memory     memory,
+                   AFM_FontInfo  fi )
+d39 42
+a80 2
+    FT_FREE( fi->KernPairs );
+    fi->NumKernPair = 0;
+d82 8
+a89 2
+    FT_FREE( fi->TrackKerns );
+    fi->NumTrackKern = 0;
+d91 10
+a100 1
+    FT_FREE( fi );
+d104 4
+a107 5
+  /* read a glyph name and return the equivalent glyph index */
+  static FT_Int
+  t1_get_index( const char*  name,
+                FT_UInt      len,
+                void*        user_data )
+d109 3
+a111 2
+    T1_Font  type1 = (T1_Font)user_data;
+    FT_Int   n;
+d114 2
+a115 1
+    for ( n = 0; n < type1->num_glyphs; n++ )
+d117 3
+a119 1
+      char*  gname = (char*)type1->glyph_names[n];
+d121 2
+d124 4
+a127 4
+      if ( gname && gname[0] == name[0]        &&
+           ft_strlen( gname ) == len           &&
+           ft_strncmp( gname, name, len ) == 0 )
+        return n;
+d129 1
+d131 1
+a131 1
+    return 0;
+d136 1
+a136 1
+#define KERN_INDEX( g1, g2 )  ( ( (FT_ULong)(g1) << 16 ) | (g2) )
+d144 2
+a145 2
+    AFM_KernPair  pair1 = (AFM_KernPair)a;
+    AFM_KernPair  pair2 = (AFM_KernPair)b;
+d147 2
+a148 2
+    FT_ULong  index1 = KERN_INDEX( pair1->index1, pair1->index2 );
+    FT_ULong  index2 = KERN_INDEX( pair2->index1, pair2->index2 );
+d155 4
+a158 5
+  /* parse a PFM file -- for now, only read the kerning pairs */
+  static FT_Error
+  T1_Read_PFM( FT_Face       t1_face,
+               FT_Stream     stream,
+               AFM_FontInfo  fi )
+d160 10
+a169 10
+    FT_Error      error = T1_Err_Ok;
+    FT_Memory     memory = stream->memory;
+    FT_Byte*      start;
+    FT_Byte*      limit;
+    FT_Byte*      p;
+    AFM_KernPair  kp;
+    FT_Int        width_table_length;
+    FT_CharMap    oldcharmap;
+    FT_CharMap    charmap;
+    FT_Int        n;
+d171 2
+d178 4
+a181 4
+    /* Figure out how long the width table is.          */
+    /* This info is a little-endian short at offset 99. */
+    p = start + 99;
+    if ( p + 2 > limit )
+d183 2
+a184 30
+      error = T1_Err_Unknown_File_Format;
+      goto Exit;
+    }
+    width_table_length = FT_PEEK_USHORT_LE( p );
+
+    p += 18 + width_table_length;
+    if ( p + 0x12 > limit || FT_PEEK_USHORT_LE( p ) < 0x12 )
+      /* extension table is probably optional */
+      goto Exit;
+
+    /* Kerning offset is 14 bytes from start of extensions table. */
+    p += 14;
+    p = start + FT_PEEK_ULONG_LE( p );
+
+    if ( p == start )
+      /* zero offset means no table */
+      goto Exit;
+
+    if ( p + 2 > limit )
+    {
+      error = T1_Err_Unknown_File_Format;
+      goto Exit;
+    }
+
+    fi->NumKernPair = FT_PEEK_USHORT_LE( p );
+    p += 2;
+    if ( p + 4 * fi->NumKernPair > limit )
+    {
+      error = T1_Err_Unknown_File_Format;
+      goto Exit;
+d188 1
+a188 1
+    if ( fi->NumKernPair == 0 )
+d192 1
+a192 1
+    if ( FT_QNEW_ARRAY( fi->KernPairs, fi->NumKernPair ) )
+d196 5
+a200 2
+    kp             = fi->KernPairs;
+    limit          = p + 4 * fi->NumKernPair;
+d202 1
+a202 6
+    /* PFM kerning data are stored by encoding rather than glyph index, */
+    /* so find the PostScript charmap of this font and install it       */
+    /* temporarily.  If we find no PostScript charmap, then just use    */
+    /* the default and hope it is the right one.                        */
+    oldcharmap = t1_face->charmap;
+    charmap    = NULL;
+d204 1
+a204 1
+    for ( n = 0; n < t1_face->num_charmaps; n++ )
+d206 1
+a206 3
+      charmap = t1_face->charmaps[n];
+      /* check against PostScript pseudo platform */
+      if ( charmap->platform_id == 7 )
+d208 7
+a214 6
+        error = FT_Set_Charmap( t1_face, charmap );
+        if ( error )
+          goto Exit;
+        break;
+      }
+    }
+d216 3
+a218 9
+    /* Kerning info is stored as:             */
+    /*                                        */
+    /*   encoding of first glyph (1 byte)     */
+    /*   encoding of second glyph (1 byte)    */
+    /*   offset (little-endian short)         */
+    for ( ; p < limit ; p += 4 )
+    {
+      kp->index1 = FT_Get_Char_Index( t1_face, p[0] );
+      kp->index2 = FT_Get_Char_Index( t1_face, p[1] );
+d220 3
+a222 2
+      kp->x = (FT_Int)FT_PEEK_SHORT_LE(p + 2);
+      kp->y = 0;
+d224 2
+a225 1
+      kp++;
+a227 5
+    if ( oldcharmap != NULL )
+      error = FT_Set_Charmap( t1_face, oldcharmap );
+    if ( error )
+      goto Exit;
+
+d229 1
+a229 1
+    ft_qsort( fi->KernPairs, fi->NumKernPair, sizeof ( AFM_KernPairRec ),
+d234 1
+a234 81
+    {
+      FT_FREE( fi->KernPairs );
+      fi->NumKernPair = 0;
+    }
+
+    return error;
+  }
+
+
+  /* parse a metrics file -- either AFM or PFM depending on what */
+  /* it turns out to be                                          */
+  FT_LOCAL_DEF( FT_Error )
+  T1_Read_Metrics( FT_Face    t1_face,
+                   FT_Stream  stream )
+  {
+    PSAux_Service  psaux;
+    FT_Memory      memory = stream->memory;
+    AFM_ParserRec  parser;
+    AFM_FontInfo   fi;
+    FT_Error       error = T1_Err_Unknown_File_Format;
+    T1_Font        t1_font = &( (T1_Face)t1_face )->type1;
+
+
+    if ( FT_NEW( fi )                   ||
+         FT_FRAME_ENTER( stream->size ) )
+      goto Exit;
+
+    fi->FontBBox  = t1_font->font_bbox;
+    fi->Ascender  = t1_font->font_bbox.yMax;
+    fi->Descender = t1_font->font_bbox.yMin;
+
+    psaux = (PSAux_Service)( (T1_Face)t1_face )->psaux;
+    if ( psaux && psaux->afm_parser_funcs )
+    {
+      error = psaux->afm_parser_funcs->init( &parser,
+                                             stream->memory,
+                                             stream->cursor,
+                                             stream->limit );
+
+      if ( !error )
+      {
+        parser.FontInfo  = fi;
+        parser.get_index = t1_get_index;
+        parser.user_data = t1_font;
+
+        error = psaux->afm_parser_funcs->parse( &parser );
+        psaux->afm_parser_funcs->done( &parser );
+      }
+    }
+
+    if ( error == T1_Err_Unknown_File_Format )
+    {
+      FT_Byte*  start = stream->cursor;
+
+
+      /* MS Windows allows versions up to 0x3FF without complaining */
+      if ( stream->size > 6                              &&
+           start[1] < 4                                  &&
+           FT_PEEK_ULONG_LE( start + 2 ) == stream->size )
+        error = T1_Read_PFM( t1_face, stream, fi );
+    }
+
+    if ( !error )
+    {
+      t1_font->font_bbox = fi->FontBBox;
+
+      t1_face->bbox.xMin =   fi->FontBBox.xMin             >> 16;
+      t1_face->bbox.yMin =   fi->FontBBox.yMin             >> 16;
+      t1_face->bbox.xMax = ( fi->FontBBox.xMax + 0xFFFFU ) >> 16;
+      t1_face->bbox.yMax = ( fi->FontBBox.yMax + 0xFFFFU ) >> 16;
+
+      t1_face->ascender  = (FT_Short)( ( fi->Ascender  + 0x8000U ) >> 16 );
+      t1_face->descender = (FT_Short)( ( fi->Descender + 0x8000U ) >> 16 );
+
+      if ( fi->NumKernPair )
+      {
+        t1_face->face_flags |= FT_FACE_FLAG_KERNING;
+        ( (T1_Face)t1_face )->afm_data = fi;
+        fi = NULL;
+      }
+    }
+a237 4
+  Exit:
+    if ( fi != NULL )
+      T1_Done_Metrics( memory, fi );
+
+d244 4
+a247 4
+  T1_Get_Kerning( AFM_FontInfo  fi,
+                  FT_UInt       glyph1,
+                  FT_UInt       glyph2,
+                  FT_Vector*    kerning )
+d249 1
+a249 1
+    AFM_KernPair  min, mid, max;
+d254 2
+a255 2
+    min = fi->KernPairs;
+    max = min + fi->NumKernPair - 1;
+d263 1
+a263 1
+      midi = KERN_INDEX( mid->index1, mid->index2 );
+d267 1
+a267 3
+        kerning->x = mid->x;
+        kerning->y = mid->y;
+
+a281 38
+  FT_LOCAL_DEF( FT_Error )
+  T1_Get_Track_Kerning( FT_Face    face,
+                        FT_Fixed   ptsize,
+                        FT_Int     degree,
+                        FT_Fixed*  kerning )
+  {
+    AFM_FontInfo  fi = (AFM_FontInfo)( (T1_Face)face )->afm_data;
+    FT_Int        i;
+
+
+    if ( !fi )
+      return T1_Err_Invalid_Argument;
+
+    for ( i = 0; i < fi->NumTrackKern; i++ )
+    {
+      AFM_TrackKern  tk = fi->TrackKerns + i;
+
+
+      if ( tk->degree != degree )
+        continue;
+
+      if ( ptsize < tk->min_ptsize )
+        *kerning = tk->min_kern;
+      else if ( ptsize > tk->max_ptsize )
+        *kerning = tk->max_kern;
+      else
+      {
+        *kerning = FT_MulDiv( ptsize - tk->min_ptsize,
+                              tk->max_kern - tk->min_kern,
+                              tk->max_ptsize - tk->min_ptsize ) +
+                   tk->min_kern;
+      }
+    }
+
+    return T1_Err_Ok;
+  }
+
+
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006 by                   */
+a20 1
+#include "t1errors.h"
+d22 1
+a22 1
+#include FT_INTERNAL_POSTSCRIPT_AUX_H
+d36 2
+a37 2
+  T1_Done_Metrics( FT_Memory     memory,
+                   AFM_FontInfo  fi )
+d39 41
+a79 2
+    FT_FREE( fi->KernPairs );
+    fi->NumKernPair = 0;
+a80 2
+    FT_FREE( fi->TrackKerns );
+    fi->NumTrackKern = 0;
+d82 19
+a100 1
+    FT_FREE( fi );
+d104 4
+a107 5
+  /* read a glyph name and return the equivalent glyph index */
+  static FT_Int
+  t1_get_index( const char*  name,
+                FT_UInt      len,
+                void*        user_data )
+d109 3
+a111 2
+    T1_Font  type1 = (T1_Font)user_data;
+    FT_Int   n;
+d114 2
+a115 1
+    for ( n = 0; n < type1->num_glyphs; n++ )
+d117 3
+a119 1
+      char*  gname = (char*)type1->glyph_names[n];
+d121 2
+d124 4
+a127 4
+      if ( gname && gname[0] == name[0]        &&
+           ft_strlen( gname ) == len           &&
+           ft_strncmp( gname, name, len ) == 0 )
+        return n;
+d129 1
+d131 1
+a131 1
+    return 0;
+d144 2
+a145 2
+    AFM_KernPair  pair1 = (AFM_KernPair)a;
+    AFM_KernPair  pair2 = (AFM_KernPair)b;
+d147 2
+a148 2
+    FT_ULong  index1 = KERN_INDEX( pair1->index1, pair1->index2 );
+    FT_ULong  index2 = KERN_INDEX( pair2->index1, pair2->index2 );
+d155 4
+a158 5
+  /* parse a PFM file -- for now, only read the kerning pairs */
+  static FT_Error
+  T1_Read_PFM( FT_Face       t1_face,
+               FT_Stream     stream,
+               AFM_FontInfo  fi )
+d160 9
+a168 10
+    FT_Error      error = T1_Err_Ok;
+    FT_Memory     memory = stream->memory;
+    FT_Byte*      start;
+    FT_Byte*      limit;
+    FT_Byte*      p;
+    AFM_KernPair  kp;
+    FT_Int        width_table_length;
+    FT_CharMap    oldcharmap;
+    FT_CharMap    charmap;
+    FT_Int        n;
+d171 3
+d178 4
+a181 4
+    /* Figure out how long the width table is.          */
+    /* This info is a little-endian short at offset 99. */
+    p = start + 99;
+    if ( p + 2 > limit )
+d183 2
+a184 30
+      error = T1_Err_Unknown_File_Format;
+      goto Exit;
+    }
+    width_table_length = FT_PEEK_USHORT_LE( p );
+
+    p += 18 + width_table_length;
+    if ( p + 0x12 > limit || FT_PEEK_USHORT_LE( p ) < 0x12 )
+      /* extension table is probably optional */
+      goto Exit;
+
+    /* Kerning offset is 14 bytes from start of extensions table. */
+    p += 14;
+    p = start + FT_PEEK_ULONG_LE( p );
+
+    if ( p == start )
+      /* zero offset means no table */
+      goto Exit;
+
+    if ( p + 2 > limit )
+    {
+      error = T1_Err_Unknown_File_Format;
+      goto Exit;
+    }
+
+    fi->NumKernPair = FT_PEEK_USHORT_LE( p );
+    p += 2;
+    if ( p + 4 * fi->NumKernPair > limit )
+    {
+      error = T1_Err_Unknown_File_Format;
+      goto Exit;
+d188 1
+a188 1
+    if ( fi->NumKernPair == 0 )
+d192 1
+a192 1
+    if ( FT_QNEW_ARRAY( fi->KernPairs, fi->NumKernPair ) )
+d196 2
+a197 2
+    kp             = fi->KernPairs;
+    limit          = p + 4 * fi->NumKernPair;
+d199 2
+a200 6
+    /* PFM kerning data are stored by encoding rather than glyph index, */
+    /* so find the PostScript charmap of this font and install it       */
+    /* temporarily.  If we find no PostScript charmap, then just use    */
+    /* the default and hope it is the right one.                        */
+    oldcharmap = t1_face->charmap;
+    charmap    = NULL;
+d202 3
+a204 1
+    for ( n = 0; n < t1_face->num_charmaps; n++ )
+d206 1
+a206 3
+      charmap = t1_face->charmaps[n];
+      /* check against PostScript pseudo platform */
+      if ( charmap->platform_id == 7 )
+d208 7
+a214 6
+        error = FT_Set_Charmap( t1_face, charmap );
+        if ( error )
+          goto Exit;
+        break;
+      }
+    }
+d216 3
+a218 9
+    /* Kerning info is stored as:             */
+    /*                                        */
+    /*   encoding of first glyph (1 byte)     */
+    /*   encoding of second glyph (1 byte)    */
+    /*   offset (little-endian short)         */
+    for ( ; p < limit ; p += 4 )
+    {
+      kp->index1 = FT_Get_Char_Index( t1_face, p[0] );
+      kp->index2 = FT_Get_Char_Index( t1_face, p[1] );
+d220 3
+a222 2
+      kp->x = (FT_Int)FT_PEEK_USHORT_LE(p + 2);
+      kp->y = 0;
+d224 2
+a225 1
+      kp++;
+a227 5
+    if ( oldcharmap != NULL )
+      error = FT_Set_Charmap( t1_face, oldcharmap );
+    if ( error )
+      goto Exit;
+
+d229 1
+a229 1
+    ft_qsort( fi->KernPairs, fi->NumKernPair, sizeof ( AFM_KernPairRec ),
+d234 1
+a234 84
+    {
+      FT_FREE( fi->KernPairs );
+      fi->NumKernPair = 0;
+    }
+
+    return error;
+  }
+
+
+  /* parse a metrics file -- either AFM or PFM depending on what */
+  /* it turns out to be                                          */
+  FT_LOCAL_DEF( FT_Error )
+  T1_Read_Metrics( FT_Face    t1_face,
+                   FT_Stream  stream )
+  {
+    PSAux_Service  psaux;
+    FT_Memory      memory = stream->memory;
+    AFM_ParserRec  parser;
+    AFM_FontInfo   fi;
+    FT_Error       error = T1_Err_Unknown_File_Format;
+    T1_Font        t1_font = &( (T1_Face)t1_face )->type1;
+
+
+    if ( FT_NEW( fi ) )
+      return error;
+
+    if ( FT_FRAME_ENTER( stream->size ) )
+    {
+      FT_FREE( fi );
+      return error;
+    }
+
+    fi->FontBBox  = t1_font->font_bbox;
+    fi->Ascender  = t1_font->font_bbox.yMax;
+    fi->Descender = t1_font->font_bbox.yMin;
+
+    psaux = (PSAux_Service)( (T1_Face)t1_face )->psaux;
+    if ( psaux && psaux->afm_parser_funcs )
+    {
+      error = psaux->afm_parser_funcs->init( &parser,
+                                             stream->memory,
+                                             stream->cursor,
+                                             stream->limit );
+
+      if ( !error )
+      {
+        parser.FontInfo  = fi;
+        parser.get_index = t1_get_index;
+        parser.user_data = t1_font;
+
+        error = psaux->afm_parser_funcs->parse( &parser );
+        psaux->afm_parser_funcs->done( &parser );
+      }
+    }
+
+    if ( error == T1_Err_Unknown_File_Format )
+    {
+      FT_Byte*  start = stream->cursor;
+
+
+      if ( stream->size > 6                              &&
+           start[0] == 0x00 && start[1] == 0x01          &&
+           FT_PEEK_ULONG_LE( start + 2 ) == stream->size )
+        error = T1_Read_PFM( t1_face, stream, fi );
+    }
+
+    if ( !error )
+    {
+      t1_font->font_bbox = fi->FontBBox;
+
+      t1_face->bbox.xMin =   fi->FontBBox.xMin             >> 16;
+      t1_face->bbox.yMin =   fi->FontBBox.yMin             >> 16;
+      t1_face->bbox.xMax = ( fi->FontBBox.xMax + 0xFFFFU ) >> 16;
+      t1_face->bbox.yMax = ( fi->FontBBox.yMax + 0xFFFFU ) >> 16;
+
+      t1_face->ascender  = (FT_Short)( ( fi->Ascender  + 0x8000U ) >> 16 );
+      t1_face->descender = (FT_Short)( ( fi->Descender + 0x8000U ) >> 16 );
+
+      if ( fi->NumKernPair )
+      {
+        t1_face->face_flags |= FT_FACE_FLAG_KERNING;
+        ( (T1_Face)t1_face )->afm_data = fi;
+      }
+    }
+d244 4
+a247 4
+  T1_Get_Kerning( AFM_FontInfo  fi,
+                  FT_UInt       glyph1,
+                  FT_UInt       glyph2,
+                  FT_Vector*    kerning )
+d249 1
+a249 1
+    AFM_KernPair  min, mid, max;
+d254 2
+a255 2
+    min = fi->KernPairs;
+    max = min + fi->NumKernPair - 1;
+d263 1
+a263 1
+      midi = KERN_INDEX( mid->index1, mid->index2 );
+d267 1
+a267 3
+        kerning->x = mid->x;
+        kerning->y = mid->y;
+
+a281 38
+  FT_LOCAL_DEF( FT_Error )
+  T1_Get_Track_Kerning( FT_Face    face,
+                        FT_Fixed   ptsize,
+                        FT_Int     degree,
+                        FT_Fixed*  kerning )
+  {
+    AFM_FontInfo  fi = (AFM_FontInfo)( (T1_Face)face )->afm_data;
+    FT_Int        i;
+
+
+    if ( !fi )
+      return T1_Err_Invalid_Argument;
+
+    for ( i = 0; i < fi->NumTrackKern; i++ )
+    {
+      AFM_TrackKern  tk = fi->TrackKerns + i;
+
+
+      if ( tk->degree != degree )
+        continue;
+
+      if ( ptsize < tk->min_ptsize )
+        *kerning = tk->min_kern;
+      else if ( ptsize > tk->max_ptsize )
+        *kerning = tk->max_kern;
+      else
+      {
+        *kerning = FT_MulDiv( ptsize - tk->min_ptsize,
+                              tk->max_kern - tk->min_kern,
+                              tk->max_ptsize - tk->min_ptsize ) +
+                   tk->min_kern;
+      }
+    }
+
+    return T1_Err_Ok;
+  }
+
+
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 by */
+d53 1
+a53 1
+                FT_Offset    len,
+a59 4
+    /* PS string/name length must be < 16-bit */
+    if ( len > 0xFFFFU )
+      return 0;
+
+d76 1
+a76 1
+#define KERN_INDEX( g1, g2 )  ( ( (FT_ULong)(g1) << 16 ) | (g2) )
+d91 1
+a91 6
+    if ( index1 > index2 )
+      return 1;
+    else if ( index1 < index2 )
+      return -1;
+    else
+      return 0;
+d196 1
+a196 1
+      kp->x = (FT_Int)FT_PEEK_SHORT_LE(p + 2);
+d236 8
+a243 3
+    if ( FT_NEW( fi )                   ||
+         FT_FRAME_ENTER( stream->size ) )
+      goto Exit;
+a272 1
+      /* MS Windows allows versions up to 0x3FF without complaining */
+d274 1
+a274 1
+           start[1] < 4                                  &&
+d283 7
+a289 9
+      t1_face->bbox.xMin =   fi->FontBBox.xMin            >> 16;
+      t1_face->bbox.yMin =   fi->FontBBox.yMin            >> 16;
+      /* no `U' suffix here to 0xFFFF! */
+      t1_face->bbox.xMax = ( fi->FontBBox.xMax + 0xFFFF ) >> 16;
+      t1_face->bbox.yMax = ( fi->FontBBox.yMax + 0xFFFF ) >> 16;
+
+      /* no `U' suffix here to 0x8000! */
+      t1_face->ascender  = (FT_Short)( ( fi->Ascender  + 0x8000 ) >> 16 );
+      t1_face->descender = (FT_Short)( ( fi->Descender + 0x8000 ) >> 16 );
+a294 1
+        fi = NULL;
+a299 4
+  Exit:
+    if ( fi != NULL )
+      T1_Done_Metrics( memory, fi );
+
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+d21 1
+a21 1
+#include FT_INTERNAL_DEBUG_H
+a23 1
+#include "t1errors.h"
+d110 1
+a110 1
+    FT_Error      error  = FT_Err_Ok;
+d124 1
+d131 1
+a131 1
+      error = FT_THROW( Unknown_File_Format );
+d151 1
+a151 1
+      error = FT_THROW( Unknown_File_Format );
+d159 1
+a159 1
+      error = FT_THROW( Unknown_File_Format );
+d172 2
+a173 2
+    kp    = fi->KernPairs;
+    limit = p + 4 * fi->NumKernPair;
+d200 1
+a200 1
+    for ( ; p < limit; p += 4 )
+d211 1
+a211 1
+    if ( oldcharmap )
+d238 1
+a238 1
+    FT_Memory      memory  = stream->memory;
+d240 3
+a242 5
+    AFM_FontInfo   fi      = NULL;
+    FT_Error       error   = FT_ERR( Unknown_File_Format );
+    T1_Face        face    = (T1_Face)t1_face;
+    T1_Font        t1_font = &face->type1;
+
+a243 8
+    if ( face->afm_data )
+    {
+      FT_TRACE1(( "T1_Read_Metrics:"
+                  " Freeing previously attached metrics data.\n" ));
+      T1_Done_Metrics( memory, (AFM_FontInfo)face->afm_data );
+
+      face->afm_data = NULL;
+    }
+d253 2
+a254 2
+    psaux = (PSAux_Service)face->psaux;
+    if ( psaux->afm_parser_funcs )
+d272 1
+a272 1
+    if ( FT_ERR_EQ( error, Unknown_File_Format ) )
+d301 2
+a302 2
+        face->afm_data       = fi;
+        fi                   = NULL;
+d309 1
+a309 1
+    if ( fi )
+d365 1
+a365 1
+    FT_UInt       i;
+d369 1
+a369 1
+      return FT_THROW( Invalid_Argument );
+d392 1
+a392 1
+    return FT_Err_Ok;
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

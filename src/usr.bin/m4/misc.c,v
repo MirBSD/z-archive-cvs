@@ -1,0 +1,842 @@
+head	1.5;
+access;
+symbols
+	cvs-200911172100:1.1.1.5
+	cvs-200908101645:1.1.1.4
+	cvs-200810051545:1.1.1.4
+	MIRBSD_10:1.1.1.3.0.2
+	MIRBSD_10_BASE:1.1.1.3
+	OPENBSD_4_0:1.1.1.3
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	cvs-200504170300:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2016.10.22.21.25.19;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100580BD95570B7AB60;
+
+1.4
+date	2009.11.22.14.39.59;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004B094D4B2DC70993;
+
+1.3
+date	2009.11.17.20.58.28;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004B030E6331AD46CC;
+
+1.2
+date	2009.11.17.19.55.59;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	1004B02FFBC169D69B3;
+
+1.1
+date	2005.02.05.17.29.42;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.42;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.59.46;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2006.09.20.19.06.52;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	10045119150397FC669;
+
+1.1.1.4
+date	2008.10.05.15.56.01;	author tg;	state Exp;
+branches;
+next	1.1.1.5;
+commitid	10048E8E3980BD9A84E;
+
+1.1.1.5
+date	2009.11.17.21.01.44;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004B030F47588DC904;
+
+
+desc
+@@
+
+
+1.5
+log
+@make __CRAZY=Yes ready
+@
+text
+@/*	$OpenBSD: misc.c,v 1.41 2009/10/14 17:19:47 sthen Exp $	*/
+/*	$NetBSD: misc.c,v 1.6 1995/09/28 05:37:41 tls Exp $	*/
+
+/*
+ * Copyright (c) 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Ozan Yigit at York University.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+#include <errno.h>
+#include <unistd.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stddef.h>
+#include <string.h>
+#include <err.h>
+#include "mdef.h"
+#include "stdd.h"
+#include "extern.h"
+#include "pathnames.h"
+
+__RCSID("$MirOS: src/usr.bin/m4/misc.c,v 1.4 2009/11/22 14:39:59 tg Exp $");
+
+char *ep;		/* first free char in strspace */
+static char *strspace;	/* string space for evaluation */
+char *endest;		/* end of string space	       */
+static size_t strsize = STRSPMAX;
+static size_t bufsize = BUFSIZE;
+
+unsigned char *buf;			/* push-back buffer	       */
+unsigned char *bufbase;			/* the base for current ilevel */
+unsigned char *bbase[MAXINP];		/* the base for each ilevel    */
+unsigned char *bp; 			/* first available character   */
+unsigned char *endpbb;			/* end of push-back buffer     */
+
+
+/*
+ * find the index of second str in the first str.
+ */
+ptrdiff_t
+indx(const char *s1, const char *s2)
+{
+	char *t;
+
+	t = strstr(s1, s2);
+	if (t == NULL)
+		return (-1);
+	else
+		return (t - s1);
+}
+/*
+ *  pushback - push character back onto input
+ */
+void
+pushback(int c)
+{
+	if (c == EOF)
+		return;
+	if (bp >= endpbb)
+		enlarge_bufspace();
+	*bp++ = c;
+}
+
+/*
+ *  pbstr - push string back onto input
+ *          pushback is replicated to improve
+ *          performance.
+ */
+void
+pbstr(const char *s)
+{
+	size_t n;
+
+	n = strlen(s);
+	while (endpbb - bp <= n)
+		enlarge_bufspace();
+	while (n > 0)
+		*bp++ = s[--n];
+}
+
+/*
+ *  pbnum - convert number to string, push back on input.
+ */
+void
+pbnum(int n)
+{
+	pbnumbase(n, 10, 0);
+}
+
+void
+pbnumbase(int n, int base, int d)
+{
+	static char digits[36] = "0123456789abcdefghijklmnopqrstuvwxyz";
+	int num;
+	int printed = 0;
+
+	if (base > 36)
+		m4errx(1, "base %d > 36: not supported.", base);
+
+	if (base < 2)
+		m4errx(1, "bad base %d for conversion.", base);
+
+	num = (n < 0) ? -n : n;
+	do {
+		pushback(digits[num % base]);
+		printed++;
+	}
+	while ((num /= base) > 0);
+
+	if (n < 0)
+		printed++;
+	while (printed++ < d)
+		pushback('0');
+
+	if (n < 0)
+		pushback('-');
+}
+
+/*
+ *  pbunsigned - convert unsigned long to string, push back on input.
+ */
+void
+pbunsigned(unsigned long n)
+{
+	do {
+		pushback(n % 10 + '0');
+	}
+	while ((n /= 10) > 0);
+}
+
+void 
+initspaces(void)
+{
+	int i;
+
+	strspace = xalloc(strsize+1, NULL);
+	ep = strspace;
+	endest = strspace+strsize;
+	buf = (unsigned char *)xalloc(bufsize, NULL);
+	bufbase = buf;
+	bp = buf;
+	endpbb = buf + bufsize;
+	for (i = 0; i < MAXINP; i++)
+		bbase[i] = buf;
+}
+
+void 
+enlarge_strspace(void)
+{
+	char *newstrspace;
+	int i;
+
+	strsize *= 2;
+	newstrspace = malloc(strsize + 1);
+	if (!newstrspace)
+		errx(1, "string space overflow");
+	memcpy(newstrspace, strspace, strsize/2);
+	for (i = 0; i <= sp; i++) 
+		if (sstack[i])
+			mstack[i].sstr = (mstack[i].sstr - strspace) 
+			    + newstrspace;
+	ep = (ep-strspace) + newstrspace;
+	free(strspace);
+	strspace = newstrspace;
+	endest = strspace + strsize;
+}
+
+void
+enlarge_bufspace(void)
+{
+	unsigned char *newbuf;
+	int i;
+
+	bufsize += bufsize/2;
+	newbuf = xrealloc(buf, bufsize, "too many characters pushed back");
+	for (i = 0; i < MAXINP; i++)
+		bbase[i] = (bbase[i]-buf)+newbuf;
+	bp = (bp-buf)+newbuf;
+	bufbase = (bufbase-buf)+newbuf;
+	buf = newbuf;
+	endpbb = buf+bufsize;
+}
+
+/*
+ *  chrsave - put single char on string space
+ */
+void
+chrsave(int c)
+{
+	if (ep >= endest) 
+		enlarge_strspace();
+	*ep++ = c;
+}
+
+/*
+ * read in a diversion file, and dispose it.
+ */
+void
+getdiv(int n)
+{
+	int c;
+
+	if (active == outfile[n])
+		m4errx(1, "undivert: diversion still active.");
+	rewind(outfile[n]);
+	while ((c = getc(outfile[n])) != EOF)
+		putc(c, active);
+	(void) fclose(outfile[n]);
+	outfile[n] = NULL;
+}
+
+void
+onintr(int signo)
+{
+#define intrmessage	"m4: interrupted.\n"
+	write(STDERR_FILENO, intrmessage, sizeof(intrmessage)-1);
+	_exit(1);
+}
+
+/*
+ * killdiv - get rid of the diversion files
+ */
+void
+killdiv(void)
+{
+	int n;
+
+	for (n = 0; n < maxout; n++)
+		if (outfile[n] != NULL) {
+			(void) fclose(outfile[n]);
+		}
+}
+
+extern char *__progname;
+
+void
+m4errx(int rv, const char *fmt, ...)
+{
+	fprintf(stderr, "%s: ", __progname);
+	fprintf(stderr, "%s at line %lu: ", CURRENT_NAME, CURRENT_LINE);
+	if (fmt != NULL) {
+		va_list ap;
+
+		va_start(ap, fmt);
+		vfprintf(stderr, fmt, ap);
+		va_end(ap);
+	}
+	fprintf(stderr, "\n");
+	exit(rv);
+}
+
+/*
+ * resizedivs: allocate more diversion files */
+void
+resizedivs(int n)
+{
+	int i;
+
+	outfile = (FILE **)xrealloc(outfile, sizeof(FILE *) * n, 
+	    "too many diverts %d", n);
+	for (i = maxout; i < n; i++)
+		outfile[i] = NULL;
+	maxout = n;
+}
+
+void *
+xalloc(size_t n, const char *fmt, ...)
+{
+	void *p = malloc(n);
+
+	if (p == NULL) {
+		if (fmt == NULL)
+			err(1, "malloc");
+		else {
+			va_list va;
+			
+			va_start(va, fmt);
+			verr(1, fmt, va);
+			va_end(va);
+		}
+	}
+	return p;
+}
+
+void *
+xrealloc(void *old, size_t n, const char *fmt, ...)
+{
+	char *p = realloc(old, n);
+
+	if (p == NULL) {
+		free(old);
+		if (fmt == NULL)
+			err(1, "realloc");
+		else {
+			va_list va;
+
+			va_start(va, fmt);
+			verr(1, fmt, va);
+			va_end(va);
+	    	}
+	}
+	return p;
+}
+
+char *
+xstrdup(const char *s)
+{
+	char *p = strdup(s);
+	if (p == NULL)
+		err(1, "strdup");
+	return p;
+}
+
+void
+usage(void)
+{
+	fprintf(stderr, "usage: m4 [-gPs] [-Dname[=value]] [-d flags] "
+			"[-I dirname] [-o filename]\n"
+			"\t[-t macro] [-Uname] [file ...]\n");
+	exit(1);
+}
+
+int 
+obtain_char(struct input_file *f)
+{
+	if (f->c == EOF)
+		return EOF;
+
+	f->c = fgetc(f->file);
+	if (f->c == '\n')
+		f->lineno++;
+
+	return f->c;
+}
+
+void 
+set_input(struct input_file *f, FILE *real, const char *name)
+{
+	f->file = real;
+	f->lineno = 1;
+	f->c = 0;
+	f->name = xstrdup(name);
+	emit_synchline();
+}
+
+void
+do_emit_synchline(void)
+{
+	fprintf(active, "#line %lu \"%s\"\n",
+	    infile[ilevel].lineno, infile[ilevel].name);
+	infile[ilevel].synch_lineno = infile[ilevel].lineno;
+}
+
+void 
+release_input(struct input_file *f)
+{
+	if (f->file != stdin)
+	    fclose(f->file);
+	f->c = EOF;
+	/*
+	 * XXX can't free filename, as there might still be 
+	 * error information pointing to it.
+	 */
+}
+
+void
+doprintlineno(struct input_file *f)
+{
+	pbunsigned(TOKEN_LINE(f));
+}
+
+void
+doprintfilename(struct input_file *f)
+{
+	pbstr(rquote);
+	pbstr(f->name);
+	pbstr(lquote);
+}
+
+/* 
+ * buffer_mark/dump_buffer: allows one to save a mark in a buffer,
+ * and later dump everything that was added since then to a file.
+ */
+size_t
+buffer_mark(void)
+{
+	return bp - buf;
+}
+
+
+void
+dump_buffer(FILE *f, size_t m)
+{
+	unsigned char *s;
+
+	for (s = bp; s-buf > m;)
+		fputc(*--s, f);
+}
+@
+
+
+1.4
+log
+@fix another line number problem with our m4(1)
+@
+text
+@d50 1
+a50 1
+__RCSID("$MirOS$");
+d160 1
+a160 1
+initspaces()
+d176 1
+a176 1
+enlarge_strspace()
+d197 1
+a197 1
+enlarge_bufspace()
+d252 1
+a252 1
+killdiv()
+d265 1
+a265 1
+m4errx(int eval, const char *fmt, ...)
+d277 1
+a277 1
+	exit(eval);
+d343 1
+a343 1
+usage()
+d375 1
+a375 1
+do_emit_synchline()
+d413 1
+a413 1
+buffer_mark()
+@
+
+
+1.3
+log
+@revert commitid 1004B02FFBC169D69B3 by bsiegert@@
+
+this is not subversion; cvs has vendor branches, and we use them;
+your commit incidentally switched the HEAD tag from 1.1 to 1.3,
+meaning more work in the future for me when merging m4... thanks.
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.40 2008/08/21 20:59:14 espie Exp $	*/
+d50 1
+d345 1
+a345 1
+	fprintf(stderr, "usage: m4 [-gs] [-Dname[=value]] [-d flags] "
+d397 1
+a397 1
+	pbunsigned(f->lineno);
+@
+
+
+1.2
+log
+@Pull in recent changes from OpenBSD, essentially the following:
+
+Support the -P option from gnu m4, which prefixes builtins with the
+string m4_.
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.41 2009/10/14 17:19:47 sthen Exp $	*/
+d344 1
+a344 1
+	fprintf(stderr, "usage: m4 [-gPs] [-Dname[=value]] [-d flags] "
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.30 2003/11/17 17:12:10 espie Exp $	*/
+a35 8
+#ifndef lint
+#if 0
+static char sccsid[] = "@@(#)misc.c	8.1 (Berkeley) 6/6/93";
+#else
+static char rcsid[] = "$OpenBSD: misc.c,v 1.30 2003/11/17 17:12:10 espie Exp $";
+#endif
+#endif /* not lint */
+
+d57 5
+a61 5
+char *buf;			/* push-back buffer	       */
+char *bufbase;			/* the base for current ilevel */
+char *bbase[MAXINP];		/* the base for each ilevel    */
+char *bp; 			/* first available character   */
+char *endpbb;			/* end of push-back buffer     */
+d79 1
+a79 1
+ *  putback - push character back onto input
+d82 1
+a82 1
+putback(int c)
+d93 1
+a93 1
+ *          putback is replicated to improve
+d114 7
+d122 7
+d132 2
+a133 1
+		putback(num % 10 + '0');
+d135 1
+a135 1
+	while ((num /= 10) > 0);
+d138 6
+a143 1
+		putback('-');
+d153 1
+a153 1
+		putback(n % 10 + '0');
+d166 1
+a166 1
+	buf = (char *)xalloc(bufsize, NULL);
+d198 1
+a198 1
+	char *newbuf;
+d231 1
+a231 1
+		errx(1, "undivert: diversion still active");
+d261 18
+d344 3
+a346 1
+	fprintf(stderr, "usage: m4 [-gs] [-d flags] [-t macro] [-o file] [-Dname[=val]] [-Uname] [-I dirname...]\n");
+d355 3
+a357 1
+	else if (f->c == '\n')
+a359 1
+	f->c = fgetc(f->file);
+d421 1
+a421 1
+	char *s;
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.31 2005/05/29 18:44:36 espie Exp $	*/
+d40 1
+a40 1
+static char rcsid[] = "$OpenBSD: misc.c,v 1.31 2005/05/29 18:44:36 espie Exp $";
+a121 7
+	pbnumbase(n, 10, 0);
+}
+
+void
+pbnumbase(int n, int base, int d)
+{
+	static char digits[36] = "0123456789abcdefghijklmnopqrstuvwxyz";
+a122 7
+	int printed = 0;
+
+	if (base > 36)
+		errx(1, "base %d > 36: not supported", base);
+
+	if (base < 2)
+		errx(1, "bad base %d for conversion", base);
+d126 1
+a126 2
+		putback(digits[num % base]);
+		printed++;
+d128 1
+a128 6
+	while ((num /= base) > 0);
+
+	if (n < 0)
+		printed++;
+	while (printed++ < d)
+		putback('0');
+@
+
+
+1.1.1.3
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.35 2006/03/20 10:55:19 espie Exp $	*/
+d36 8
+d87 1
+a87 1
+ *  pushback - push character back onto input
+d90 1
+a90 1
+pushback(int c)
+d101 1
+a101 1
+ *          pushback is replicated to improve
+d133 1
+a133 1
+		m4errx(1, "base %d > 36: not supported.", base);
+d136 1
+a136 1
+		m4errx(1, "bad base %d for conversion.", base);
+d140 1
+a140 1
+		pushback(digits[num % base]);
+d148 1
+a148 1
+		pushback('0');
+d151 1
+a151 1
+		pushback('-');
+d161 1
+a161 1
+		pushback(n % 10 + '0');
+d239 1
+a239 1
+		m4errx(1, "undivert: diversion still active.");
+a268 17
+extern char *__progname;
+
+void
+m4errx(int eval, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	fprintf(stderr, "%s: ", __progname);
+	fprintf(stderr, "%s at line %lu: ", CURRENT_NAME, CURRENT_LINE);
+	if (fmt != NULL)
+		vfprintf(stderr, fmt, ap);
+	fprintf(stderr, "\n");
+	exit(eval);
+	va_end(ap);
+}
+
+d334 1
+a334 1
+	fprintf(stderr, "usage: m4 [-gs] [-Dname[=value]] [-d flags] [-I dirname] [-o filename] [-t macro] [-Uname]\n");
+d343 2
+a346 3
+	if (f->c == '\n')
+		f->lineno++;
+
+@
+
+
+1.1.1.4
+log
+@Import OpenBSD’s latest m4 changes, in which Marc Espie fixed autoconf-2.62
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.40 2008/08/21 20:59:14 espie Exp $	*/
+d57 5
+a61 5
+unsigned char *buf;			/* push-back buffer	       */
+unsigned char *bufbase;			/* the base for current ilevel */
+unsigned char *bbase[MAXINP];		/* the base for each ilevel    */
+unsigned char *bp; 			/* first available character   */
+unsigned char *endpbb;			/* end of push-back buffer     */
+d166 1
+a166 1
+	buf = (unsigned char *)xalloc(bufsize, NULL);
+d198 1
+a198 1
+	unsigned char *newbuf;
+d266 3
+d271 1
+a271 4
+	if (fmt != NULL) {
+		va_list ap;
+
+		va_start(ap, fmt);
+a272 2
+		va_end(ap);
+	}
+d275 1
+d343 1
+a343 3
+	fprintf(stderr, "usage: m4 [-gs] [-Dname[=value]] [-d flags] "
+			"[-I dirname] [-o filename]\n"
+			"\t[-t macro] [-Uname] [file ...]\n");
+d418 1
+a418 1
+	unsigned char *s;
+@
+
+
+1.1.1.5
+log
+@Import new m4(1) from OpenBSD
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: misc.c,v 1.41 2009/10/14 17:19:47 sthen Exp $	*/
+d344 1
+a344 1
+	fprintf(stderr, "usage: m4 [-gPs] [-Dname[=value]] [-d flags] "
+@
+
+

@@ -1,0 +1,352 @@
+head	1.6;
+access;
+symbols
+	MIRBSD_10:1.6.0.2
+	MIRBSD_10_BASE:1.6
+	cvs-200706211400:1.1.1.2
+	MIRBSD_9_BASE:1.5
+	MIRBSD_8:1.5.0.2
+	MIRBSD_8_BASE:1.5
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2007.06.21.14.17.07;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100467A885746F6DDD6;
+
+1.5
+date	2005.11.24.13.20.33;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	11f34385be32929b;
+
+1.4
+date	2005.11.17.20.58.17;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	140f437ceef4dacf;
+
+1.3
+date	2005.09.01.23.14.22;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	66da43178b5b535b;
+
+1.2
+date	2005.02.23.20.36.53;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.29.42;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.42;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2007.06.21.14.01.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	100467A84A665BF4A08;
+
+
+desc
+@@
+
+
+1.6
+log
+@• merge
+• make const-clean(er) again *sigh*
+@
+text
+@/**	$MirOS: src/usr.bin/make/generate.c,v 1.5 2005/11/24 13:20:33 tg Exp $ */
+/*	$OpenPackages$ */
+/*	$OpenBSD: generate.c,v 1.6 2006/01/20 23:10:19 espie Exp $ */
+
+/*
+ * Copyright (c) 2001 Marc Espie.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE OPENBSD PROJECT AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OPENBSD
+ * PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <stddef.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+#include "stats.h"
+#include "ohash.h"
+#include "cond_int.h"
+#include "var_int.h"
+#include "defines.h"
+
+__RCSID("$MirOS: src/usr.bin/make/generate.c,v 1.5 2005/11/24 13:20:33 tg Exp $");
+
+#define M(x)	x, #x
+const char *table_var[] = {
+	M(TARGET),
+	M(OODATE),
+	M(ALLSRC),
+	M(GNUALLSRC),
+	M(IMPSRC),
+	M(PREFIX),
+	M(ARCHIVE),
+	M(MEMBER),
+	M(LONGTARGET),
+	M(LONGOODATE),
+	M(LONGALLSRC),
+	M(LONGIMPSRC),
+	M(LONGPREFIX),
+	M(LONGARCHIVE),
+	M(LONGMEMBER),
+	M(FTARGET),
+	M(DTARGET),
+	M(FPREFIX),
+	M(DPREFIX),
+	M(FARCHIVE),
+	M(DARCHIVE),
+	M(FMEMBER),
+	M(DMEMBER),
+	NULL
+};
+
+const char *table_cond[] = {
+	M(COND_IF),
+	M(COND_IFDEF),
+	M(COND_IFNDEF),
+	M(COND_IFMAKE),
+	M(COND_IFNMAKE),
+	M(COND_ELSE),
+	M(COND_ELIF),
+	M(COND_ELIFDEF),
+	M(COND_ELIFNDEF),
+	M(COND_ELIFMAKE),
+	M(COND_ELIFNMAKE),
+	M(COND_ENDIF),
+	M(COND_FOR),
+	M(COND_ENDFOR),
+	M(COND_INCLUDE),
+	M(COND_UNDEF),
+	M(COND_UERR),
+	M(COND_TRACE),
+	NULL
+};
+
+
+const char **table[] = {
+	table_var,
+	table_cond
+};
+
+int
+main(int argc, char *argv[])
+{
+	uint32_t i;
+	uint32_t v;
+	uint32_t h;
+	uint32_t slots;
+	const char *e;
+	const char **occupied;
+	const char **t;
+	int tn;
+
+	Init_Stats();
+	if (argc != 3)
+		exit(1);
+
+	tn = atoi(argv[1]);
+	if (!tn)
+		exit(1);
+	t = table[tn-1];
+	slots = atoi(argv[2]);
+	if (slots) {
+		occupied = malloc(sizeof(char *) * slots);
+		if (!occupied)
+			exit(1);
+		for (i = 0; i < slots; i++)
+			occupied[i] = NULL;
+	} else
+		occupied = NULL;
+
+	printf("/* File created by generate %d %d, do not edit */\n",
+	    tn, slots);
+	for (i = 0; t[i] != NULL; i++) {
+		e = NULL;
+		v = ohash_interval(t[i], &e);
+		if (slots) {
+			h = v % slots;
+			if (occupied[h]) {
+				fprintf(stderr,
+				    "Collision: %s / %s (%d)\n", occupied[h],
+				    t[i], h);
+				exit(1);
+			}
+			occupied[h] = t[i];
+		}
+		i++;
+		printf("#define K_%s %u\n", t[i], v);
+	}
+	if (slots)
+		printf("#define MAGICSLOTS%d %u\n", tn, slots);
+	exit(0);
+}
+@
+
+
+1.5
+log
+@make __CRAZY clean
+@
+text
+@d1 3
+a3 2
+/**	$MirOS: src/usr.bin/make/generate.c,v 1.4 2005/11/17 20:58:17 tg Exp $ */
+/*	$OpenBSD: generate.c,v 1.5 2002/06/11 21:12:11 espie Exp $ */
+d32 1
+d41 1
+a41 1
+__RCSID("$MirOS: src/usr.bin/make/generate.c,v 1.4 2005/11/17 20:58:17 tg Exp $");
+d102 4
+a105 4
+	u_int32_t i;
+	u_int32_t v;
+	u_int32_t h;
+	u_int32_t slots;
+@
+
+
+1.4
+log
+@Implement .trace, � la .error
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.bin/make/generate.c,v 1.3 2005/09/01 23:14:22 tg Exp $ */
+d39 1
+a39 1
+__RCSID("$MirOS: src/usr.bin/make/generate.c,v 1.3 2005/09/01 23:14:22 tg Exp $");
+d42 1
+a42 1
+char *table_var[] = {
+d69 1
+a69 1
+char *table_cond[] = {
+d92 1
+a92 1
+char **table[] = {
+d105 2
+a106 2
+	char **occupied;
+	char **t;
+d127 1
+a127 1
+	printf("/* File created by generate %d %d, do not edit */\n", 
+d135 1
+a135 1
+				fprintf(stderr, 
+@
+
+
+1.3
+log
+@implement .error
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/usr.bin/make/generate.c,v 1.2 2005/02/23 20:36:53 tg Exp $ */
+d39 1
+a39 1
+__RCSID("$MirOS: src/usr.bin/make/generate.c,v 1.2 2005/02/23 20:36:53 tg Exp $");
+d87 1
+@
+
+
+1.2
+log
+@* merge make from ncvs 1
+* reduce diff in the amount of whitespace to facilitate
+  easier future merges of OpenBSD, in the hope they'll
+  ever fix that in their CVS *sigh*
+* sane MACHINE{,_ARCH,_OS} handling
+@
+text
+@d1 1
+a1 2
+/**	$MirOS$ */
+/*	$OpenPackages$ */
+d39 1
+a39 1
+__RCSID("$MirOS$");
+d86 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d38 3
+d47 1
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import OtherBSD's make(1) improvements
+@
+text
+@d2 1
+a2 1
+/*	$OpenBSD: generate.c,v 1.6 2006/01/20 23:10:19 espie Exp $ */
+a30 1
+#include <stdint.h>
+d94 4
+a97 4
+	uint32_t i;
+	uint32_t v;
+	uint32_t h;
+	uint32_t slots;
+@
+

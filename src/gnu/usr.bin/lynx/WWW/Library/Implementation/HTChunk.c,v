@@ -1,0 +1,702 @@
+head	1.2;
+access;
+symbols
+	lynx-2_8_8dev_16:1.1.109.5
+	lynx-2_8_8dev_15e:1.1.109.5
+	lynx-2_8_8dev_15:1.1.109.5
+	lynx-2_8_8dev_14:1.1.109.5
+	lynx-2_8_8dev_12:1.1.109.5
+	lynx-2_8_8dev_11:1.1.109.5
+	lynx-2_8_8dev_10a:1.1.109.5
+	lynx-2_8_8dev_7a:1.1.109.4
+	lynx-2_8_8dev_7:1.1.109.4
+	lynx-2_8_7rel_1:1.1.109.3
+	lynx-2_8_7dev_12:1.1.109.2
+	lynx-2_8_7dev_11a:1.1.109.2
+	MIRBSD_10:1.1.109.2.0.4
+	MIRBSD_10_BASE:1.1.109.2
+	lynx-2_8_7dev_8:1.1.109.2
+	lynx-2_8_7dev_7:1.1.109.2
+	lynx-2_8_7dev_5:1.1.109.2
+	lynx-2_8_7dev_2:1.1.109.2
+	lynx-2_8_6pre_5:1.1.109.2
+	lynx-2_8_6pre_4:1.1.109.2
+	lynx-2_8_6pre_3:1.1.109.2
+	MIRBSD_9_BASE:1.1.109.2
+	lynx-2_8_6dev_18c:1.1.109.2
+	lynx-2_8_6dev_18:1.1.109.2
+	MIRBSD_8:1.1.109.2.0.2
+	MIRBSD_8_BASE:1.1.109.2
+	lynx-2_8_6dev_16:1.1.109.2
+	lynx:1.1.109;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2012.02.19.19.37.53;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004F414F917991F461;
+
+1.1
+date	2005.03.27.22.11.54;	author tg;	state Exp;
+branches
+	1.1.109.1;
+next	;
+
+1.1.109.1
+date	2005.03.27.22.11.54;	author tg;	state Exp;
+branches;
+next	1.1.109.2;
+
+1.1.109.2
+date	2005.06.22.11.11.40;	author tg;	state Exp;
+branches;
+next	1.1.109.3;
+commitid	408242b94777c7d4;
+
+1.1.109.3
+date	2009.08.09.14.37.47;	author tg;	state Exp;
+branches;
+next	1.1.109.4;
+commitid	1004A7EDF4952738297;
+
+1.1.109.4
+date	2010.12.19.18.12.40;	author tg;	state Exp;
+branches;
+next	1.1.109.5;
+commitid	1004D0E4B24304015D1;
+
+1.1.109.5
+date	2012.02.19.18.28.20;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004F413EF328BF0E26;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge lynx2.8.8dev.10a and fix some spelling
+@
+text
+@/*
+ * $LynxId: HTChunk.c,v 1.27 2012/02/07 11:28:44 tom Exp $
+ *
+ *		Chunk handling:	Flexible arrays
+ *		===============================
+ *
+ */
+
+#include <HTUtils.h>
+#include <HTChunk.h>
+
+#include <LYLeaks.h>
+
+/*
+ *	Initialize a chunk with a certain allocation unit
+ */
+void HTChunkInit(HTChunk *ch, int grow)
+{
+    ch->data = 0;
+    ch->growby = grow;
+    ch->size = 0;
+    ch->allocated = 0;
+}
+
+/*	Create a chunk with a certain allocation unit
+ *	--------------
+ */
+HTChunk *HTChunkCreate(int grow)
+{
+    HTChunk *ch = typecalloc(HTChunk);
+
+    if (ch == NULL)
+	outofmem(__FILE__, "creation of chunk");
+
+    HTChunkInit(ch, grow);
+    return ch;
+}
+
+HTChunk *HTChunkCreateMayFail(int grow, int failok)
+{
+    HTChunk *ch = typecalloc(HTChunk);
+
+    if (ch == NULL) {
+	if (!failok) {
+	    outofmem(__FILE__, "creation of chunk");
+	} else {
+	    return ch;
+	}
+    }
+
+    assert(ch != NULL);
+
+    HTChunkInit(ch, grow);
+    ch->failok = failok;
+    return ch;
+}
+
+/*	Create a chunk with a certain allocation unit and ensured size
+ *	--------------
+ */
+HTChunk *HTChunkCreate2(int grow, size_t needed)
+{
+    HTChunk *ch = typecalloc(HTChunk);
+
+    if (ch == NULL)
+	outofmem(__FILE__, "HTChunkCreate2");
+
+    assert(ch != NULL);
+
+    HTChunkInit(ch, grow);
+    if (needed-- > 0) {
+	/* Round up */
+	ch->allocated = (int) (needed - (needed % (size_t) ch->growby)
+			       + (unsigned) ch->growby);
+	CTRACE((tfp, "HTChunkCreate2: requested %d, allocate %u\n",
+		(int) needed, (unsigned) ch->allocated));
+	ch->data = typecallocn(char, (unsigned) ch->allocated);
+
+	if (!ch->data)
+	    outofmem(__FILE__, "HTChunkCreate2 data");
+    }
+    return ch;
+}
+
+/*	Clear a chunk of all data
+ *	--------------------------
+ */
+void HTChunkClear(HTChunk *ch)
+{
+    FREE(ch->data);
+    ch->size = 0;
+    ch->allocated = 0;
+}
+
+/*     Free a chunk (and its chain, if any)
+ *     ------------------------------------
+ */
+void HTChunkFree(HTChunk *ch)
+{
+    HTChunk *next;
+
+    do {
+	next = ch->next;
+	FREE(ch->data);
+	FREE(ch);
+	ch = next;
+    } while (ch != NULL);
+}
+
+/*	Realloc the chunk
+ *	-----------------
+ */
+BOOL HTChunkRealloc(HTChunk *ch, int growby)
+{
+    char *data;
+
+    ch->allocated = ch->allocated + growby;
+
+    data = (ch->data
+	    ? typeRealloc(char, ch->data, ch->allocated)
+	    : typecallocn(char, ch->allocated));
+
+    if (data) {
+	ch->data = data;
+    } else if (ch->failok) {
+	HTChunkClear(ch);	/* allocation failed, clear all data - kw */
+	return FALSE;		/* caller should check ch->allocated - kw */
+    } else {
+	outofmem(__FILE__, "HTChunkRealloc");
+    }
+    return TRUE;
+}
+
+/*	Append a character
+ *	------------------
+ */
+void HTChunkPutc(HTChunk *ch, unsigned c)
+{
+    if (ch->size >= ch->allocated) {
+	if (!HTChunkRealloc(ch, ch->growby))
+	    return;
+    }
+    ch->data[ch->size++] = (char) c;
+}
+
+/* like above but no realloc: extend to another chunk if necessary */
+HTChunk *HTChunkPutc2(HTChunk *ch, int c)
+{
+    if (ch->size >= ch->allocated) {
+	HTChunk *chunk = HTChunkCreateMayFail(ch->growby, ch->failok);
+
+	ch->next = chunk;
+	ch = chunk;
+	HTChunkPutc(ch, UCH(c));
+    } else {
+	ch->data[ch->size++] = (char) c;
+    }
+    return ch;
+}
+
+/*	Ensure a certain size
+ *	---------------------
+ */
+void HTChunkEnsure(HTChunk *ch, int needed)
+{
+    if (needed <= ch->allocated)
+	return;
+    ch->allocated = needed - 1 - ((needed - 1) % ch->growby)
+	+ ch->growby;		/* Round up */
+    ch->data = (ch->data
+		? typeRealloc(char, ch->data, ch->allocated)
+		: typecallocn(char, ch->allocated));
+
+    if (ch->data == NULL)
+	outofmem(__FILE__, "HTChunkEnsure");
+}
+
+/*
+ * Append a block of characters.
+ */
+void HTChunkPutb(HTChunk *ch, const char *b, int l)
+{
+    if (l <= 0)
+	return;
+    if (ch->size + l > ch->allocated) {
+	int growby = l - (l % ch->growby) + ch->growby;		/* Round up */
+
+	if (!HTChunkRealloc(ch, growby))
+	    return;
+    }
+    MemCpy(ch->data + ch->size, b, l);
+    ch->size += l;
+}
+
+/* like above but no realloc: extend to another chunk if necessary */
+HTChunk *HTChunkPutb2(HTChunk *ch, const char *b, int l)
+{
+    if (l <= 0)
+	return ch;
+    if (ch->size + l > ch->allocated) {
+	HTChunk *chunk;
+	int m = ch->allocated - ch->size;
+
+	MemCpy(ch->data + ch->size, b, (unsigned) m);
+	ch->size += m;
+
+	chunk = HTChunkCreateMayFail(ch->growby, ch->failok);
+	ch->next = chunk;
+	ch = chunk;
+	HTChunkPutb(ch, b + m, l - m);
+    } else {
+	MemCpy(ch->data + ch->size, b, (unsigned) l);
+	ch->size += l;
+    }
+    return ch;
+}
+
+#define PUTC(code)  ch->data[ch->size++] = (char)(code)
+#define PUTC2(code) ch->data[ch->size++] = (char)(0x80|(0x3f &(code)))
+
+/*
+ * Append a character encoded as UTF-8.
+ */
+void HTChunkPutUtf8Char(HTChunk *ch, UCode_t code)
+{
+    int utflen;
+
+    if (TOASCII(code) < 128)
+	utflen = 1;
+    else if (code < 0x800L) {
+	utflen = 2;
+    } else if (code < 0x10000L) {
+	utflen = 3;
+    } else if (code < 0x200000L) {
+	utflen = 4;
+    } else if (code < 0x4000000L) {
+	utflen = 5;
+    } else if (code <= 0x7fffffffL) {
+	utflen = 6;
+    } else
+	utflen = 0;
+
+    if (ch->size + utflen > ch->allocated) {
+	int growby = (ch->growby >= utflen) ? ch->growby : utflen;
+
+	if (!HTChunkRealloc(ch, growby))
+	    return;
+    }
+
+    switch (utflen) {
+    case 0:
+	return;
+    case 1:
+	ch->data[ch->size++] = (char) code;
+	return;
+    case 2:
+	PUTC(0xc0 | (code >> 6));
+	break;
+    case 3:
+	PUTC(0xe0 | (code >> 12));
+	break;
+    case 4:
+	PUTC(0xf0 | (code >> 18));
+	break;
+    case 5:
+	PUTC(0xf8 | (code >> 24));
+	break;
+    case 6:
+	PUTC(0xfc | (code >> 30));
+	break;
+    }
+    switch (utflen) {
+    case 6:
+	PUTC2(code >> 24);
+	/* FALLTHRU */
+    case 5:
+	PUTC2(code >> 18);
+	/* FALLTHRU */
+    case 4:
+	PUTC2(code >> 12);
+	/* FALLTHRU */
+    case 3:
+	PUTC2(code >> 6);
+	/* FALLTHRU */
+    case 2:
+	PUTC2(code);
+	break;
+    }
+}
+
+/*	Terminate a chunk
+ *	-----------------
+ */
+void HTChunkTerminate(HTChunk *ch)
+{
+    HTChunkPutc(ch, (char) 0);
+}
+
+/*	Append a string
+ *	---------------
+ */
+void HTChunkPuts(HTChunk *ch, const char *s)
+{
+    const char *p;
+
+    if (s != NULL) {
+	for (p = s; *p; p++) {
+	    if (ch->size >= ch->allocated) {
+		if (!HTChunkRealloc(ch, ch->growby))
+		    break;
+	    }
+	    ch->data[ch->size++] = *p;
+	}
+    }
+}
+
+/* like above but no realloc: extend to another chunk if necessary */
+HTChunk *HTChunkPuts2(HTChunk *ch, const char *s)
+{
+    const char *p;
+
+    if (s != NULL) {
+	for (p = s; *p; p++) {
+	    if (ch->size >= ch->allocated) {
+		HTChunk *chunk = HTChunkCreateMayFail(ch->growby, ch->failok);
+
+		ch->next = chunk;
+		ch = chunk;
+		HTChunkPuts(ch, p);
+		break;
+	    }
+	    ch->data[ch->size++] = *p;
+	}
+    }
+    return ch;
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 4
+a4 1
+/*		Chunk handling:	Flexible arrays
+d50 3
+d68 2
+d71 7
+a77 6
+    if (needed > 0) {
+	ch->allocated = needed - 1 - ((needed - 1) % ch->growby)
+	    + ch->growby;	/* Round up */
+	CTRACE((tfp, "HTChunkCreate2: requested %d, allocate %d\n",
+		(int) needed, ch->allocated));
+	ch->data = typecallocn(char, ch->allocated);
+d95 2
+a96 2
+/*	Free a chunk
+ *	------------
+d100 8
+a107 2
+    FREE(ch->data);
+    FREE(ch);
+d120 1
+a120 1
+	    ? (char *) realloc(ch->data, ch->allocated)
+a135 4
+ *
+ * Warning:  the code of this function is repeated within the macro
+ * HTChunkPutUtf8Char in SGML.c.  Change the macro or undefine it in SGML.c
+ * when changing this function.  -VH
+d137 1
+a137 1
+void HTChunkPutc(HTChunk *ch, char c)
+d143 16
+a158 1
+    ch->data[ch->size++] = c;
+d171 1
+a171 1
+		? (char *) realloc(ch->data, ch->allocated)
+d191 1
+a191 1
+    memcpy(ch->data + ch->size, b, l);
+d195 23
+d310 21
+a330 1
+		    return;
+d335 1
+@
+
+
+1.1.109.1
+log
+@Lynx 2.8.6dev.11h (pre-patch) minus
+* lib
+* po
+* scripts
+@
+text
+@@
+
+
+1.1.109.2
+log
+@update our Lynx
+@
+text
+@d86 2
+a87 2
+/*     Free a chunk (and it's chain, if any)
+ *     -------------------------------------
+d91 2
+a92 8
+    HTChunk *next;
+
+    do {
+	next = ch->next;
+	FREE(ch->data);
+	FREE(ch);
+	ch = next;
+    } while (ch != NULL);
+d121 4
+a134 14
+/* like above but no realloc: extend to another chunk if necessary */
+HTChunk *HTChunkPutc2(HTChunk *ch, char c)
+{
+    if (ch->size >= ch->allocated) {
+	HTChunk *chunk = HTChunkCreateMayFail(ch->growby, ch->failok);
+
+	ch->next = chunk;
+	HTChunkPutc(chunk, c);
+	return chunk;
+    }
+    ch->data[ch->size++] = c;
+    return ch;
+}
+
+a168 22
+/* like above but no realloc: extend to another chunk if necessary */
+HTChunk *HTChunkPutb2(HTChunk *ch, const char *b, int l)
+{
+    if (l <= 0)
+	return ch;
+    if (ch->size + l > ch->allocated) {
+	HTChunk *chunk;
+	int m = ch->allocated - ch->size;
+
+	memcpy(ch->data + ch->size, b, m);
+	ch->size += m;
+
+	chunk = HTChunkCreateMayFail(ch->growby, ch->failok);
+	ch->next = chunk;
+	HTChunkPutb(chunk, b + m, l - m);
+	return chunk;
+    }
+    memcpy(ch->data + ch->size, b, l);
+    ch->size += l;
+    return ch;
+}
+
+a266 20
+
+/* like above but no realloc: extend to another chunk if necessary */
+HTChunk *HTChunkPuts2(HTChunk *ch, const char *s)
+{
+    const char *p;
+
+    if (s != NULL) {
+	for (p = s; *p; p++) {
+	    if (ch->size >= ch->allocated) {
+		HTChunk *chunk = HTChunkCreateMayFail(ch->growby, ch->failok);
+
+		ch->next = chunk;
+		HTChunkPuts(chunk, p);
+		return chunk;
+	    }
+	    ch->data[ch->size++] = *p;
+	}
+    }
+    return ch;
+}
+@
+
+
+1.1.109.3
+log
+@Woohoo, there’s a new Lynx release!
+@
+text
+@d1 1
+a1 4
+/*
+ * $LynxId: HTChunk.c,v 1.21 2009/02/01 12:49:24 tom Exp $
+ *
+ *		Chunk handling:	Flexible arrays
+d64 5
+a68 6
+	/* Round up */
+	ch->allocated = (int) (needed - 1 - ((needed - 1) % ch->growby)
+			       + (unsigned) ch->growby);
+	CTRACE((tfp, "HTChunkCreate2: requested %d, allocate %u\n",
+		(int) needed, (unsigned) ch->allocated));
+	ch->data = typecallocn(char, (unsigned) ch->allocated);
+d111 2
+a112 2
+	    ? (char *) realloc(ch->data, (unsigned) ch->allocated)
+	    : typecallocn(char, (unsigned) ch->allocated));
+d161 2
+a162 2
+		? (char *) realloc(ch->data, (unsigned) ch->allocated)
+		: typecallocn(char, (unsigned) ch->allocated));
+d181 1
+a181 1
+    memcpy(ch->data + ch->size, b, (unsigned) l);
+d194 1
+a194 1
+	memcpy(ch->data + ch->size, b, (unsigned) m);
+d202 1
+a202 1
+    memcpy(ch->data + ch->size, b, (unsigned) l);
+@
+
+
+1.1.109.4
+log
+@Import lynx-current
+@
+text
+@d2 1
+a2 1
+ * $LynxId: HTChunk.c,v 1.26 2010/09/25 00:32:33 tom Exp $
+a49 3
+
+    assert(ch != NULL);
+
+a64 2
+    assert(ch != NULL);
+
+d66 1
+a66 1
+    if (needed-- > 0) {
+d68 1
+a68 1
+	ch->allocated = (int) (needed - (needed % (size_t) ch->growby)
+d115 2
+a116 2
+	    ? typeRealloc(char, ch->data, ch->allocated)
+	    : typecallocn(char, ch->allocated));
+d132 1
+a132 1
+void HTChunkPutc(HTChunk *ch, unsigned c)
+d138 1
+a138 1
+    ch->data[ch->size++] = (char) c;
+d142 1
+a142 1
+HTChunk *HTChunkPutc2(HTChunk *ch, int c)
+d148 1
+a148 1
+	HTChunkPutc(chunk, UCH(c));
+d151 1
+a151 1
+    ch->data[ch->size++] = (char) c;
+d165 2
+a166 2
+		? typeRealloc(char, ch->data, ch->allocated)
+		: typecallocn(char, ch->allocated));
+d185 1
+a185 1
+    MemCpy(ch->data + ch->size, b, l);
+d198 1
+a198 1
+	MemCpy(ch->data + ch->size, b, (unsigned) m);
+d206 1
+a206 1
+    MemCpy(ch->data + ch->size, b, (unsigned) l);
+@
+
+
+1.1.109.5
+log
+@Import Lynx 2.8.8dev.10 plus dev.10a patch from invisible-island plus
+fix for “lynx -help” output by KIHARA Hideto, by import-3rdpty,v 1.43
+@
+text
+@d2 1
+a2 1
+ * $LynxId: HTChunk.c,v 1.27 2012/02/07 11:28:44 tom Exp $
+d153 2
+a154 4
+	ch = chunk;
+	HTChunkPutc(ch, UCH(c));
+    } else {
+	ch->data[ch->size++] = (char) c;
+d156 1
+d208 2
+a209 5
+	ch = chunk;
+	HTChunkPutb(ch, b + m, l - m);
+    } else {
+	MemCpy(ch->data + ch->size, b, (unsigned) l);
+	ch->size += l;
+d211 2
+d308 1
+a308 1
+		    break;
+d326 2
+a327 3
+		ch = chunk;
+		HTChunkPuts(ch, p);
+		break;
+@
+
+

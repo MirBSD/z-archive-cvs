@@ -1,0 +1,540 @@
+head	1.12;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.12
+date	2017.12.19.00.56.34;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	1005A38636B714CDF30;
+
+1.11
+date	2015.12.27.02.25.09;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	100567F4C05672768BA;
+
+1.10
+date	2015.10.21.20.31.52;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1005627F64E42AE88F2;
+
+1.9
+date	2015.03.14.01.09.22;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10055038A4A0941829E;
+
+1.8
+date	2014.11.14.21.33.38;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1005466753E16C120D2;
+
+1.7
+date	2014.07.15.22.19.19;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10053C5A9003426AC17;
+
+1.6
+date	2014.07.15.20.52.09;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10053C59488096050AA;
+
+1.5
+date	2014.07.01.21.34.16;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10053B3296C55F60556;
+
+1.4
+date	2014.07.01.21.31.36;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10053B328CB70C6579A;
+
+1.3
+date	2014.07.01.21.14.53;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10053B324D8241E4A22;
+
+1.2
+date	2014.07.01.21.14.03;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10053B324A76EEF18F9;
+
+1.1
+date	2014.06.29.13.56.28;	author tg;	state Exp;
+branches;
+next	;
+commitid	10053B01B164296BB8C;
+
+
+desc
+@@
+
+
+1.12
+log
+@https → http, nowadays (unwillingly) considered proper
+@
+text
+@#!/usr/bin/perl -T
+# $MirOS: www/files/raw.cgi,v 1.11 2015/12/27 02:25:09 tg Exp $
+#-
+# Copyright © 2012, 2014, 2015
+#	mirabilos <m@@mirbsd.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un‐
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person’s immediate fault when using the work as intended.
+#-
+# CGI to search through MirBSD HTML manpages and acronyms, for bots.
+
+use strict;
+use warnings;
+
+use File::Glob qw(:globally :nocase);
+
+use File::Basename qw(dirname);
+my ($mydir) = (dirname($0) =~ /(.*)/);	# untaint
+
+use File::Spec::Functions qw(catfile);
+my $db = catfile($mydir, 'acronyms');
+
+if ((-r $db) && (open(ACRONYMS, $db))) {
+	undef $mydir;
+} else {
+	print "Status: 500 Internal Script Error\r\n";
+	print "Content-Type: text/plain\r\n\r\n";
+	print "Cannot read acronyms database '" . $db . "'!\r\n";
+	exit(1);
+}
+
+my @@files = ();
+my $match = "";
+my $query = "";
+my $queryorig = "";
+my %results = ();
+my @@wtfresults = ();
+
+if (defined($ENV{QUERY_STRING})) {
+	for my $p (split(/[;&]+/, $ENV{QUERY_STRING})) {
+		next unless $p;
+		$p =~ y/+/ /;
+		my ($key, $val) = split(/=/, $p, 2);
+		next unless defined($key);
+
+		next unless ($key eq "q");
+		next unless defined($val);
+		$val =~ s/%([0-9A-Fa-f][0-9A-Fa-f])/chr(hex($1))/eg;
+		$queryorig = $val;
+	}
+	if ($queryorig eq "") {
+		my $p = $ENV{QUERY_STRING};
+		$p =~ y/+/ /;
+		$p =~ s/%([0-9A-Fa-f][0-9A-Fa-f])/chr(hex($1))/eg;
+		$queryorig = $p unless $p =~ /^(.*[;&])?q=([;&].*)?$/;
+	}
+
+	# ltrim and rtrim
+	$queryorig =~ s/^\s+//;
+	$queryorig =~ s/\s+$//;
+
+	$query = $queryorig unless $queryorig =~ /[^0-9A-Za-z+.:_-]/;
+}
+
+if ($queryorig ne "") {
+	$queryorig =~ y/a-z/A-Z/;
+	$queryorig =~ y/.//d if $queryorig =~ /[A-Z]\./;
+	$queryorig =~ s/à/À/g;
+	$queryorig =~ s/á/Á/g;
+	$queryorig =~ s/ä/Ä/g;
+	$queryorig =~ s/å/Å/g;
+	$queryorig =~ s/æ/Æ/g;
+	$queryorig =~ s/ç/Ç/g;
+	$queryorig =~ s/è/È/g;
+	$queryorig =~ s/é/É/g;
+	$queryorig =~ s/í/Í/g;
+	$queryorig =~ s/ð/Ð/g;
+	$queryorig =~ s/ñ/Ñ/g;
+	$queryorig =~ s/ó/Ó/g;
+	$queryorig =~ s/ö/Ö/g;
+	$queryorig =~ s/ø/Ø/g;
+	$queryorig =~ s/ü/Ü/g;
+	$queryorig =~ s/þ/Þ/g;
+	$queryorig =~ s/ą/Ą/g;
+	$queryorig =~ s/ć/Ć/g;
+	$queryorig =~ s/ĉ/Ĉ/g;
+	$queryorig =~ s/č/Č/g;
+	$queryorig =~ s/đ/Đ/g;
+	$queryorig =~ s/ę/Ę/g;
+	$queryorig =~ s/ĝ/Ĝ/g;
+	$queryorig =~ s/ĥ/Ĥ/g;
+	$queryorig =~ s/ĵ/Ĵ/g;
+	$queryorig =~ s/ł/Ł/g;
+	$queryorig =~ s/ń/Ń/g;
+	$queryorig =~ s/ś/Ś/g;
+	$queryorig =~ s/ŝ/Ŝ/g;
+	$queryorig =~ s/š/Š/g;
+	$queryorig =~ s/ŭ/Ŭ/g;
+	$queryorig =~ s/ź/Ź/g;
+	$queryorig =~ s/ż/Ż/g;
+	$queryorig =~ s/ž/Ž/g;
+	$queryorig =~ s/ε/Ε/g;
+	$queryorig =~ s/λ/Λ/g;
+	$queryorig =~ s/ο/Ο/g;
+	$queryorig =~ s/ς/Σ/g;
+	$queryorig =~ s/σ/Σ/g;
+	$queryorig =~ s/а/А/g;
+	$queryorig =~ s/б/Б/g;
+	$queryorig =~ s/г/Г/g;
+	$queryorig =~ s/д/Д/g;
+	$queryorig =~ s/е/Е/g;
+	$queryorig =~ s/з/З/g;
+	$queryorig =~ s/й/Й/g;
+	$queryorig =~ s/к/К/g;
+	$queryorig =~ s/л/Л/g;
+	$queryorig =~ s/м/М/g;
+	$queryorig =~ s/н/Н/g;
+	$queryorig =~ s/о/О/g;
+	$queryorig =~ s/р/Р/g;
+	$queryorig =~ s/с/С/g;
+	$queryorig =~ s/т/Т/g;
+	$queryorig =~ s/у/У/g;
+	$queryorig =~ s/ф/Ф/g;
+	$queryorig =~ s/қ/Қ/g;
+	$queryorig =~ s/ա/Ա/g;
+	$queryorig =~ s/հ/Հ/g;
+	$queryorig =~ s/յ/Յ/g;
+
+	foreach my $line (<ACRONYMS>) {
+		chomp($line);
+		if ($line =~ /^\Q$queryorig	\E(.*)$/) {
+			push(@@wtfresults, $1);
+		}
+	}
+}
+close(ACRONYMS);
+
+if ($query ne "") {
+	if (length($query) < 3) {
+		@@files = <htman/*/man[1-9]/{,.}${query}*.htm>;
+		my @@f;
+		@@f = <htman/*/man{3p,PSD,SMM,USD,PAPERS}/${query}*.htm>;
+		push @@files, @@f if (@@f > 0);
+		@@f = <htman/*/man{PSD,SMM,USD,PAPERS}/*.${query}*.htm>;
+		push @@files, @@f if (@@f > 0);
+		@@f = <htman/*/manINFO/${query}*.html>;
+		push @@files, @@f if (@@f > 0);
+	} else {
+		@@files = <htman/*/man[1-9]/{,.}*${query}*.htm>;
+		my @@f;
+		@@f = <htman/*/man{3p,PSD,SMM,USD,PAPERS}/*${query}*.htm>;
+		push @@files, @@f if (@@f > 0);
+		@@f = <htman/*/manINFO/*${query}*.html>;
+		push @@files, @@f if (@@f > 0);
+	}
+}
+
+if (@@files > 0) {
+	my @@filesort = ();
+
+	foreach my $a (qw( i386 sparc )) {
+		# from MirOS: src/etc/man.conf,v 1.5 2009/07/18 14:09:03 tg Exp $
+		foreach my $o (qw( 1 8 6 2 3 5 7 4 9 3p
+		    PSD SMM USD PAPERS INFO )) {
+			my @@filtered = grep /^htman\/\Q$a\E\/man\Q$o\E\//,
+			    @@files;
+			if (@@filtered > 0) {
+				push @@filesort, @@filtered;
+			}
+		}
+	}
+
+	my %pnino = ();
+	my %inoseen = ();
+	@@files = ();
+
+	foreach my $fn (@@filesort) {
+		my $ino = (stat($fn))[1];
+
+		next unless (-r _ && -f _ && -s _);
+
+		my ($a, $k) = $fn =~
+		    /^htman\/([^\/]*)\/man([^\/]*\/.*)[.]html?$/;
+		$results{$k} .= $a . ' ';
+
+		if ($ino) {
+			if ($inoseen{$ino}) {
+				my $bn = $fn;
+				$bn =~ s/^.*\///g;
+				my @@inomatches = grep {
+					$pnino{$_} == $ino
+				    } keys %pnino;
+				s/^.*\///g for @@inomatches;
+				my $inomatched = grep {
+					$_ eq $bn
+				    } @@inomatches;
+				next if ($inomatched > 0);
+			} else {
+				$inoseen{$ino} = 1;
+			}
+			$pnino{$fn} = $ino;
+		}
+		push @@files, $fn;
+	}
+
+	foreach my $k (keys %results) {
+		$_ = $results{$k};
+		my @@a = split;
+		if (@@a < 1) {
+			# should not happen
+			$results{$k} = '-';
+			next;
+		}
+		if (@@a < 2) {
+			$results{$k} = $a[0];
+			next;
+		}
+		# both i386 and sparc: duplicates or no?
+		@@a = grep /man\Q$k\E[.]html?$/, @@files;
+		if (@@a < 2) {
+			$results{$k} = '-';
+		} else {
+			$results{$k} = 'i386 sparc';
+		}
+	}
+
+	my @@goodmatches;
+	@@goodmatches = grep /\/\Q$query\E[.]htm$/, @@files;
+	if (@@goodmatches < 1) {
+		@@goodmatches = grep /\/\Q$query\E[.]htm$/i, @@files;
+	}
+	if (@@goodmatches > 0) {
+		$match = $goodmatches[0];
+	}
+}
+
+if (@@files > 0) {
+	my @@res = sort keys %results;
+	foreach my $k (grep(!/^INFO/, @@res)) {
+		my $a = $results{$k};
+		my ($s, $n) = split /\//, $k, 2;
+		my $x = $k . ".htm";
+		if ($a eq '-') {
+			push(@@wtfresults, "http://www.mirbsd.org/man" . $x);
+			next;
+		}
+		$_ = $a;
+		my @@aa = split;
+		foreach my $r (@@aa) {
+			push(@@wtfresults, "http://www.mirbsd.org/htman/" . $r . "/man" . $x);
+		}
+	}
+	foreach my $k (grep(/^INFO/, @@res)) {
+		my $a = $results{$k};
+		my ($s, $n) = split /\//, $k, 2;
+		$s = "GNU";
+		my $x = $k . ".html";
+		if ($a eq '-') {
+			push(@@wtfresults, "http://www.mirbsd.org/man" . $x);
+			next;
+		}
+		$_ = $a;
+		my @@aa = split;
+		foreach my $r (@@aa) {
+			push(@@wtfresults, "http://www.mirbsd.org/htman/" . $r . "/man" . $x);
+		}
+	}
+}
+
+print "Content-Type: text/plain; charset=utf-8\r\n\r\n";
+
+foreach my $line (@@wtfresults) {
+	print $line . "\r\n";
+}
+
+exit(0);
+@
+
+
+1.11
+log
+@hardcode acronyms,v 1.529 casemapping list, I still don’t know enough Perl to parse it from the file
+@
+text
+@d2 1
+a2 1
+# $MirOS: www/files/raw.cgi,v 1.7 2014/07/15 22:19:19 tg Exp $
+d256 1
+a256 1
+			push(@@wtfresults, "https://www.mirbsd.org/man" . $x);
+d262 1
+a262 1
+			push(@@wtfresults, "https://www.mirbsd.org/htman/" . $r . "/man" . $x);
+d271 1
+a271 1
+			push(@@wtfresults, "https://www.mirbsd.org/man" . $x);
+d277 1
+a277 1
+			push(@@wtfresults, "https://www.mirbsd.org/htman/" . $r . "/man" . $x);
+@
+
+
+1.10
+log
+@sync with wtf.cgi
+@
+text
+@d80 2
+d83 4
+a86 4
+	$queryorig =~ s/ö/Ö/g;
+	$queryorig =~ s/ü/Ü/g;
+	$queryorig =~ s/ñ/Ñ/g;
+	$queryorig =~ s/á/Á/g;
+d89 2
+d92 48
+a139 2
+	$queryorig =~ s/ç/Ç/g;
+	$queryorig =~ s/è/È/g;
+@
+
+
+1.9
+log
+@couple more things
+@
+text
+@d5 1
+a5 1
+#	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+d79 1
+@
+
+
+1.8
+log
+@improve search for ed tutorials ;)
+@
+text
+@d4 2
+a5 2
+# Copyright © 2012, 2014
+#	Thorsten Glaser <tg@@mirbsd.org>
+d82 7
+@
+
+
+1.7
+log
+@fix trim
+@
+text
+@d2 1
+a2 1
+# $MirOS: www/files/raw.cgi,v 1.5 2014/07/01 21:34:16 tg Exp $
+d98 2
+@
+
+
+1.6
+log
+@some updates; also trim() $query in the CGIs
+@
+text
+@d70 4
+a76 6
+# ltrim and rtrim
+$query =~ s/^\s+//;
+$query =~ s/\s+$//;
+$queryorig =~ s/^\s+//;
+$queryorig =~ s/\s+$//;
+
+@
+
+
+1.5
+log
+@last pasto for today… I hope
+@
+text
+@d2 1
+a2 1
+# $MirOS: www/files/raw.cgi,v 1.1 2014/06/29 13:56:28 tg Exp $
+d73 6
+@
+
+
+1.4
+log
+@… never mind me… (and I hate Perl…)
+@
+text
+@d218 1
+a218 1
+print "Content-Type: text/html; charset=utf-8\r\n\r\n";
+@
+
+
+1.3
+log
+@do not use tr on multibyte values in Perl
+@
+text
+@d74 4
+a77 4
+	$query =~ y/a-z/A-Z/;
+	$query =~ s/ä/Ä/g;
+	$query =~ s/ö/Ö/g;
+	$query =~ s/ü/Ü/g;
+d81 1
+a81 1
+		if ($line =~ /^\Q$query	\E(.*)$/) {
+@
+
+
+1.2
+log
+@do not use uc() since we want this to only work on A-Z to match shell
+@
+text
+@d75 3
+a77 1
+	$query =~ y/äöü/ÄÖÜ/;
+@
+
+
+1.1
+log
+@new CGI for returning raw-text wtf and man results
+@
+text
+@d2 1
+a2 1
+# $MirOS$
+d74 1
+a74 1
+	$query = uc($query);
+@
+

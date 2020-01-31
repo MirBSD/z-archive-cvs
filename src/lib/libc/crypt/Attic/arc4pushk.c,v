@@ -1,0 +1,177 @@
+head	1.4;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2010.09.21.19.38.21;	author tg;	state dead;
+branches;
+next	1.3;
+commitid	1004C99098A59EF7F86;
+
+1.3
+date	2010.09.12.17.10.51;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C8D0939027D8BE7;
+
+1.2
+date	2008.12.27.21.17.54;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10049569B9439744217;
+
+1.1
+date	2008.04.06.16.35.17;	author tg;	state Exp;
+branches;
+next	;
+commitid	10047F8FBC509338948;
+
+
+desc
+@@
+
+
+1.4
+log
+@* discourage arc4random_addrandom if arc4random_pushb_fast is faster but
+  doesn’t harm (i.e. for everything that doesn’t specifically require KSA)
+* discovered configure checks for symbols, not macros, so keep the older
+  push* API around
+@
+text
+@/*
+ * Implement a legacy (deprecated) MirBSD ABI.
+ * The API is still available as arc4random_pushk macro.
+ */
+
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <sys/taitime.h>
+#include <stdlib.h>
+
+__RCSID("$MirOS: src/lib/libc/crypt/arc4pushk.c,v 1.3 2010/09/12 17:10:51 tg Exp $");
+
+/* to go away with the next libc major bump */
+
+#undef arc4random_pushk
+uint32_t arc4random_pushk(const void *, size_t);
+
+uint32_t
+arc4random_pushk(const void *buf, size_t len)
+{
+	return (arc4random_pushb(buf, len));
+}
+
+#undef arc4random_push
+void
+arc4random_push(int n)
+{
+	arc4random_pushb_fast(&n, sizeof(n));
+}
+
+#undef arc4random_pushb
+uint32_t
+arc4random_pushb(const void *buf, size_t len)
+{
+	arc4random_pushb_fast(buf, len);
+	return (arc4random());
+}
+@
+
+
+1.3
+log
+@new implementation of arc4random(3) API (except arc4random_uniform(3),
+which though has been split off earlier today)
+
+deprecate arc4random_push arc4random_pushb arc4random_pushk
+in favour of arc4random_pushb_fast as well
+
+hide internal symbols from user with a version script (only some,
+until the next major bump)
+
+make deprecated functions into macros already
+
+switch some kernel code to use the new shared code already; rewrite
+of kernel arc4random(9) will come next/later
+@
+text
+@d11 1
+a11 1
+__RCSID("$MirOS: src/lib/libc/crypt/arc4pushk.c,v 1.2 2008/12/27 21:17:54 tg Exp $");
+@
+
+
+1.2
+log
+@merge and wrap exec/exit functions better
+@
+text
+@d1 5
+d11 1
+a11 1
+__RCSID("$MirOS: src/lib/libc/crypt/arc4pushk.c,v 1.1 2008/04/06 16:35:17 tg Exp $");
+d23 15
+@
+
+
+1.1
+log
+@new function (and macro with 1:1 definition): arc4random_pushk(3)
+for use in applications that do not need to pull in all of arc4random.c
+@
+text
+@a0 20
+/*-
+ * Copyright (c) 2008
+ *	Thorsten Glaser <tg@@mirbsd.de>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ */
+
+d6 6
+a11 1
+__RCSID("$MirOS: src/share/misc/licence.template,v 1.20 2006/12/11 21:04:56 tg Rel $");
+d16 1
+a16 23
+	uint32_t res;
+	size_t rlen;
+	union {
+		uint8_t buf[256];
+		tai64na_t tai64tm;
+		uint32_t xbuf;
+	} idat;
+	const uint8_t *cbuf = (const uint8_t *)buf;
+	int mib[2];
+
+	taina_time(&idat.tai64tm);
+	for (rlen = 0; rlen < len; ++rlen)
+		idat.buf[rlen % 256] ^= cbuf[rlen];
+	len = MIN(256, len);
+
+	mib[0] = CTL_KERN;
+	mib[1] = KERN_ARND;
+	rlen = sizeof (res);
+	res ^= idat.xbuf;
+
+	sysctl(mib, 2, &res, &rlen, &idat.buf[0], len);
+
+	return (res);
+@
+

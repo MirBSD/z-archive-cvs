@@ -1,0 +1,671 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype:1.1.115;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.21.42;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.47.57;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.06.12.20.54.38;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10048518C1E44F62885;
+
+1.2
+date	2008.02.26.20.04.59;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	10047C470A72A1E13CE;
+
+1.1
+date	2006.06.29.18.37.42;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10044A41DBD6368BED5;
+
+1.1.1.1
+date	2008.02.26.19.53.03;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.38.29;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.115.1
+date	2006.06.29.18.37.42;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.2
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.3
+date	2017.04.15.15.42.08;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  gxvmort1.c                                                             */
+/*                                                                         */
+/*    TrueTypeGX/AAT mort table validation                                 */
+/*    body for type1 (Contextual Substitution) subtable.                   */
+/*                                                                         */
+/*  Copyright 2005-2016 by                                                 */
+/*  suzuki toshiya, Masatake YAMATO, Red Hat K.K.,                         */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+/***************************************************************************/
+/*                                                                         */
+/* gxvalid is derived from both gxlayout module and otvalid module.        */
+/* Development of gxlayout is supported by the Information-technology      */
+/* Promotion Agency(IPA), Japan.                                           */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include "gxvmort.h"
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_gxvmort
+
+
+  typedef struct  GXV_mort_subtable_type1_StateOptRec_
+  {
+    FT_UShort  substitutionTable;
+    FT_UShort  substitutionTable_length;
+
+  }  GXV_mort_subtable_type1_StateOptRec,
+    *GXV_mort_subtable_type1_StateOptRecData;
+
+#define GXV_MORT_SUBTABLE_TYPE1_HEADER_SIZE \
+          ( GXV_STATETABLE_HEADER_SIZE + 2 )
+
+
+  static void
+  gxv_mort_subtable_type1_substitutionTable_load( FT_Bytes       table,
+                                                  FT_Bytes       limit,
+                                                  GXV_Validator  gxvalid )
+  {
+    FT_Bytes  p = table;
+
+    GXV_mort_subtable_type1_StateOptRecData  optdata =
+      (GXV_mort_subtable_type1_StateOptRecData)gxvalid->statetable.optdata;
+
+
+    GXV_LIMIT_CHECK( 2 );
+    optdata->substitutionTable = FT_NEXT_USHORT( p );
+  }
+
+
+  static void
+  gxv_mort_subtable_type1_subtable_setup( FT_UShort      table_size,
+                                          FT_UShort      classTable,
+                                          FT_UShort      stateArray,
+                                          FT_UShort      entryTable,
+                                          FT_UShort*     classTable_length_p,
+                                          FT_UShort*     stateArray_length_p,
+                                          FT_UShort*     entryTable_length_p,
+                                          GXV_Validator  gxvalid )
+  {
+    FT_UShort  o[4];
+    FT_UShort  *l[4];
+    FT_UShort  buff[5];
+
+    GXV_mort_subtable_type1_StateOptRecData  optdata =
+      (GXV_mort_subtable_type1_StateOptRecData)gxvalid->statetable.optdata;
+
+
+    o[0] = classTable;
+    o[1] = stateArray;
+    o[2] = entryTable;
+    o[3] = optdata->substitutionTable;
+    l[0] = classTable_length_p;
+    l[1] = stateArray_length_p;
+    l[2] = entryTable_length_p;
+    l[3] = &( optdata->substitutionTable_length );
+
+    gxv_set_length_by_ushort_offset( o, l, buff, 4, table_size, gxvalid );
+  }
+
+
+  static void
+  gxv_mort_subtable_type1_offset_to_subst_validate(
+    FT_Short          wordOffset,
+    const FT_String*  tag,
+    FT_Byte           state,
+    GXV_Validator     gxvalid )
+  {
+    FT_UShort  substTable;
+    FT_UShort  substTable_limit;
+
+    FT_UNUSED( tag );
+    FT_UNUSED( state );
+
+
+    substTable =
+      ((GXV_mort_subtable_type1_StateOptRec *)
+       (gxvalid->statetable.optdata))->substitutionTable;
+    substTable_limit =
+      (FT_UShort)( substTable +
+                   ((GXV_mort_subtable_type1_StateOptRec *)
+                    (gxvalid->statetable.optdata))->substitutionTable_length );
+
+    gxvalid->min_gid = (FT_UShort)( ( substTable       - wordOffset * 2 ) / 2 );
+    gxvalid->max_gid = (FT_UShort)( ( substTable_limit - wordOffset * 2 ) / 2 );
+    gxvalid->max_gid = (FT_UShort)( FT_MAX( gxvalid->max_gid,
+                                            gxvalid->face->num_glyphs ) );
+
+    /* XXX: check range? */
+
+    /* TODO: min_gid & max_gid comparison with ClassTable contents */
+  }
+
+
+  static void
+  gxv_mort_subtable_type1_entry_validate(
+    FT_Byte                         state,
+    FT_UShort                       flags,
+    GXV_StateTable_GlyphOffsetCPtr  glyphOffset_p,
+    FT_Bytes                        table,
+    FT_Bytes                        limit,
+    GXV_Validator                   gxvalid )
+  {
+#ifdef GXV_LOAD_UNUSED_VARS
+    FT_UShort  setMark;
+    FT_UShort  dontAdvance;
+#endif
+    FT_UShort  reserved;
+    FT_Short   markOffset;
+    FT_Short   currentOffset;
+
+    FT_UNUSED( table );
+    FT_UNUSED( limit );
+
+
+#ifdef GXV_LOAD_UNUSED_VARS
+    setMark       = (FT_UShort)(   flags >> 15            );
+    dontAdvance   = (FT_UShort)( ( flags >> 14 ) & 1      );
+#endif
+    reserved      = (FT_UShort)(    flags        & 0x3FFF );
+
+    markOffset    = (FT_Short)( glyphOffset_p->ul >> 16 );
+    currentOffset = (FT_Short)( glyphOffset_p->ul       );
+
+    if ( 0 < reserved )
+    {
+      GXV_TRACE(( " non-zero bits found in reserved range\n" ));
+      GXV_SET_ERR_IF_PARANOID( FT_INVALID_DATA );
+    }
+
+    gxv_mort_subtable_type1_offset_to_subst_validate( markOffset,
+                                                      "markOffset",
+                                                      state,
+                                                      gxvalid );
+
+    gxv_mort_subtable_type1_offset_to_subst_validate( currentOffset,
+                                                      "currentOffset",
+                                                      state,
+                                                      gxvalid );
+  }
+
+
+  static void
+  gxv_mort_subtable_type1_substTable_validate( FT_Bytes       table,
+                                               FT_Bytes       limit,
+                                               GXV_Validator  gxvalid )
+  {
+    FT_Bytes   p = table;
+    FT_UShort  num_gids = (FT_UShort)(
+                 ((GXV_mort_subtable_type1_StateOptRec *)
+                  (gxvalid->statetable.optdata))->substitutionTable_length / 2 );
+    FT_UShort  i;
+
+
+    GXV_NAME_ENTER( "validating contents of substitutionTable" );
+    for ( i = 0; i < num_gids; i++ )
+    {
+      FT_UShort  dst_gid;
+
+
+      GXV_LIMIT_CHECK( 2 );
+      dst_gid = FT_NEXT_USHORT( p );
+
+      if ( dst_gid >= 0xFFFFU )
+        continue;
+
+      if ( dst_gid < gxvalid->min_gid || gxvalid->max_gid < dst_gid )
+      {
+        GXV_TRACE(( "substTable include a strange gid[%d]=%d >"
+                    " out of define range (%d..%d)\n",
+                    i, dst_gid, gxvalid->min_gid, gxvalid->max_gid ));
+        GXV_SET_ERR_IF_PARANOID( FT_INVALID_GLYPH_ID );
+      }
+    }
+
+    GXV_EXIT;
+  }
+
+
+  /*
+   * subtable for Contextual glyph substitution is a modified StateTable.
+   * In addition to classTable, stateArray, and entryTable, the field
+   * `substitutionTable' is added.
+   */
+  FT_LOCAL_DEF( void )
+  gxv_mort_subtable_type1_validate( FT_Bytes       table,
+                                    FT_Bytes       limit,
+                                    GXV_Validator  gxvalid )
+  {
+    FT_Bytes  p = table;
+
+    GXV_mort_subtable_type1_StateOptRec  st_rec;
+
+
+    GXV_NAME_ENTER( "mort chain subtable type1 (Contextual Glyph Subst)" );
+
+    GXV_LIMIT_CHECK( GXV_MORT_SUBTABLE_TYPE1_HEADER_SIZE );
+
+    gxvalid->statetable.optdata =
+      &st_rec;
+    gxvalid->statetable.optdata_load_func =
+      gxv_mort_subtable_type1_substitutionTable_load;
+    gxvalid->statetable.subtable_setup_func =
+      gxv_mort_subtable_type1_subtable_setup;
+    gxvalid->statetable.entry_glyphoffset_fmt =
+      GXV_GLYPHOFFSET_ULONG;
+    gxvalid->statetable.entry_validate_func =
+
+      gxv_mort_subtable_type1_entry_validate;
+    gxv_StateTable_validate( p, limit, gxvalid );
+
+    gxv_mort_subtable_type1_substTable_validate(
+      table + st_rec.substitutionTable,
+      table + st_rec.substitutionTable + st_rec.substitutionTable_length,
+      gxvalid );
+
+    GXV_EXIT;
+  }
+
+
+/* END */
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d8 2
+a9 1
+/*  Copyright 2005, 2007 by suzuki toshiya, Masatake YAMATO, Red Hat K.K., */
+d57 1
+a57 1
+                                                  GXV_Validator  valid )
+d62 1
+a62 1
+      (GXV_mort_subtable_type1_StateOptRecData)valid->statetable.optdata;
+d78 1
+a78 1
+                                          GXV_Validator  valid )
+d85 1
+a85 1
+      (GXV_mort_subtable_type1_StateOptRecData)valid->statetable.optdata;
+d97 1
+a97 1
+    gxv_set_length_by_ushort_offset( o, l, buff, 4, table_size, valid );
+d106 1
+a106 1
+    GXV_Validator     valid )
+a109 2
+    FT_UShort  min_gid;
+    FT_UShort  max_gid;
+d117 1
+a117 1
+       (valid->statetable.optdata))->substitutionTable;
+d121 1
+a121 1
+                    (valid->statetable.optdata))->substitutionTable_length );
+d123 4
+a126 3
+    min_gid = (FT_UShort)( ( substTable       - wordOffset * 2 ) / 2 );
+    max_gid = (FT_UShort)( ( substTable_limit - wordOffset * 2 ) / 2 );
+    max_gid = (FT_UShort)( FT_MAX( max_gid, valid->face->num_glyphs ) );
+d141 1
+a141 1
+    GXV_Validator                   valid )
+d143 1
+d146 1
+d155 1
+d158 2
+a159 1
+    reserved      = (FT_Short)(    flags         & 0x3FFF );
+d167 1
+a167 2
+      if ( valid->root->level >= FT_VALIDATE_PARANOID )
+        FT_INVALID_DATA;
+d173 1
+a173 1
+                                                      valid );
+d178 1
+a178 1
+                                                      valid );
+d185 1
+a185 1
+                                               GXV_Validator  valid )
+d190 1
+a190 1
+                  (valid->statetable.optdata))->substitutionTable_length / 2 );
+d195 1
+a195 1
+    for ( i = 0; i < num_gids ; i ++ )
+d206 1
+a206 1
+      if ( dst_gid > valid->face->num_glyphs )
+d208 4
+a211 5
+        GXV_TRACE(( "substTable include too large gid[%d]=%d >"
+                    " max defined gid #%d\n",
+                    i, dst_gid, valid->face->num_glyphs ));
+        if ( valid->root->level >= FT_VALIDATE_PARANOID )
+          FT_INVALID_GLYPH_ID;
+d227 1
+a227 1
+                                    GXV_Validator  valid )
+d238 1
+a238 1
+    valid->statetable.optdata =
+d240 1
+a240 1
+    valid->statetable.optdata_load_func =
+d242 1
+a242 1
+    valid->statetable.subtable_setup_func =
+d244 1
+a244 1
+    valid->statetable.entry_glyphoffset_fmt =
+d246 1
+a246 1
+    valid->statetable.entry_validate_func =
+d249 1
+a249 1
+    gxv_StateTable_validate( p, limit, valid );
+d254 1
+a254 1
+      valid );
+@
+
+
+1.3
+log
+@Merge freetype 2.3.6
+@
+text
+@d138 1
+a138 1
+    GXV_StateTable_GlyphOffsetDesc  glyphOffset,
+d157 2
+a158 2
+    markOffset    = (FT_Short)( glyphOffset.ul >> 16 );
+    currentOffset = (FT_Short)( glyphOffset.ul       );
+@
+
+
+1.2
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d205 1
+a205 1
+        GXV_TRACE(( "substTable include toolarge gid[%d]=%d >"
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d8 1
+a8 1
+/*  Copyright 2005 by suzuki toshiya, Masatake YAMATO, Red Hat K.K.,       */
+d191 1
+a191 1
+    GXV_NAME_ENTER( "validating contents of substitionTable" );
+d218 1
+a218 1
+   * subtable for Contextual glyph substition is a modified StateTable.
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d8 1
+a8 1
+/*  Copyright 2005, 2007 by suzuki toshiya, Masatake YAMATO, Red Hat K.K., */
+d191 1
+a191 1
+    GXV_NAME_ENTER( "validating contents of substitutionTable" );
+d218 1
+a218 1
+   * subtable for Contextual glyph substitution is a modified StateTable.
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d205 1
+a205 1
+        GXV_TRACE(( "substTable include too large gid[%d]=%d >"
+@
+
+
+1.1.115.1
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@@
+
+
+1.1.115.2
+log
+@we need newer freetype for advance calculation
+@
+text
+@d8 1
+a8 1
+/*  Copyright 2005, 2007 by suzuki toshiya, Masatake YAMATO, Red Hat K.K., */
+d138 1
+a138 1
+    GXV_StateTable_GlyphOffsetCPtr  glyphOffset_p,
+d157 2
+a158 2
+    markOffset    = (FT_Short)( glyphOffset_p->ul >> 16 );
+    currentOffset = (FT_Short)( glyphOffset_p->ul       );
+d191 1
+a191 1
+    GXV_NAME_ENTER( "validating contents of substitutionTable" );
+d205 1
+a205 1
+        GXV_TRACE(( "substTable include too large gid[%d]=%d >"
+d218 1
+a218 1
+   * subtable for Contextual glyph substitution is a modified StateTable.
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d8 1
+a8 2
+/*  Copyright 2005-2016 by                                                 */
+/*  suzuki toshiya, Masatake YAMATO, Red Hat K.K.,                         */
+d56 1
+a56 1
+                                                  GXV_Validator  gxvalid )
+d61 1
+a61 1
+      (GXV_mort_subtable_type1_StateOptRecData)gxvalid->statetable.optdata;
+d77 1
+a77 1
+                                          GXV_Validator  gxvalid )
+d84 1
+a84 1
+      (GXV_mort_subtable_type1_StateOptRecData)gxvalid->statetable.optdata;
+d96 1
+a96 1
+    gxv_set_length_by_ushort_offset( o, l, buff, 4, table_size, gxvalid );
+d105 1
+a105 1
+    GXV_Validator     gxvalid )
+d109 2
+d118 1
+a118 1
+       (gxvalid->statetable.optdata))->substitutionTable;
+d122 1
+a122 1
+                    (gxvalid->statetable.optdata))->substitutionTable_length );
+d124 3
+a126 4
+    gxvalid->min_gid = (FT_UShort)( ( substTable       - wordOffset * 2 ) / 2 );
+    gxvalid->max_gid = (FT_UShort)( ( substTable_limit - wordOffset * 2 ) / 2 );
+    gxvalid->max_gid = (FT_UShort)( FT_MAX( gxvalid->max_gid,
+                                            gxvalid->face->num_glyphs ) );
+d141 1
+a141 1
+    GXV_Validator                   gxvalid )
+a142 1
+#ifdef GXV_LOAD_UNUSED_VARS
+a144 1
+#endif
+a152 1
+#ifdef GXV_LOAD_UNUSED_VARS
+d155 1
+a155 2
+#endif
+    reserved      = (FT_UShort)(    flags        & 0x3FFF );
+d163 2
+a164 1
+      GXV_SET_ERR_IF_PARANOID( FT_INVALID_DATA );
+d170 1
+a170 1
+                                                      gxvalid );
+d175 1
+a175 1
+                                                      gxvalid );
+d182 1
+a182 1
+                                               GXV_Validator  gxvalid )
+d187 1
+a187 1
+                  (gxvalid->statetable.optdata))->substitutionTable_length / 2 );
+d192 1
+a192 1
+    for ( i = 0; i < num_gids; i++ )
+d203 1
+a203 1
+      if ( dst_gid < gxvalid->min_gid || gxvalid->max_gid < dst_gid )
+d205 5
+a209 4
+        GXV_TRACE(( "substTable include a strange gid[%d]=%d >"
+                    " out of define range (%d..%d)\n",
+                    i, dst_gid, gxvalid->min_gid, gxvalid->max_gid ));
+        GXV_SET_ERR_IF_PARANOID( FT_INVALID_GLYPH_ID );
+d225 1
+a225 1
+                                    GXV_Validator  gxvalid )
+d236 1
+a236 1
+    gxvalid->statetable.optdata =
+d238 1
+a238 1
+    gxvalid->statetable.optdata_load_func =
+d240 1
+a240 1
+    gxvalid->statetable.subtable_setup_func =
+d242 1
+a242 1
+    gxvalid->statetable.entry_glyphoffset_fmt =
+d244 1
+a244 1
+    gxvalid->statetable.entry_validate_func =
+d247 1
+a247 1
+    gxv_StateTable_validate( p, limit, gxvalid );
+d252 1
+a252 1
+      gxvalid );
+@
+
+

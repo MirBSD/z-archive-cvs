@@ -1,0 +1,1160 @@
+head	1.3;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.2.4.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.3
+	cvs-20101220:1.1.1.3
+	mbsd-20101220:1.1.1.2.0.4
+	cvs-201012191730:1.1.1.2
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.2
+	cvs-200805071200:1.1.1.2
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200803022030:1.1.1.2
+	cvs-200707152000:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200702051700:1.1.1.2
+	cvs-200609121900:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200606151800:1.1.1.1
+	cvs-200603231300:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2014.06.09.15.17.17;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005395CFC65E5646F1;
+
+1.2
+date	2011.07.02.15.03.42;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E0F31C5496AB95F;
+
+1.1
+date	2005.02.05.17.24.22;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.22;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2007.02.05.17.05.51;	author tg;	state Exp;
+branches
+	1.1.1.2.4.1;
+next	1.1.1.3;
+commitid	10045C763C551AABAF7;
+
+1.1.1.3
+date	2011.07.02.14.59.50;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.2.4.1
+date	2011.07.02.15.02.11;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.127.1
+date	2010.12.19.14.45.52;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2014.06.09.14.29.25;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@<HTML>
+<HEAD><TITLE>A Sample Filter</TITLE></HEAD>
+<BODY>
+<!--
+$Id: sample.html,v 1.23 2013-11-22 20:51:39 ca Exp $
+-->
+<H1>A Sample Filter</H1>
+
+The following sample logs each message to a separate temporary file,
+adds a recipient given with the -a flag,
+and rejects a disallowed recipient address given with the -r flag.
+It recognizes the following options:
+<P>
+<CENTER>
+<TABLE border="1" cellpadding=2 cellspacing=1>
+<TR><TD><CODE>-p port</CODE></TD><TD>The port through which the MTA will connect to the filter.</TD></TR>
+<TR><TD><CODE>-t sec</CODE></TD><TD>The timeout value.</TD></TR>
+<TR><TD><CODE>-r addr</CODE></TD><TD>A recipient to reject.</TD></TR>
+<TR><TD><CODE>-a addr</CODE></TD><TD>A recipient to add.</TD></TR>
+</TABLE>
+</CENTER>
+<HR>
+<PRE>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;sysexits.h&gt;
+#include &lt;unistd.h&gt;
+
+#include "libmilter/mfapi.h"
+
+#ifndef bool
+# define bool	int
+# define TRUE	1
+# define FALSE	0
+#endif /* ! bool */
+
+
+struct mlfiPriv
+{
+	char	*mlfi_fname;
+	char	*mlfi_connectfrom;
+	char	*mlfi_helofrom;
+	FILE	*mlfi_fp;
+};
+
+#define MLFIPRIV	((struct mlfiPriv *) <A href="smfi_getpriv.html">smfi_getpriv</A>(ctx))
+
+extern sfsistat		mlfi_cleanup(SMFICTX *, bool);
+
+/* recipients to add and reject (set with -a and -r options) */
+char *add = NULL;
+char *reject = NULL;
+
+sfsistat
+<A href="xxfi_connect.html">mlfi_connect</A>(ctx, hostname, hostaddr)
+	 SMFICTX *ctx;
+	 char *hostname;
+	 _SOCK_ADDR *hostaddr;
+{
+	struct mlfiPriv *priv;
+	char *ident;
+
+	/* allocate some private memory */
+	priv = malloc(sizeof *priv);
+	if (priv == NULL)
+	{
+		/* can't accept this message right now */
+		return SMFIS_TEMPFAIL;
+	}
+	memset(priv, '\0', sizeof *priv);
+
+	/* save the private data */
+	<A href="smfi_setpriv.html">smfi_setpriv</A>(ctx, priv);
+
+	ident = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "_");
+	if (ident == NULL)
+		ident = "???";
+	if ((priv-&gt;mlfi_connectfrom = strdup(ident)) == NULL)
+	{
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+
+	/* continue processing */
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_helo.html">mlfi_helo</A>(ctx, helohost)
+	 SMFICTX *ctx;
+	 char *helohost;
+{
+	size_t len;
+	char *tls;
+	char *buf;
+	struct mlfiPriv *priv = MLFIPRIV;
+
+	tls = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "{tls_version}");
+	if (tls == NULL)
+		tls = "No TLS";
+	if (helohost == NULL)
+		helohost = "???";
+	len = strlen(tls) + strlen(helohost) + 3;
+	if ((buf = (char*) malloc(len)) == NULL)
+	{
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+	snprintf(buf, len, "%s, %s", helohost, tls);
+	if (priv-&gt;mlfi_helofrom != NULL)
+		free(priv-&gt;mlfi_helofrom);
+	priv-&gt;mlfi_helofrom = buf;
+
+	/* continue processing */
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_envfrom.html">mlfi_envfrom</A>(ctx, argv)
+	 SMFICTX *ctx;
+	 char **argv;
+{
+	int fd = -1;
+	int argc = 0;
+	struct mlfiPriv *priv = MLFIPRIV;
+	char *mailaddr = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "{mail_addr}");
+
+	/* open a file to store this message */
+	if ((priv-&gt;mlfi_fname = strdup("/tmp/msg.XXXXXX")) == NULL)
+	{
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+
+	if ((fd = mkstemp(priv-&gt;mlfi_fname)) == -1)
+	{
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+
+	if ((priv-&gt;mlfi_fp = fdopen(fd, "w+")) == NULL)
+	{
+		(void) close(fd);
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+
+	/* count the arguments */
+	while (*argv++ != NULL)
+		++argc;
+
+	/* log the connection information we stored earlier: */
+	if (fprintf(priv-&gt;mlfi_fp, "Connect from %s (%s)\n\n",
+		    priv-&gt;mlfi_helofrom, priv-&gt;mlfi_connectfrom) == EOF)
+	{
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+	/* log the sender */
+	if (fprintf(priv-&gt;mlfi_fp, "FROM %s (%d argument%s)\n",
+		    mailaddr ? mailaddr : "???", argc,
+		    (argc == 1) ? "" : "s") == EOF)
+	{
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+
+	/* continue processing */
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_envrcpt.html">mlfi_envrcpt</A>(ctx, argv)
+	 SMFICTX *ctx;
+	 char **argv;
+{
+	struct mlfiPriv *priv = MLFIPRIV;
+	char *rcptaddr = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "{rcpt_addr}");
+	int argc = 0;
+
+	/* count the arguments */
+	while (*argv++ != NULL)
+		++argc;
+
+	/* log this recipient */
+	if (reject != NULL && rcptaddr != NULL &&
+	    (strcasecmp(rcptaddr, reject) == 0))
+	{
+		if (fprintf(priv-&gt;mlfi_fp, "RCPT %s -- REJECTED\n",
+			    rcptaddr) == EOF)
+		{
+			(void) mlfi_cleanup(ctx, FALSE);
+			return SMFIS_TEMPFAIL;
+		}
+		return SMFIS_REJECT;
+	}
+	if (fprintf(priv-&gt;mlfi_fp, "RCPT %s (%d argument%s)\n",
+		    rcptaddr ? rcptaddr : "???", argc,
+		    (argc == 1) ? "" : "s") == EOF)
+	{
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+
+	/* continue processing */
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_header.html">mlfi_header</A>(ctx, headerf, headerv)
+	 SMFICTX *ctx;
+	 char *headerf;
+	 unsigned char *headerv;
+{
+	/* write the header to the log file */
+	if (fprintf(MLFIPRIV-&gt;mlfi_fp, "%s: %s\n", headerf, headerv) == EOF)
+	{
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+
+	/* continue processing */
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_eoh.html">mlfi_eoh</A>(ctx)
+	 SMFICTX *ctx;
+{
+	/* output the blank line between the header and the body */
+	if (fprintf(MLFIPRIV-&gt;mlfi_fp, "\n") == EOF)
+	{
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+
+	/* continue processing */
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_body.html">mlfi_body</A>(ctx, bodyp, bodylen)
+	 SMFICTX *ctx;
+	 unsigned char *bodyp;
+	 size_t bodylen;
+{
+        struct mlfiPriv *priv = MLFIPRIV;
+
+	/* output body block to log file */
+	if (fwrite(bodyp, bodylen, 1, priv-&gt;mlfi_fp) != 1)
+	{
+		/* write failed */
+		fprintf(stderr, "Couldn't write file %s: %s\n",
+			priv-&gt;mlfi_fname, strerror(errno));
+		(void) mlfi_cleanup(ctx, FALSE);
+		return SMFIS_TEMPFAIL;
+	}
+
+	/* continue processing */
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_eom.html">mlfi_eom</A>(ctx)
+	 SMFICTX *ctx;
+{
+	bool ok = TRUE;
+
+	/* change recipients, if requested */
+	if (add != NULL)
+		ok = (<A href="smfi_addrcpt.html">smfi_addrcpt</A>(ctx, add) == MI_SUCCESS);
+	return mlfi_cleanup(ctx, ok);
+}
+
+sfsistat
+<A href="xxfi_abort.html">mlfi_abort</A>(ctx)
+	 SMFICTX *ctx;
+{
+	return mlfi_cleanup(ctx, FALSE);
+}
+
+sfsistat
+mlfi_cleanup(ctx, ok)
+	 SMFICTX *ctx;
+	 bool ok;
+{
+	sfsistat rstat = SMFIS_CONTINUE;
+	struct mlfiPriv *priv = MLFIPRIV;
+	char *p;
+	char host[512];
+	char hbuf[1024];
+
+	if (priv == NULL)
+		return rstat;
+
+	/* close the archive file */
+	if (priv-&gt;mlfi_fp != NULL && fclose(priv-&gt;mlfi_fp) == EOF)
+	{
+		/* failed; we have to wait until later */
+		fprintf(stderr, "Couldn't close archive file %s: %s\n",
+			priv-&gt;mlfi_fname, strerror(errno));
+		rstat = SMFIS_TEMPFAIL;
+		(void) unlink(priv-&gt;mlfi_fname);
+	}
+	else if (ok)
+	{
+		/* add a header to the message announcing our presence */
+		if (gethostname(host, sizeof host) &lt; 0)
+			snprintf(host, sizeof host, "localhost");
+		p = strrchr(priv-&gt;mlfi_fname, '/');
+		if (p == NULL)
+			p = priv-&gt;mlfi_fname;
+		else
+			p++;
+		snprintf(hbuf, sizeof hbuf, "%s@@%s", p, host);
+		if (<A href="smfi_addheader.html">smfi_addheader</A>(ctx, "X-Archived", hbuf) != MI_SUCCESS)
+		{
+			/* failed; we have to wait until later */
+			fprintf(stderr,
+				"Couldn't add header: X-Archived: %s\n",
+				hbuf);
+			ok = FALSE;
+			rstat = SMFIS_TEMPFAIL;
+			(void) unlink(priv-&gt;mlfi_fname);
+		}
+	}
+	else
+	{
+		/* message was aborted -- delete the archive file */
+		fprintf(stderr, "Message aborted.  Removing %s\n",
+			priv-&gt;mlfi_fname);
+		rstat = SMFIS_TEMPFAIL;
+		(void) unlink(priv-&gt;mlfi_fname);
+	}
+
+	/* release private memory */
+	if (priv-&gt;mlfi_fname != NULL)
+		free(priv-&gt;mlfi_fname);
+
+	/* return status */
+	return rstat;
+}
+
+sfsistat
+<A href="xxfi_close.html">mlfi_close</A>(ctx)
+	 SMFICTX *ctx;
+{
+	struct mlfiPriv *priv = MLFIPRIV;
+
+	if (priv == NULL)
+		return SMFIS_CONTINUE;
+	if (priv-&gt;mlfi_connectfrom != NULL)
+		free(priv-&gt;mlfi_connectfrom);
+	if (priv-&gt;mlfi_helofrom != NULL)
+		free(priv-&gt;mlfi_helofrom);
+	free(priv);
+	<A href="smfi_setpriv.html">smfi_setpriv</A>(ctx, NULL);
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_unknown.html">mlfi_unknown</A>(ctx, cmd)
+	SMFICTX *ctx;
+	char *cmd;
+{
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_data.html">mlfi_data</A>(ctx)
+	SMFICTX *ctx;
+{
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_negotiate.html">mlfi_negotiate</A>(ctx, f0, f1, f2, f3, pf0, pf1, pf2, pf3)
+	SMFICTX *ctx;
+	unsigned long f0;
+	unsigned long f1;
+	unsigned long f2;
+	unsigned long f3;
+	unsigned long *pf0;
+	unsigned long *pf1;
+	unsigned long *pf2;
+	unsigned long *pf3;
+{
+	return SMFIS_ALL_OPTS;
+}
+
+struct smfiDesc smfilter =
+{
+	"SampleFilter",	/* filter name */
+	SMFI_VERSION,	/* version code -- do not change */
+	SMFIF_ADDHDRS|SMFIF_ADDRCPT,
+			/* flags */
+	<A href="xxfi_connect.html">mlfi_connect</A>,	/* connection info filter */
+	<A href="xxfi_helo.html">mlfi_helo</A>,	/* SMTP HELO command filter */
+	<A href="xxfi_envfrom.html">mlfi_envfrom</A>,	/* envelope sender filter */
+	<A href="xxfi_envrcpt.html">mlfi_envrcpt</A>,	/* envelope recipient filter */
+	<A href="xxfi_header.html">mlfi_header</A>,	/* header filter */
+	<A href="xxfi_eoh.html">mlfi_eoh</A>,	/* end of header */
+	<A href="xxfi_body.html">mlfi_body</A>,	/* body block filter */
+	<A href="xxfi_eom.html">mlfi_eom</A>,	/* end of message */
+	<A href="xxfi_abort.html">mlfi_abort</A>,	/* message aborted */
+	<A href="xxfi_close.html">mlfi_close</A>,	/* connection cleanup */
+	<A href="xxfi_unknown.html">mlfi_unknown</A>,	/* unknown SMTP commands */
+	<A href="xxfi_data.html">mlfi_data</A>,	/* DATA command */
+	<A href="xxfi_negotiate.html">mlfi_negotiate</A>	/* Once, at the start of each SMTP connection */
+};
+
+static void
+usage(prog)
+	char *prog;
+{
+	fprintf(stderr,
+		"Usage: %s -p socket-addr [-t timeout] [-r reject-addr] [-a add-addr]\n",
+		prog);
+}
+
+int
+main(argc, argv)
+	 int argc;
+	 char **argv;
+{
+	bool setconn = FALSE;
+	int c;
+	const char *args = "p:t:r:a:h";
+	extern char *optarg;
+
+	/* Process command line options */
+	while ((c = getopt(argc, argv, args)) != -1)
+	{
+		switch (c)
+		{
+		  case 'p':
+			if (optarg == NULL || *optarg == '\0')
+			{
+				(void) fprintf(stderr, "Illegal conn: %s\n",
+					       optarg);
+				exit(EX_USAGE);
+			}
+			if (<A href="smfi_setconn.html">smfi_setconn</A>(optarg) == MI_FAILURE)
+			{
+				(void) fprintf(stderr,
+					       "smfi_setconn failed\n");
+				exit(EX_SOFTWARE);
+			}
+
+			/*
+			**  If we're using a local socket, make sure it
+			**  doesn't already exist.  Don't ever run this
+			**  code as root!!
+			*/
+
+			if (strncasecmp(optarg, "unix:", 5) == 0)
+				unlink(optarg + 5);
+			else if (strncasecmp(optarg, "local:", 6) == 0)
+				unlink(optarg + 6);
+			setconn = TRUE;
+			break;
+
+		  case 't':
+			if (optarg == NULL || *optarg == '\0')
+			{
+				(void) fprintf(stderr, "Illegal timeout: %s\n",
+					       optarg);
+				exit(EX_USAGE);
+			}
+			if (<A href="smfi_settimeout.html">smfi_settimeout</A>(atoi(optarg)) == MI_FAILURE)
+			{
+				(void) fprintf(stderr,
+					       "smfi_settimeout failed\n");
+				exit(EX_SOFTWARE);
+			}
+			break;
+
+		  case 'r':
+			if (optarg == NULL)
+			{
+				(void) fprintf(stderr,
+					       "Illegal reject rcpt: %s\n",
+					       optarg);
+				exit(EX_USAGE);
+			}
+			reject = optarg;
+			break;
+
+		  case 'a':
+			if (optarg == NULL)
+			{
+				(void) fprintf(stderr,
+					       "Illegal add rcpt: %s\n",
+					       optarg);
+				exit(EX_USAGE);
+			}
+			add = optarg;
+			smfilter.xxfi_flags |= SMFIF_ADDRCPT;
+			break;
+
+		  case 'h':
+		  default:
+			usage(argv[0]);
+			exit(EX_USAGE);
+		}
+	}
+	if (!setconn)
+	{
+		fprintf(stderr, "%s: Missing required -p argument\n", argv[0]);
+		usage(argv[0]);
+		exit(EX_USAGE);
+	}
+	if (<A href="smfi_register.html">smfi_register</A>(smfilter) == MI_FAILURE)
+	{
+		fprintf(stderr, "smfi_register failed\n");
+		exit(EX_UNAVAILABLE);
+	}
+	return <A href="smfi_main.html">smfi_main</A>();
+}
+
+/* eof */
+
+</PRE>
+<HR size="1">
+<FONT size="-1">
+Copyright (c) 2000-2004, 2006 Proofpoint, Inc. and its suppliers.
+All rights reserved.
+<BR>
+By using this file, you agree to the terms and conditions set
+forth in the LICENSE.
+</FONT>
+</BODY>
+</HTML>
+@
+
+
+1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d5 1
+a5 1
+$Id: sample.html,v 1.22 2006/10/09 23:14:51 ca Exp $
+d530 1
+a530 1
+Copyright (c) 2000-2004, 2006 Sendmail, Inc. and its suppliers.
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 3
+a3 3
+<html>
+<head><title>A Sample Filter</title></head>
+<body>
+d5 1
+a5 1
+$Sendmail: sample.html,v 1.18 2004/02/27 00:49:28 msk Exp $
+d7 1
+a7 1
+<h1>A Sample Filter</h1>
+d10 14
+a23 14
+adds a recipient given with the -a flag, and rejects a disallowed
+recipient address given with the -r flag.  It recognizes the following
+options:
+<p>
+<center>
+<table border="1" cellpadding=2 cellspacing=1>
+<tr><td><code>-p port</code></td><td>The port through which the MTA will connect to the filter.</td></tr>
+<tr><td><code>-t sec</code></td><td>The timeout value.</td></tr>
+<tr><td><code>-r addr</code></td><td>A recipient to reject.</td></tr>
+<tr><td><code>-a addr</code></td><td>A recipient to add.</td></tr>
+</table>
+</center>
+<hr>
+<pre>
+d50 1
+a50 1
+#define MLFIPRIV	((struct mlfiPriv *) <a href="smfi_getpriv.html">smfi_getpriv</a>(ctx))
+d59 1
+a59 1
+<a href="xxfi_connect.html">mlfi_connect</a>(ctx, hostname, hostaddr)
+d77 1
+a77 1
+	<a href="smfi_setpriv.html">smfi_setpriv</a>(ctx, priv);
+d79 1
+a79 1
+	ident = <a href="smfi_getsymval.html">smfi_getsymval</a>(ctx, "_");
+d93 1
+a93 1
+<a href="xxfi_helo.html">mlfi_helo</a>(ctx, helohost)
+d102 1
+a102 1
+	tls = <a href="smfi_getsymval.html">smfi_getsymval</a>(ctx, "{tls_version}");
+d123 1
+a123 1
+<a href="xxfi_envfrom.html">mlfi_envfrom</a>(ctx, argv)
+d130 1
+a130 1
+	char *mailaddr = <a href="smfi_getsymval.html">smfi_getsymval</a>(ctx, "{mail_addr}");
+d177 1
+a177 1
+<a href="xxfi_envrcpt.html">mlfi_envrcpt</a>(ctx, argv)
+d182 1
+a182 1
+	char *rcptaddr = <a href="smfi_getsymval.html">smfi_getsymval</a>(ctx, "{rcpt_addr}");
+d214 1
+a214 1
+<a href="xxfi_header.html">mlfi_header</a>(ctx, headerf, headerv)
+d231 1
+a231 1
+<a href="xxfi_eoh.html">mlfi_eoh</a>(ctx)
+d246 1
+a246 1
+<a href="xxfi_body.html">mlfi_body</a>(ctx, bodyp, bodylen)
+d268 1
+a268 1
+<a href="xxfi_eom.html">mlfi_eom</a>(ctx)
+d275 1
+a275 1
+		ok = (<a href="smfi_addrcpt.html">smfi_addrcpt</a>(ctx, add) == MI_SUCCESS);
+d280 1
+a280 1
+<a href="xxfi_abort.html">mlfi_abort</a>(ctx)
+d320 1
+a320 1
+		if (<a href="smfi_addheader.html">smfi_addheader</a>(ctx, "X-Archived", hbuf) != MI_SUCCESS)
+d349 1
+a349 1
+<a href="xxfi_close.html">mlfi_close</a>(ctx)
+d361 1
+a361 1
+	<a href="smfi_setpriv.html">smfi_setpriv</a>(ctx, NULL);
+d365 30
+d401 13
+a413 10
+	<a href="xxfi_connect.html">mlfi_connect</a>,	/* connection info filter */
+	<a href="xxfi_helo.html">mlfi_helo</a>,	/* SMTP HELO command filter */
+	<a href="xxfi_envfrom.html">mlfi_envfrom</a>,	/* envelope sender filter */
+	<a href="xxfi_envrcpt.html">mlfi_envrcpt</a>,	/* envelope recipient filter */
+	<a href="xxfi_header.html">mlfi_header</a>,	/* header filter */
+	<a href="xxfi_eoh.html">mlfi_eoh</a>,	/* end of header */
+	<a href="xxfi_body.html">mlfi_body</a>,	/* body block filter */
+	<a href="xxfi_eom.html">mlfi_eom</a>,	/* end of message */
+	<a href="xxfi_abort.html">mlfi_abort</a>,	/* message aborted */
+	<a href="xxfi_close.html">mlfi_close</a>,	/* connection cleanup */
+d447 1
+a447 1
+			if (<a href="smfi_setconn.html">smfi_setconn</a>(optarg) == MI_FAILURE)
+d474 1
+a474 1
+			if (<a href="smfi_settimeout.html">smfi_settimeout</a>(atoi(optarg)) == MI_FAILURE)
+d517 1
+a517 1
+	if (<a href="smfi_register.html">smfi_register</a>(smfilter) == MI_FAILURE)
+d522 1
+a522 1
+	return <a href="smfi_main.html">smfi_main</a>();
+d527 4
+a530 4
+</pre>
+<hr size="1">
+<font size="-1">
+Copyright (c) 2000-2004 Sendmail, Inc. and its suppliers.
+d532 1
+a532 1
+<br>
+d535 3
+a537 3
+</font>
+</body>
+</html>
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d1 3
+a3 3
+<HTML>
+<HEAD><TITLE>A Sample Filter</TITLE></HEAD>
+<BODY>
+d5 1
+a5 1
+$Id: sample.html,v 1.22 2006/10/09 23:14:51 ca Exp $
+d7 1
+a7 1
+<H1>A Sample Filter</H1>
+d10 14
+a23 14
+adds a recipient given with the -a flag,
+and rejects a disallowed recipient address given with the -r flag.
+It recognizes the following options:
+<P>
+<CENTER>
+<TABLE border="1" cellpadding=2 cellspacing=1>
+<TR><TD><CODE>-p port</CODE></TD><TD>The port through which the MTA will connect to the filter.</TD></TR>
+<TR><TD><CODE>-t sec</CODE></TD><TD>The timeout value.</TD></TR>
+<TR><TD><CODE>-r addr</CODE></TD><TD>A recipient to reject.</TD></TR>
+<TR><TD><CODE>-a addr</CODE></TD><TD>A recipient to add.</TD></TR>
+</TABLE>
+</CENTER>
+<HR>
+<PRE>
+d50 1
+a50 1
+#define MLFIPRIV	((struct mlfiPriv *) <A href="smfi_getpriv.html">smfi_getpriv</A>(ctx))
+d59 1
+a59 1
+<A href="xxfi_connect.html">mlfi_connect</A>(ctx, hostname, hostaddr)
+d77 1
+a77 1
+	<A href="smfi_setpriv.html">smfi_setpriv</A>(ctx, priv);
+d79 1
+a79 1
+	ident = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "_");
+d93 1
+a93 1
+<A href="xxfi_helo.html">mlfi_helo</A>(ctx, helohost)
+d102 1
+a102 1
+	tls = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "{tls_version}");
+d123 1
+a123 1
+<A href="xxfi_envfrom.html">mlfi_envfrom</A>(ctx, argv)
+d130 1
+a130 1
+	char *mailaddr = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "{mail_addr}");
+d177 1
+a177 1
+<A href="xxfi_envrcpt.html">mlfi_envrcpt</A>(ctx, argv)
+d182 1
+a182 1
+	char *rcptaddr = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "{rcpt_addr}");
+d214 1
+a214 1
+<A href="xxfi_header.html">mlfi_header</A>(ctx, headerf, headerv)
+d231 1
+a231 1
+<A href="xxfi_eoh.html">mlfi_eoh</A>(ctx)
+d246 1
+a246 1
+<A href="xxfi_body.html">mlfi_body</A>(ctx, bodyp, bodylen)
+d268 1
+a268 1
+<A href="xxfi_eom.html">mlfi_eom</A>(ctx)
+d275 1
+a275 1
+		ok = (<A href="smfi_addrcpt.html">smfi_addrcpt</A>(ctx, add) == MI_SUCCESS);
+d280 1
+a280 1
+<A href="xxfi_abort.html">mlfi_abort</A>(ctx)
+d320 1
+a320 1
+		if (<A href="smfi_addheader.html">smfi_addheader</A>(ctx, "X-Archived", hbuf) != MI_SUCCESS)
+d349 1
+a349 1
+<A href="xxfi_close.html">mlfi_close</A>(ctx)
+d361 1
+a361 1
+	<A href="smfi_setpriv.html">smfi_setpriv</A>(ctx, NULL);
+a364 30
+sfsistat
+<A href="xxfi_unknown.html">mlfi_unknown</A>(ctx, cmd)
+	SMFICTX *ctx;
+	char *cmd;
+{
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_data.html">mlfi_data</A>(ctx)
+	SMFICTX *ctx;
+{
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_negotiate.html">mlfi_negotiate</A>(ctx, f0, f1, f2, f3, pf0, pf1, pf2, pf3)
+	SMFICTX *ctx;
+	unsigned long f0;
+	unsigned long f1;
+	unsigned long f2;
+	unsigned long f3;
+	unsigned long *pf0;
+	unsigned long *pf1;
+	unsigned long *pf2;
+	unsigned long *pf3;
+{
+	return SMFIS_ALL_OPTS;
+}
+
+d371 10
+a380 13
+	<A href="xxfi_connect.html">mlfi_connect</A>,	/* connection info filter */
+	<A href="xxfi_helo.html">mlfi_helo</A>,	/* SMTP HELO command filter */
+	<A href="xxfi_envfrom.html">mlfi_envfrom</A>,	/* envelope sender filter */
+	<A href="xxfi_envrcpt.html">mlfi_envrcpt</A>,	/* envelope recipient filter */
+	<A href="xxfi_header.html">mlfi_header</A>,	/* header filter */
+	<A href="xxfi_eoh.html">mlfi_eoh</A>,	/* end of header */
+	<A href="xxfi_body.html">mlfi_body</A>,	/* body block filter */
+	<A href="xxfi_eom.html">mlfi_eom</A>,	/* end of message */
+	<A href="xxfi_abort.html">mlfi_abort</A>,	/* message aborted */
+	<A href="xxfi_close.html">mlfi_close</A>,	/* connection cleanup */
+	<A href="xxfi_unknown.html">mlfi_unknown</A>,	/* unknown SMTP commands */
+	<A href="xxfi_data.html">mlfi_data</A>,	/* DATA command */
+	<A href="xxfi_negotiate.html">mlfi_negotiate</A>	/* Once, at the start of each SMTP connection */
+d414 1
+a414 1
+			if (<A href="smfi_setconn.html">smfi_setconn</A>(optarg) == MI_FAILURE)
+d441 1
+a441 1
+			if (<A href="smfi_settimeout.html">smfi_settimeout</A>(atoi(optarg)) == MI_FAILURE)
+d484 1
+a484 1
+	if (<A href="smfi_register.html">smfi_register</A>(smfilter) == MI_FAILURE)
+d489 1
+a489 1
+	return <A href="smfi_main.html">smfi_main</A>();
+d494 4
+a497 4
+</PRE>
+<HR size="1">
+<FONT size="-1">
+Copyright (c) 2000-2004, 2006 Sendmail, Inc. and its suppliers.
+d499 1
+a499 1
+<BR>
+d502 3
+a504 3
+</FONT>
+</BODY>
+</HTML>
+@
+
+
+1.1.127.2
+log
+@Import sendmail 8.14.9
+@
+text
+@d5 1
+a5 1
+$Id: sample.html,v 1.23 2013-11-22 20:51:39 ca Exp $
+d530 1
+a530 1
+Copyright (c) 2000-2004, 2006 Proofpoint, Inc. and its suppliers.
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import Sendmail 8.14.0 via OpenBSD
+@
+text
+@d1 3
+a3 3
+<HTML>
+<HEAD><TITLE>A Sample Filter</TITLE></HEAD>
+<BODY>
+d5 1
+a5 1
+$Sendmail: sample.html,v 1.22 2006/10/09 23:14:51 ca Exp $
+d7 1
+a7 1
+<H1>A Sample Filter</H1>
+d10 14
+a23 14
+adds a recipient given with the -a flag,
+and rejects a disallowed recipient address given with the -r flag.
+It recognizes the following options:
+<P>
+<CENTER>
+<TABLE border="1" cellpadding=2 cellspacing=1>
+<TR><TD><CODE>-p port</CODE></TD><TD>The port through which the MTA will connect to the filter.</TD></TR>
+<TR><TD><CODE>-t sec</CODE></TD><TD>The timeout value.</TD></TR>
+<TR><TD><CODE>-r addr</CODE></TD><TD>A recipient to reject.</TD></TR>
+<TR><TD><CODE>-a addr</CODE></TD><TD>A recipient to add.</TD></TR>
+</TABLE>
+</CENTER>
+<HR>
+<PRE>
+d50 1
+a50 1
+#define MLFIPRIV	((struct mlfiPriv *) <A href="smfi_getpriv.html">smfi_getpriv</A>(ctx))
+d59 1
+a59 1
+<A href="xxfi_connect.html">mlfi_connect</A>(ctx, hostname, hostaddr)
+d77 1
+a77 1
+	<A href="smfi_setpriv.html">smfi_setpriv</A>(ctx, priv);
+d79 1
+a79 1
+	ident = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "_");
+d93 1
+a93 1
+<A href="xxfi_helo.html">mlfi_helo</A>(ctx, helohost)
+d102 1
+a102 1
+	tls = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "{tls_version}");
+d123 1
+a123 1
+<A href="xxfi_envfrom.html">mlfi_envfrom</A>(ctx, argv)
+d130 1
+a130 1
+	char *mailaddr = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "{mail_addr}");
+d177 1
+a177 1
+<A href="xxfi_envrcpt.html">mlfi_envrcpt</A>(ctx, argv)
+d182 1
+a182 1
+	char *rcptaddr = <A href="smfi_getsymval.html">smfi_getsymval</A>(ctx, "{rcpt_addr}");
+d214 1
+a214 1
+<A href="xxfi_header.html">mlfi_header</A>(ctx, headerf, headerv)
+d231 1
+a231 1
+<A href="xxfi_eoh.html">mlfi_eoh</A>(ctx)
+d246 1
+a246 1
+<A href="xxfi_body.html">mlfi_body</A>(ctx, bodyp, bodylen)
+d268 1
+a268 1
+<A href="xxfi_eom.html">mlfi_eom</A>(ctx)
+d275 1
+a275 1
+		ok = (<A href="smfi_addrcpt.html">smfi_addrcpt</A>(ctx, add) == MI_SUCCESS);
+d280 1
+a280 1
+<A href="xxfi_abort.html">mlfi_abort</A>(ctx)
+d320 1
+a320 1
+		if (<A href="smfi_addheader.html">smfi_addheader</A>(ctx, "X-Archived", hbuf) != MI_SUCCESS)
+d349 1
+a349 1
+<A href="xxfi_close.html">mlfi_close</A>(ctx)
+d361 1
+a361 1
+	<A href="smfi_setpriv.html">smfi_setpriv</A>(ctx, NULL);
+a364 30
+sfsistat
+<A href="xxfi_unknown.html">mlfi_unknown</A>(ctx, cmd)
+	SMFICTX *ctx;
+	char *cmd;
+{
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_data.html">mlfi_data</A>(ctx)
+	SMFICTX *ctx;
+{
+	return SMFIS_CONTINUE;
+}
+
+sfsistat
+<A href="xxfi_negotiate.html">mlfi_negotiate</A>(ctx, f0, f1, f2, f3, pf0, pf1, pf2, pf3)
+	SMFICTX *ctx;
+	unsigned long f0;
+	unsigned long f1;
+	unsigned long f2;
+	unsigned long f3;
+	unsigned long *pf0;
+	unsigned long *pf1;
+	unsigned long *pf2;
+	unsigned long *pf3;
+{
+	return SMFIS_ALL_OPTS;
+}
+
+d371 10
+a380 13
+	<A href="xxfi_connect.html">mlfi_connect</A>,	/* connection info filter */
+	<A href="xxfi_helo.html">mlfi_helo</A>,	/* SMTP HELO command filter */
+	<A href="xxfi_envfrom.html">mlfi_envfrom</A>,	/* envelope sender filter */
+	<A href="xxfi_envrcpt.html">mlfi_envrcpt</A>,	/* envelope recipient filter */
+	<A href="xxfi_header.html">mlfi_header</A>,	/* header filter */
+	<A href="xxfi_eoh.html">mlfi_eoh</A>,	/* end of header */
+	<A href="xxfi_body.html">mlfi_body</A>,	/* body block filter */
+	<A href="xxfi_eom.html">mlfi_eom</A>,	/* end of message */
+	<A href="xxfi_abort.html">mlfi_abort</A>,	/* message aborted */
+	<A href="xxfi_close.html">mlfi_close</A>,	/* connection cleanup */
+	<A href="xxfi_unknown.html">mlfi_unknown</A>,	/* unknown SMTP commands */
+	<A href="xxfi_data.html">mlfi_data</A>,	/* DATA command */
+	<A href="xxfi_negotiate.html">mlfi_negotiate</A>	/* Once, at the start of each SMTP connection */
+d414 1
+a414 1
+			if (<A href="smfi_setconn.html">smfi_setconn</A>(optarg) == MI_FAILURE)
+d441 1
+a441 1
+			if (<A href="smfi_settimeout.html">smfi_settimeout</A>(atoi(optarg)) == MI_FAILURE)
+d484 1
+a484 1
+	if (<A href="smfi_register.html">smfi_register</A>(smfilter) == MI_FAILURE)
+d489 1
+a489 1
+	return <A href="smfi_main.html">smfi_main</A>();
+d494 4
+a497 4
+</PRE>
+<HR size="1">
+<FONT size="-1">
+Copyright (c) 2000-2004, 2006 Sendmail, Inc. and its suppliers.
+d499 1
+a499 1
+<BR>
+d502 3
+a504 3
+</FONT>
+</BODY>
+</HTML>
+@
+
+
+1.1.1.2.4.1
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d5 1
+a5 1
+$Id: sample.html,v 1.22 2006/10/09 23:14:51 ca Exp $
+@
+
+
+1.1.1.3
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d5 1
+a5 1
+$Id: sample.html,v 1.22 2006/10/09 23:14:51 ca Exp $
+@
+
+

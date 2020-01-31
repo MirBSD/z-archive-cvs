@@ -1,0 +1,694 @@
+head	1.5;
+access;
+symbols
+	cvs-201110182115:1.1.3.2
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	cvs-200611031400:1.1.3.1
+	netbsd:1.1.3
+	OPENBSD_4_0:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2014.02.09.23.20.00;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10052F80D3270BFA1BC;
+
+1.4
+date	2012.09.04.18.16.15;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100504644903517C0CE;
+
+1.3
+date	2011.10.18.19.46.27;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	1004E9DD78368B8F2A9;
+
+1.2
+date	2006.11.03.18.10.56;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100454B862956081199;
+
+1.1
+date	2005.02.05.17.25.18;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.3.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.18;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.3.1
+date	2006.11.03.14.20.59;	author tg;	state Exp;
+branches;
+next	1.1.3.2;
+commitid	100454B505850533E95;
+
+1.1.3.2
+date	2011.10.18.19.20.48;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004E9DD18376042FF5;
+
+
+desc
+@@
+
+
+1.5
+log
+@“long double” in MirBSD (i386 and sparc, both) is currently just plain wrong and will lead to bad results; fix the code if needed
+@
+text
+@/**	$MirOS: src/lib/libm/src/math_private.h,v 1.4 2012/09/04 18:16:15 tg Exp $ */
+/*	$OpenBSD: math_private.h,v 1.6 2002/02/16 21:27:27 millert Exp $	*/
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+
+/*
+ * from: @@(#)fdlibm.h 5.1 93/09/24
+ * $NetBSD: math_private.h,v 1.16 2010/09/16 20:39:50 drochner Exp $
+ */
+
+#ifndef _MATH_PRIVATE_H_
+#define _MATH_PRIVATE_H_ "$MirOS: src/lib/libm/src/math_private.h,v 1.4 2012/09/04 18:16:15 tg Exp $"
+
+#include <sys/types.h>
+
+/* The original fdlibm code used statements like:
+	n0 = ((*(int*)&one)>>29)^1;		* index of high word *
+	ix0 = *(n0+(int*)&x);			* high word of x *
+	ix1 = *((1-n0)+(int*)&x);		* low word of x *
+   to dig two 32 bit words out of the 64 bit IEEE floating point
+   value.  That is non-ANSI, and, moreover, the gcc instruction
+   scheduler gets it wrong.  We instead use the following macros.
+   Unlike the original code, we determine the endianness at compile
+   time, not at run time; I don't see much benefit to selecting
+   endianness at run time.  */
+
+/* A union which permits us to convert between a double and two 32 bit
+   ints.  */
+
+/*
+ * The arm32 port is little endian except for the FP word order which is
+ * big endian.
+ */
+
+#if (BYTE_ORDER == BIG_ENDIAN) || defined(arm32)
+
+typedef union
+{
+  double value;
+  struct
+  {
+    u_int32_t msw;
+    u_int32_t lsw;
+  } parts;
+} ieee_double_shape_type;
+
+#endif
+
+#if (BYTE_ORDER == LITTLE_ENDIAN) && !defined(arm32)
+
+typedef union
+{
+  double value;
+  struct
+  {
+    u_int32_t lsw;
+    u_int32_t msw;
+  } parts;
+} ieee_double_shape_type;
+
+#endif
+
+/* Get two 32 bit ints from a double.  */
+
+#define EXTRACT_WORDS(ix0,ix1,d)				\
+do {								\
+  ieee_double_shape_type ew_u;					\
+  ew_u.value = (d);						\
+  (ix0) = ew_u.parts.msw;					\
+  (ix1) = ew_u.parts.lsw;					\
+} while (/*CONSTCOND*/0)
+
+/* Get the more significant 32 bit int from a double.  */
+
+#define GET_HIGH_WORD(i,d)					\
+do {								\
+  ieee_double_shape_type gh_u;					\
+  gh_u.value = (d);						\
+  (i) = gh_u.parts.msw;						\
+} while (/*CONSTCOND*/0)
+
+/* Get the less significant 32 bit int from a double.  */
+
+#define GET_LOW_WORD(i,d)					\
+do {								\
+  ieee_double_shape_type gl_u;					\
+  gl_u.value = (d);						\
+  (i) = gl_u.parts.lsw;						\
+} while (/*CONSTCOND*/0)
+
+/* Set a double from two 32 bit ints.  */
+
+#define INSERT_WORDS(d,ix0,ix1)					\
+do {								\
+  ieee_double_shape_type iw_u;					\
+  iw_u.parts.msw = (ix0);					\
+  iw_u.parts.lsw = (ix1);					\
+  (d) = iw_u.value;						\
+} while (/*CONSTCOND*/0)
+
+/* Set the more significant 32 bits of a double from an int.  */
+
+#define SET_HIGH_WORD(d,v)					\
+do {								\
+  ieee_double_shape_type sh_u;					\
+  sh_u.value = (d);						\
+  sh_u.parts.msw = (v);						\
+  (d) = sh_u.value;						\
+} while (/*CONSTCOND*/0)
+
+/* Set the less significant 32 bits of a double from an int.  */
+
+#define SET_LOW_WORD(d,v)					\
+do {								\
+  ieee_double_shape_type sl_u;					\
+  sl_u.value = (d);						\
+  sl_u.parts.lsw = (v);						\
+  (d) = sl_u.value;						\
+} while (/*CONSTCOND*/0)
+
+/* A union which permits us to convert between a float and a 32 bit
+   int.  */
+
+typedef union
+{
+  float value;
+  u_int32_t word;
+} ieee_float_shape_type;
+
+/* Get a 32 bit int from a float.  */
+
+#define GET_FLOAT_WORD(i,d)					\
+do {								\
+  ieee_float_shape_type gf_u;					\
+  gf_u.value = (d);						\
+  (i) = gf_u.word;						\
+} while (/*CONSTCOND*/0)
+
+/* Set a float from a 32 bit int.  */
+
+#define SET_FLOAT_WORD(d,i)					\
+do {								\
+  ieee_float_shape_type sf_u;					\
+  sf_u.word = (i);						\
+  (d) = sf_u.value;						\
+} while (/*CONSTCOND*/0)
+
+/*
+ * Attempt to get strict C99 semantics for assignment with non-C99 compilers.
+ */
+#if FLT_EVAL_METHOD == 0 || __GNUC__ == 0
+#define	STRICT_ASSIGN(type, lval, rval)	((lval) = (rval))
+#else
+#define	STRICT_ASSIGN(type, lval, rval) do {	\
+	volatile type __lval;			\
+						\
+	if (sizeof(type) >= sizeof(double))	\
+		(lval) = (rval);		\
+	else {					\
+		__lval = (rval);		\
+		(lval) = __lval;		\
+	}					\
+} while (/*CONSTCOND*/0)
+#endif
+
+#ifdef	_COMPLEX_H
+
+/*
+ * Quoting from ISO/IEC 9899:TC2:
+ *
+ * 6.2.5.13 Types
+ * Each complex type has the same representation and alignment requirements as
+ * an array type containing exactly two elements of the corresponding real type;
+ * the first element is equal to the real part, and the second element to the
+ * imaginary part, of the complex number.
+ */
+typedef union {
+	float complex z;
+	float parts[2];
+} float_complex;
+
+typedef union {
+	double complex z;
+	double parts[2];
+} double_complex;
+
+#define	REAL_PART(z)	((z).parts[0])
+#define	IMAG_PART(z)	((z).parts[1])
+
+#endif	/* _COMPLEX_H */
+
+/* ieee style elementary functions */
+extern double __ieee754_sqrt(double);
+extern double __ieee754_acos(double);
+extern double __ieee754_acosh(double);
+extern double __ieee754_log(double);
+extern double __ieee754_atanh(double);
+extern double __ieee754_asin(double);
+extern double __ieee754_atan2(double,double);
+extern double __ieee754_exp(double);
+extern double __ieee754_cosh(double);
+extern double __ieee754_fmod(double,double);
+extern double __ieee754_pow(double,double);
+extern double __ieee754_lgamma_r(double,int *);
+extern double __ieee754_gamma_r(double,int *);
+extern double __ieee754_lgamma(double);
+extern double __ieee754_gamma(double);
+extern double __ieee754_log10(double);
+extern double __ieee754_log2(double);
+extern double __ieee754_sinh(double);
+extern double __ieee754_hypot(double,double);
+extern double __ieee754_j0(double);
+extern double __ieee754_j1(double);
+extern double __ieee754_y0(double);
+extern double __ieee754_y1(double);
+extern double __ieee754_jn(int,double);
+extern double __ieee754_yn(int,double);
+extern double __ieee754_remainder(double,double);
+extern int    __ieee754_rem_pio2(double,double*);
+extern double __ieee754_scalb(double,double);
+
+/* fdlibm kernel function */
+extern double __kernel_standard(double,double,int);
+extern double __kernel_sin(double,double,int);
+extern double __kernel_cos(double,double);
+extern double __kernel_tan(double,double,int);
+extern int    __kernel_rem_pio2(double*,double*,int,int,int,const int*);
+
+
+/* ieee style elementary float functions */
+extern float __ieee754_sqrtf(float);
+extern float __ieee754_acosf(float);
+extern float __ieee754_acoshf(float);
+extern float __ieee754_logf(float);
+extern float __ieee754_atanhf(float);
+extern float __ieee754_asinf(float);
+extern float __ieee754_atan2f(float,float);
+extern float __ieee754_expf(float);
+extern float __ieee754_coshf(float);
+extern float __ieee754_fmodf(float,float);
+extern float __ieee754_powf(float,float);
+extern float __ieee754_lgammaf_r(float,int *);
+extern float __ieee754_gammaf_r(float,int *);
+extern float __ieee754_lgammaf(float);
+extern float __ieee754_gammaf(float);
+extern float __ieee754_log10f(float);
+extern float __ieee754_log2f(float);
+extern float __ieee754_sinhf(float);
+extern float __ieee754_hypotf(float,float);
+extern float __ieee754_j0f(float);
+extern float __ieee754_j1f(float);
+extern float __ieee754_y0f(float);
+extern float __ieee754_y1f(float);
+extern float __ieee754_jnf(int,float);
+extern float __ieee754_ynf(int,float);
+extern float __ieee754_remainderf(float,float);
+extern int   __ieee754_rem_pio2f(float,float*);
+extern float __ieee754_scalbf(float,float);
+
+/* float versions of fdlibm kernel functions */
+extern float __kernel_sinf(float,float,int);
+extern float __kernel_cosf(float,float);
+extern float __kernel_tanf(float,float,int);
+extern int   __kernel_rem_pio2f(float*,float*,int,int,int,const int*);
+
+#endif /* _MATH_PRIVATE_H_ */
+@
+
+
+1.4
+log
+@tentative major bump to libm.so.7.0 which probably should have been
+done instead of a minor bump to 6.2 back then… but what few did we
+know… anyway, basically remove the “long double” remnants, since if
+you were using it on MirBSD, you were Doing It Wrong already anyway
+as sparc only has 32/64 bit float, and while i387 has 32/64/80 bit,
+our FPUCW limits precision to 64 bit (and the ABIs are at issue for
+whether “long double” should be stored with 80 or 96 bit and *THEN*
+SSE wants 128-bit alignment for them, so…)
+
+This removes “long double” functions nobody should have been using,
+on i386, which doesn’t really warrant a major bump, and __infinity,
+which our new libm provides as GCC builtin (and __infinityf was not
+included anyway).
+
+BUT! Do not use this yet. This needs verification on sparc, where a
+Perl build failed due to having *more* (but actually even uselesser
+– heh) long double stubs…
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libm/src/math_private.h,v 1.3 2011/10/18 19:46:27 bsiegert Exp $ */
+d20 1
+a20 1
+#define _MATH_PRIVATE_H_ "$MirOS$"
+a194 7
+#if 0
+typedef union {
+	long double complex z;
+	long double parts[2];
+} long_double_complex;
+#endif
+
+@
+
+
+1.3
+log
+@Merge NetBSD libm. Makefile needs more work, I think.
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libm/src/math_private.h,v 1.2 2006/11/03 18:10:56 tg Exp $ */
+d20 1
+a20 1
+#define _MATH_PRIVATE_H_
+d195 1
+d200 1
+@
+
+
+1.2
+log
+@Switch to NetBSD libm
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d16 1
+a16 1
+ * $NetBSD: math_private.h,v 1.12 2005/07/21 12:55:58 christos Exp $
+d79 1
+a79 1
+} while (0)
+d88 1
+a88 1
+} while (0)
+d97 1
+a97 1
+} while (0)
+d107 1
+a107 1
+} while (0)
+d117 1
+a117 1
+} while (0)
+d127 1
+a127 1
+} while (0)
+d145 1
+a145 1
+} while (0)
+d154 50
+a203 1
+} while (0)
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d9 1
+a9 1
+ * software is freely granted, provided that this notice 
+d16 1
+d45 1
+a45 1
+typedef union 
+d48 1
+a48 1
+  struct 
+d59 1
+a59 1
+typedef union 
+d62 1
+a62 1
+  struct 
+d157 7
+a163 7
+extern double __ieee754_sqrt(double);			
+extern double __ieee754_acos(double);			
+extern double __ieee754_acosh(double);			
+extern double __ieee754_log(double);			
+extern double __ieee754_atanh(double);			
+extern double __ieee754_asin(double);			
+extern double __ieee754_atan2(double,double);			
+d173 1
+d187 1
+a187 1
+extern double __kernel_standard(double,double,int);	
+d195 7
+a201 7
+extern float __ieee754_sqrtf(float);			
+extern float __ieee754_acosf(float);			
+extern float __ieee754_acoshf(float);			
+extern float __ieee754_logf(float);			
+extern float __ieee754_atanhf(float);			
+extern float __ieee754_asinf(float);			
+extern float __ieee754_atan2f(float,float);			
+d211 1
+@
+
+
+1.1.3.1
+log
+@Laugh at OpenBSD's libm and import NetBSD's
+@
+text
+@d1 1
+d8 1
+a8 1
+ * software is freely granted, provided that this notice
+a14 1
+ * $NetBSD: math_private.h,v 1.12 2005/07/21 12:55:58 christos Exp $
+d37 1
+a37 1
+ * The ARM ports are little endian except for the FPA word order which is
+d41 1
+a41 1
+#if (BYTE_ORDER == BIG_ENDIAN) || (defined(__arm__) && !defined(__VFP_FP__))
+d43 1
+a43 1
+typedef union
+d46 1
+a46 1
+  struct
+d55 1
+a55 2
+#if (BYTE_ORDER == LITTLE_ENDIAN) && \
+    !(defined(__arm__) && !defined(__VFP_FP__))
+d57 1
+a57 1
+typedef union
+d60 1
+a60 1
+  struct
+d155 27
+a181 28
+extern double __ieee754_sqrt __P((double));
+extern double __ieee754_acos __P((double));
+extern double __ieee754_acosh __P((double));
+extern double __ieee754_log __P((double));
+extern double __ieee754_atanh __P((double));
+extern double __ieee754_asin __P((double));
+extern double __ieee754_atan2 __P((double,double));
+extern double __ieee754_exp __P((double));
+extern double __ieee754_cosh __P((double));
+extern double __ieee754_fmod __P((double,double));
+extern double __ieee754_pow __P((double,double));
+extern double __ieee754_lgamma_r __P((double,int *));
+extern double __ieee754_gamma_r __P((double,int *));
+extern double __ieee754_lgamma __P((double));
+extern double __ieee754_gamma __P((double));
+extern double __ieee754_log10 __P((double));
+extern double __ieee754_log2 __P((double));
+extern double __ieee754_sinh __P((double));
+extern double __ieee754_hypot __P((double,double));
+extern double __ieee754_j0 __P((double));
+extern double __ieee754_j1 __P((double));
+extern double __ieee754_y0 __P((double));
+extern double __ieee754_y1 __P((double));
+extern double __ieee754_jn __P((int,double));
+extern double __ieee754_yn __P((int,double));
+extern double __ieee754_remainder __P((double,double));
+extern int    __ieee754_rem_pio2 __P((double,double*));
+extern double __ieee754_scalb __P((double,double));
+d184 5
+a188 5
+extern double __kernel_standard __P((double,double,int));
+extern double __kernel_sin __P((double,double,int));
+extern double __kernel_cos __P((double,double));
+extern double __kernel_tan __P((double,double,int));
+extern int    __kernel_rem_pio2 __P((double*,double*,int,int,int,const int*));
+d192 27
+a218 28
+extern float __ieee754_sqrtf __P((float));
+extern float __ieee754_acosf __P((float));
+extern float __ieee754_acoshf __P((float));
+extern float __ieee754_logf __P((float));
+extern float __ieee754_atanhf __P((float));
+extern float __ieee754_asinf __P((float));
+extern float __ieee754_atan2f __P((float,float));
+extern float __ieee754_expf __P((float));
+extern float __ieee754_coshf __P((float));
+extern float __ieee754_fmodf __P((float,float));
+extern float __ieee754_powf __P((float,float));
+extern float __ieee754_lgammaf_r __P((float,int *));
+extern float __ieee754_gammaf_r __P((float,int *));
+extern float __ieee754_lgammaf __P((float));
+extern float __ieee754_gammaf __P((float));
+extern float __ieee754_log10f __P((float));
+extern float __ieee754_log2f __P((float));
+extern float __ieee754_sinhf __P((float));
+extern float __ieee754_hypotf __P((float,float));
+extern float __ieee754_j0f __P((float));
+extern float __ieee754_j1f __P((float));
+extern float __ieee754_y0f __P((float));
+extern float __ieee754_y1f __P((float));
+extern float __ieee754_jnf __P((int,float));
+extern float __ieee754_ynf __P((int,float));
+extern float __ieee754_remainderf __P((float,float));
+extern int   __ieee754_rem_pio2f __P((float,float*));
+extern float __ieee754_scalbf __P((float,float));
+d221 4
+a224 4
+extern float __kernel_sinf __P((float,float,int));
+extern float __kernel_cosf __P((float,float));
+extern float __kernel_tanf __P((float,float,int));
+extern int   __kernel_rem_pio2f __P((float*,float*,int,int,int,const int*));
+@
+
+
+1.1.3.2
+log
+@Import current libm from NetBSD, with the directories complex, noieee_src, arch/!i387 removed.
+
+The idea is to get fmin and fmax, which are needed by some newer software.
+@
+text
+@d14 1
+a14 1
+ * $NetBSD: math_private.h,v 1.16 2010/09/16 20:39:50 drochner Exp $
+d78 1
+a78 1
+} while (/*CONSTCOND*/0)
+d87 1
+a87 1
+} while (/*CONSTCOND*/0)
+d96 1
+a96 1
+} while (/*CONSTCOND*/0)
+d106 1
+a106 1
+} while (/*CONSTCOND*/0)
+d116 1
+a116 1
+} while (/*CONSTCOND*/0)
+d126 1
+a126 1
+} while (/*CONSTCOND*/0)
+d144 1
+a144 1
+} while (/*CONSTCOND*/0)
+d153 1
+a153 50
+} while (/*CONSTCOND*/0)
+
+/*
+ * Attempt to get strict C99 semantics for assignment with non-C99 compilers.
+ */
+#if FLT_EVAL_METHOD == 0 || __GNUC__ == 0
+#define	STRICT_ASSIGN(type, lval, rval)	((lval) = (rval))
+#else
+#define	STRICT_ASSIGN(type, lval, rval) do {	\
+	volatile type __lval;			\
+						\
+	if (sizeof(type) >= sizeof(double))	\
+		(lval) = (rval);		\
+	else {					\
+		__lval = (rval);		\
+		(lval) = __lval;		\
+	}					\
+} while (/*CONSTCOND*/0)
+#endif
+
+#ifdef	_COMPLEX_H
+
+/*
+ * Quoting from ISO/IEC 9899:TC2:
+ *
+ * 6.2.5.13 Types
+ * Each complex type has the same representation and alignment requirements as
+ * an array type containing exactly two elements of the corresponding real type;
+ * the first element is equal to the real part, and the second element to the
+ * imaginary part, of the complex number.
+ */
+typedef union {
+	float complex z;
+	float parts[2];
+} float_complex;
+
+typedef union {
+	double complex z;
+	double parts[2];
+} double_complex;
+
+typedef union {
+	long double complex z;
+	long double parts[2];
+} long_double_complex;
+
+#define	REAL_PART(z)	((z).parts[0])
+#define	IMAG_PART(z)	((z).parts[1])
+
+#endif	/* _COMPLEX_H */
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

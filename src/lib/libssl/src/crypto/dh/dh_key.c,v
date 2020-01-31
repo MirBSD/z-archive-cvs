@@ -1,0 +1,516 @@
+head	1.3;
+access;
+symbols
+	cvs-200804031830:1.1.1.4
+	MIRBSD_10:1.3.0.2
+	MIRBSD_10_BASE:1.3
+	cvs-200706161500:1.1.1.4
+	cvs-200705171600:1.1.1.3
+	OPENBSD_4_0:1.1.1.3
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200512060130:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2007.03.08.10.50.05;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10045EFEA64749A2C51;
+
+1.2
+date	2006.09.29.21.08.29;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100451D8B4970B35118;
+
+1.1
+date	2005.02.05.17.25.48;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.48;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.29.13.39.15;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2006.09.20.19.07.02;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	10045119150397FC669;
+
+1.1.1.4
+date	2007.06.16.15.10.56;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004673FD85114A3F32;
+
+
+desc
+@@
+
+
+1.3
+log
+@upgrade to OpenSSL 0.9.7m
+@
+text
+@/* crypto/dh/dh_key.c */
+/* Copyright (C) 1995-1998 Eric Young (eay@@cryptsoft.com)
+ * All rights reserved.
+ *
+ * This package is an SSL implementation written
+ * by Eric Young (eay@@cryptsoft.com).
+ * The implementation was written so as to conform with Netscapes SSL.
+ * 
+ * This library is free for commercial and non-commercial use as long as
+ * the following conditions are aheared to.  The following conditions
+ * apply to all code found in this distribution, be it the RC4, RSA,
+ * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
+ * included with this distribution is covered by the same copyright terms
+ * except that the holder is Tim Hudson (tjh@@cryptsoft.com).
+ * 
+ * Copyright remains Eric Young's, and as such any Copyright notices in
+ * the code are not to be removed.
+ * If this package is used in a product, Eric Young should be given attribution
+ * as the author of the parts of the library used.
+ * This can be in the form of a textual message at program startup or
+ * in documentation (online or textual) provided with the package.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *    "This product includes cryptographic software written by
+ *     Eric Young (eay@@cryptsoft.com)"
+ *    The word 'cryptographic' can be left out if the rouines from the library
+ *    being used are not cryptographic related :-).
+ * 4. If you include any Windows specific code (or a derivative thereof) from 
+ *    the apps directory (application code) you must include an acknowledgement:
+ *    "This product includes software written by Tim Hudson (tjh@@cryptsoft.com)"
+ * 
+ * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ * 
+ * The licence and distribution terms for any publically available version or
+ * derivative of this code cannot be changed.  i.e. this code cannot simply be
+ * copied and put under another distribution licence
+ * [including the GNU Public Licence.]
+ */
+
+#include <stdio.h>
+#include "cryptlib.h"
+#include <openssl/bn.h>
+#include <openssl/rand.h>
+#include <openssl/dh.h>
+
+#ifndef OPENSSL_FIPS
+
+static int generate_key(DH *dh);
+static int compute_key(unsigned char *key, const BIGNUM *pub_key, DH *dh);
+static int dh_bn_mod_exp(const DH *dh, BIGNUM *r,
+			const BIGNUM *a, const BIGNUM *p,
+			const BIGNUM *m, BN_CTX *ctx,
+			BN_MONT_CTX *m_ctx);
+static int dh_init(DH *dh);
+static int dh_finish(DH *dh);
+
+int DH_generate_key(DH *dh)
+	{
+	return dh->meth->generate_key(dh);
+	}
+
+int DH_compute_key(unsigned char *key, const BIGNUM *pub_key, DH *dh)
+	{
+	return dh->meth->compute_key(key, pub_key, dh);
+	}
+
+static DH_METHOD dh_ossl = {
+"OpenSSL DH Method",
+generate_key,
+compute_key,
+dh_bn_mod_exp,
+dh_init,
+dh_finish,
+0,
+NULL
+};
+
+const DH_METHOD *DH_OpenSSL(void)
+{
+	return &dh_ossl;
+}
+
+static int generate_key(DH *dh)
+	{
+	int ok=0;
+	int generate_new_key=0;
+	unsigned l;
+	BN_CTX *ctx;
+	BN_MONT_CTX *mont=NULL;
+	BIGNUM *pub_key=NULL,*priv_key=NULL;
+
+	ctx = BN_CTX_new();
+	if (ctx == NULL) goto err;
+
+	if (dh->priv_key == NULL)
+		{
+		priv_key=BN_new();
+		if (priv_key == NULL) goto err;
+		generate_new_key=1;
+		}
+	else
+		priv_key=dh->priv_key;
+
+	if (dh->pub_key == NULL)
+		{
+		pub_key=BN_new();
+		if (pub_key == NULL) goto err;
+		}
+	else
+		pub_key=dh->pub_key;
+
+
+	if (dh->flags & DH_FLAG_CACHE_MONT_P)
+		{
+		mont = BN_MONT_CTX_set_locked(
+				(BN_MONT_CTX **)&dh->method_mont_p,
+				CRYPTO_LOCK_DH, dh->p, ctx);
+		if (!mont)
+			goto err;
+		}
+
+	if (generate_new_key)
+		{
+		l = dh->length ? dh->length : BN_num_bits(dh->p)-1; /* secret exponent length */
+		if (!BN_rand(priv_key, l, 0, 0)) goto err;
+		}
+
+	{
+		BIGNUM local_prk;
+		BIGNUM *prk;
+
+		if ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) == 0)
+			{
+			BN_init(&local_prk);
+			prk = &local_prk;
+			BN_with_flags(prk, priv_key, BN_FLG_EXP_CONSTTIME);
+			}
+		else
+			prk = priv_key;
+
+		if (!dh->meth->bn_mod_exp(dh, pub_key, dh->g, prk, dh->p, ctx, mont)) goto err;
+	}
+		
+	dh->pub_key=pub_key;
+	dh->priv_key=priv_key;
+	ok=1;
+err:
+	if (ok != 1)
+		DHerr(DH_F_DH_GENERATE_KEY,ERR_R_BN_LIB);
+
+	if ((pub_key != NULL)  && (dh->pub_key == NULL))  BN_free(pub_key);
+	if ((priv_key != NULL) && (dh->priv_key == NULL)) BN_free(priv_key);
+	BN_CTX_free(ctx);
+	return(ok);
+	}
+
+static int compute_key(unsigned char *key, const BIGNUM *pub_key, DH *dh)
+	{
+	BN_CTX *ctx=NULL;
+	BN_MONT_CTX *mont=NULL;
+	BIGNUM *tmp;
+	int ret= -1;
+	int check_result;
+
+	if (BN_num_bits(dh->p) > OPENSSL_DH_MAX_MODULUS_BITS)
+		{
+		DHerr(DH_F_DH_COMPUTE_KEY,DH_R_MODULUS_TOO_LARGE);
+		goto err;
+		}
+
+	ctx = BN_CTX_new();
+	if (ctx == NULL) goto err;
+	BN_CTX_start(ctx);
+	tmp = BN_CTX_get(ctx);
+	
+	if (dh->priv_key == NULL)
+		{
+		DHerr(DH_F_DH_COMPUTE_KEY,DH_R_NO_PRIVATE_VALUE);
+		goto err;
+		}
+
+	if (dh->flags & DH_FLAG_CACHE_MONT_P)
+		{
+		mont = BN_MONT_CTX_set_locked(
+				(BN_MONT_CTX **)&dh->method_mont_p,
+				CRYPTO_LOCK_DH, dh->p, ctx);
+		if ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) == 0)
+			{
+			/* XXX */
+			BN_set_flags(dh->priv_key, BN_FLG_EXP_CONSTTIME);
+			}
+		if (!mont)
+			goto err;
+		}
+	if (!DH_check_pub_key(dh, pub_key, &check_result) || check_result)
+		{
+		DHerr(DH_F_DH_COMPUTE_KEY,DH_R_INVALID_PUBKEY);
+		goto err;
+		}
+	if (!dh->meth->bn_mod_exp(dh, tmp, pub_key, dh->priv_key,dh->p,ctx,mont))
+		{
+		DHerr(DH_F_DH_COMPUTE_KEY,ERR_R_BN_LIB);
+		goto err;
+		}
+
+	ret=BN_bn2bin(tmp,key);
+err:
+	if (ctx != NULL)
+		{
+		BN_CTX_end(ctx);
+		BN_CTX_free(ctx);
+		}
+	return(ret);
+	}
+
+static int dh_bn_mod_exp(const DH *dh, BIGNUM *r,
+			const BIGNUM *a, const BIGNUM *p,
+			const BIGNUM *m, BN_CTX *ctx,
+			BN_MONT_CTX *m_ctx)
+	{
+	/* If a is only one word long and constant time is false, use the faster
+	 * exponenentiation function.
+	 */
+	if (a->top == 1 && ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) != 0))
+		{
+		BN_ULONG A = a->d[0];
+		return BN_mod_exp_mont_word(r,A,p,m,ctx,m_ctx);
+		}
+	else
+		return BN_mod_exp_mont(r,a,p,m,ctx,m_ctx);
+	}
+
+
+static int dh_init(DH *dh)
+	{
+	dh->flags |= DH_FLAG_CACHE_MONT_P;
+	return(1);
+	}
+
+static int dh_finish(DH *dh)
+	{
+	if(dh->method_mont_p)
+		BN_MONT_CTX_free((BN_MONT_CTX *)dh->method_mont_p);
+	return(1);
+	}
+
+#endif
+@
+
+
+1.2
+log
+@update OpenSSL to 0.9.7l (easy update, no API/ABI change)
+@
+text
+@d178 1
+a178 1
+	BN_CTX *ctx;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d65 2
+d108 1
+a108 1
+	BN_MONT_CTX *mont;
+d131 2
+a132 1
+	if ((dh->method_mont_p == NULL) && (dh->flags & DH_FLAG_CACHE_MONT_P))
+d134 5
+a138 3
+		if ((dh->method_mont_p=(char *)BN_MONT_CTX_new()) != NULL)
+			if (!BN_MONT_CTX_set((BN_MONT_CTX *)dh->method_mont_p,
+				dh->p,ctx)) goto err;
+a139 1
+	mont=(BN_MONT_CTX *)dh->method_mont_p;
+d146 16
+a161 2
+	if (!dh->meth->bn_mod_exp(dh, pub_key, dh->g, priv_key,dh->p,ctx,mont))
+		goto err;
+d179 1
+a179 1
+	BN_MONT_CTX *mont;
+d182 7
+d200 2
+a201 1
+	if ((dh->method_mont_p == NULL) && (dh->flags & DH_FLAG_CACHE_MONT_P))
+d203 15
+a217 3
+		if ((dh->method_mont_p=(char *)BN_MONT_CTX_new()) != NULL)
+			if (!BN_MONT_CTX_set((BN_MONT_CTX *)dh->method_mont_p,
+				dh->p,ctx)) goto err;
+a218 2
+
+	mont=(BN_MONT_CTX *)dh->method_mont_p;
+d227 5
+a231 2
+	BN_CTX_end(ctx);
+	BN_CTX_free(ctx);
+d240 4
+a243 1
+	if (a->top == 1)
+d265 2
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@sure enough they updated OpenSSL late
+but thanks mates, so I need not do it myself
+@
+text
+@a64 2
+#ifndef OPENSSL_FIPS
+
+a222 2
+
+#endif
+@
+
+
+1.1.1.3
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d108 1
+a108 1
+	BN_MONT_CTX *mont=NULL;
+d131 1
+a131 2
+
+	if (dh->flags & DH_FLAG_CACHE_MONT_P)
+d133 3
+a135 5
+		mont = BN_MONT_CTX_set_locked(
+				(BN_MONT_CTX **)&dh->method_mont_p,
+				CRYPTO_LOCK_DH, dh->p, ctx);
+		if (!mont)
+			goto err;
+d137 1
+d144 2
+a145 16
+
+	{
+		BIGNUM local_prk;
+		BIGNUM *prk;
+
+		if ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) == 0)
+			{
+			BN_init(&local_prk);
+			prk = &local_prk;
+			BN_with_flags(prk, priv_key, BN_FLG_EXP_CONSTTIME);
+			}
+		else
+			prk = priv_key;
+
+		if (!dh->meth->bn_mod_exp(dh, pub_key, dh->g, prk, dh->p, ctx, mont)) goto err;
+	}
+d163 1
+a163 1
+	BN_MONT_CTX *mont=NULL;
+a165 1
+	int check_result;
+d177 1
+a177 2
+
+	if (dh->flags & DH_FLAG_CACHE_MONT_P)
+d179 3
+a181 15
+		mont = BN_MONT_CTX_set_locked(
+				(BN_MONT_CTX **)&dh->method_mont_p,
+				CRYPTO_LOCK_DH, dh->p, ctx);
+		if ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) == 0)
+			{
+			/* XXX */
+			BN_set_flags(dh->priv_key, BN_FLG_EXP_CONSTTIME);
+			}
+		if (!mont)
+			goto err;
+		}
+	if (!DH_check_pub_key(dh, pub_key, &check_result) || check_result)
+		{
+		DHerr(DH_F_DH_COMPUTE_KEY,DH_R_INVALID_PUBKEY);
+		goto err;
+d183 2
+d193 2
+a194 5
+	if (ctx != NULL)
+		{
+		BN_CTX_end(ctx);
+		BN_CTX_free(ctx);
+		}
+d203 1
+a203 4
+	/* If a is only one word long and constant time is false, use the faster
+	 * exponenentiation function.
+	 */
+	if (a->top == 1 && ((dh->flags & DH_FLAG_NO_EXP_CONSTTIME) != 0))
+@
+
+
+1.1.1.4
+log
+@Import latest OpenSSH and OpenBSD-libssl
+@
+text
+@a183 6
+	if (BN_num_bits(dh->p) > OPENSSL_DH_MAX_MODULUS_BITS)
+		{
+		DHerr(DH_F_DH_COMPUTE_KEY,DH_R_MODULUS_TOO_LARGE);
+		return -1;
+		}
+
+@
+
+

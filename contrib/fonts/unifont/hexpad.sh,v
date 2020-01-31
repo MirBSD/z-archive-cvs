@@ -1,0 +1,302 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2016.09.29.22.37.25;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10057ED97BB0C170459;
+
+1.4
+date	2012.09.01.20.57.15;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100504276B961618888;
+
+1.3
+date	2012.09.01.18.15.33;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005042509D1B0E89BD;
+
+1.2
+date	2012.09.01.18.03.46;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10050424E0328EBB67B;
+
+1.1
+date	2012.09.01.17.57.34;	author tg;	state Exp;
+branches;
+next	;
+commitid	10050424C7A1DC4E89C;
+
+
+desc
+@@
+
+
+1.5
+log
+@update
+@
+text
+@#!/bin/mksh
+# $MirOS: contrib/fonts/unifont/hexpad.sh,v 1.3 2012/09/01 18:15:33 tg Exp $
+#-
+# Copyright © 2012
+#	mirabilos <m@@mirbsd.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un‐
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person’s immediate fault when using the work as intended.
+#-
+# Read unifont.hex and remove glyphs from blanks.hex and rc-priv.hex
+# then pad 8x16 to 9x18 and 16x16 to 18x18 and output them into bdfc
+# stub files, separate by glyph width if character width matches it.
+# (Theoretically, we should allow ${%s} == -1 for halfwidth, but all
+# occurrences in GNU Unifont are fullwidth.)
+
+set -U
+
+set -A skip
+integer skip
+# pure awkwardness later
+skip[0]=1
+# invalid codepoints
+skip[0xFFFE]=1
+skip[0xFFFF]=1
+# surrogates
+c=0xD800
+while (( c <= 0xDFFF )); do
+	skip[c++]=1
+done
+while IFS=: read i data rest; do
+	if [[ $data = 00542A542A542A542A542A542A542A00 ]]; then
+		skip[0x$i]=1
+	else
+		print -ru2 E: unknown blanks line "$i:$data:$rest"
+		exit 1
+	fi
+done <blanks.hex
+while IFS=: read i data rest; do
+	if [[ $data = FFB9C5EDD5D5D5D5D5D5D5D5EDB991FF ]]; then
+		skip[0x$i]=1
+	else
+		print -ru2 E: unknown rc-priv line "$i:$data:$rest"
+		exit 1
+	fi
+done <rc-priv.hex
+
+function check_hw {
+	typeset -Uui16 -Z5 q
+
+	q=0x${data: 30:2}
+	(( top = (q != 0) ))
+}
+
+function check_fw {
+	typeset -Uui16 -Z5 q r
+
+	q=0x${data: 0:4}
+	r=0x${data: 60:4}
+	(( top = (q || r) ))
+	if [[ $data = @@(AAAA00018000*5555|555580000001*AAAA) ]]; then
+		top=0
+		odd=0
+	fi
+}
+
+function merge_hw {
+	typeset -Uui16 -Z5 q
+
+	q=0x${data: j*2:2}
+	(( odd |= (q & 1) ))
+	l+=${q#16#}00:
+}
+
+function merge_fw {
+	typeset -Uui16 -Z9 q
+
+	q=0x${data: j*4:4}
+	(( odd |= (q & 1) ))
+	(( q <<= 7 ))
+	l+=${q#16#}:
+}
+
+exec 4>unihalf9x18.bdfc 5>unihalf18x18.bdfc
+
+print -ru4 -- =bdfc 1
+print -ru4 -- C
+print -ru4 -- d 540 0 9 0 0 -4
+
+print -ru5 -- =bdfc 1
+print -ru5 -- C
+print -ru5 -- d 1080 0 18 0 0 -3
+
+typeset -i1 ch
+while IFS=: read i data rest; do
+	if (( skip[(ch = 0x$i)] )); then
+		print SKIP $i
+		continue
+	fi
+	s=${ch#1#}
+	if (( ${#data} == 32 )); then
+		if (( ${%s} != 1 && ${%s} != 0 )); then
+			print NOTH $i
+			continue
+		fi
+		ofd=4
+		nulls=0000
+		sz=hw
+		l="c $i 9 "
+	elif (( ${#data} == 64 )); then
+		if (( ${%s} != 2 && ${%s} != 0 )); then
+			print NOTF $i
+			continue
+		fi
+		ofd=5
+		nulls=000000
+		sz=fw
+		l="c $i 18 $nulls:"
+	else
+		print E:UW $i ${#data}
+		continue
+	fi
+	odd=0 top=0
+	j=-1
+	while (( ++j < 16 )); do
+		eval merge_$sz
+	done
+	if [[ $sz = fw ]]; then
+		l+=$nulls
+	else
+		l+=$nulls:$nulls
+	fi
+	print -ru$ofd -- $l
+	eval check_$sz
+	(( odd )) && print HORZ $i
+	(( top )) && print VERT $i
+done <unifont.hex | tee hexpad.log
+
+print -u4 .
+print -u5 .
+exec 4>&- 5>&-
+
+if [[ -s ../9x18.lst && -s ../18x18ko.lst ]]; then
+	set -A known
+	for x in $(<../9x18.lst) $(<../18x18ko.lst); do
+		known[0x$x]=1
+	done
+
+	while read a b; do
+		[[ $a = HORZ || $a = VERT ]] || continue
+		(( known[0x$b] )) && continue
+		print $a $b
+	done <hexpad.log >hexpad.chk
+fi
+
+print DONE
+@
+
+
+1.4
+log
+@make hexpad output clst capable
+@
+text
+@d5 1
+a5 1
+#	Thorsten Glaser <tg@@mirbsd.org>
+@
+
+
+1.3
+log
+@indeed, shift the 8x16 → 9x18 to pad two on the bottom, instead of
+one at the top and one at the bottom, so the writing line matches;
+this makes U+0030 and U+0041 fit, but U+0061 is a pixel higher, no
+importance though as Unifont is only used to extend fixed-misc for
+places the latter is lacking, and latin letters are decent there…
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/fonts/unifont/hexpad.sh,v 1.2 2012/09/01 18:03:46 tg Exp $
+d153 14
+@
+
+
+1.2
+log
+@• skip U+0000 (to make following code easier), surrogates, U+FFFE, U+FFFF
+• honour character width
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/fonts/unifont/hexpad.sh,v 1.1 2012/09/01 17:57:34 tg Exp $
+d60 1
+a60 1
+	typeset -Uui16 -Z5 q r
+d62 2
+a63 3
+	q=0x${data: 0:2}
+	r=0x${data: 30:2}
+	(( top |= (q || r) ))
+d71 1
+a71 1
+	(( top |= (q || r) ))
+d83 1
+a83 1
+	l+=:${q#16#}00
+d92 1
+a92 1
+	l+=:${q#16#}
+d120 1
+a120 1
+		l="c $i 9 $nulls"
+d129 1
+a129 1
+		l="c $i 18 $nulls"
+d139 5
+a143 1
+	l+=:$nulls
+@
+
+
+1.1
+log
+@first draft of padding thing
+- ignores width, for now
+- same padding algo as hexsplit/hexmerge
+- converts all; bdfctool -c throws out dupes anyway
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $
+d24 5
+a28 1
+# stub files, separate by glyph width. (Character width is ignored.)
+d31 11
+d112 1
+d114 4
+d123 4
+@
+

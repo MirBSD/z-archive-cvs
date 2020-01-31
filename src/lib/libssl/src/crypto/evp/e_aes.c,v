@@ -1,0 +1,278 @@
+head	1.2;
+access;
+symbols
+	cvs-200804031830:1.1.1.3
+	MIRBSD_10:1.1.1.3.0.2
+	MIRBSD_10_BASE:1.1.1.3
+	cvs-200706161500:1.1.1.3
+	cvs-200705171600:1.1.1.3
+	OPENBSD_4_0:1.1.1.3
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200512060130:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2015.07.19.14.39.32;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10055ABB69B2AEC3470;
+
+1.1
+date	2005.02.05.17.25.51;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.51;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.29.13.39.25;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2006.09.20.19.07.05;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045119150397FC669;
+
+
+desc
+@@
+
+
+1.2
+log
+@remove all CFB1 ciphers: DES are even broken in contemporary OpenSSL,
+and AES ones seem to be broken here; former documented in, latter
+spotted by, OpenVPN testsuite
+@
+text
+@/* ====================================================================
+ * Copyright (c) 2001 The OpenSSL Project.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer. 
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. All advertising materials mentioning features or use of this
+ *    software must display the following acknowledgment:
+ *    "This product includes software developed by the OpenSSL Project
+ *    for use in the OpenSSL Toolkit. (http://www.openssl.org/)"
+ *
+ * 4. The names "OpenSSL Toolkit" and "OpenSSL Project" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For written permission, please contact
+ *    openssl-core@@openssl.org.
+ *
+ * 5. Products derived from this software may not be called "OpenSSL"
+ *    nor may "OpenSSL" appear in their names without prior written
+ *    permission of the OpenSSL Project.
+ *
+ * 6. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by the OpenSSL Project
+ *    for use in the OpenSSL Toolkit (http://www.openssl.org/)"
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE OpenSSL PROJECT ``AS IS'' AND ANY
+ * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OpenSSL PROJECT OR
+ * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+ * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * ====================================================================
+ *
+ */
+
+#ifndef OPENSSL_NO_AES
+#include <openssl/evp.h>
+#include <openssl/err.h>
+#include <string.h>
+#include <openssl/aes.h>
+#include "evp_locl.h"
+
+__RCSID("$MirOS$");
+
+static int aes_init_key(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+					const unsigned char *iv, int enc);
+
+typedef struct
+	{
+	AES_KEY ks;
+	} EVP_AES_KEY;
+
+#define data(ctx)	EVP_C_DATA(EVP_AES_KEY,ctx)
+
+IMPLEMENT_BLOCK_CIPHER(aes_128, ks, AES, EVP_AES_KEY,
+		       NID_aes_128, 16, 16, 16, 128,
+		       EVP_CIPH_FLAG_FIPS, aes_init_key, NULL, 
+		       EVP_CIPHER_set_asn1_iv,
+		       EVP_CIPHER_get_asn1_iv,
+		       NULL)
+IMPLEMENT_BLOCK_CIPHER(aes_192, ks, AES, EVP_AES_KEY,
+		       NID_aes_192, 16, 24, 16, 128,
+		       EVP_CIPH_FLAG_FIPS, aes_init_key, NULL, 
+		       EVP_CIPHER_set_asn1_iv,
+		       EVP_CIPHER_get_asn1_iv,
+		       NULL)
+IMPLEMENT_BLOCK_CIPHER(aes_256, ks, AES, EVP_AES_KEY,
+		       NID_aes_256, 16, 32, 16, 128,
+		       EVP_CIPH_FLAG_FIPS, aes_init_key, NULL, 
+		       EVP_CIPHER_set_asn1_iv,
+		       EVP_CIPHER_get_asn1_iv,
+		       NULL)
+
+#define IMPLEMENT_AES_CFBR(ksize,cbits,flags)	IMPLEMENT_CFBR(aes,AES,EVP_AES_KEY,ks,ksize,cbits,16,flags)
+
+IMPLEMENT_AES_CFBR(128,8,EVP_CIPH_FLAG_FIPS)
+IMPLEMENT_AES_CFBR(192,8,EVP_CIPH_FLAG_FIPS)
+IMPLEMENT_AES_CFBR(256,8,EVP_CIPH_FLAG_FIPS)
+
+static int aes_init_key(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+		   const unsigned char *iv, int enc)
+	{
+	int ret;
+
+	if ((ctx->cipher->flags & EVP_CIPH_MODE) == EVP_CIPH_CFB_MODE
+	    || (ctx->cipher->flags & EVP_CIPH_MODE) == EVP_CIPH_OFB_MODE
+	    || enc) 
+		ret=AES_set_encrypt_key(key, ctx->key_len * 8, ctx->cipher_data);
+	else
+		ret=AES_set_decrypt_key(key, ctx->key_len * 8, ctx->cipher_data);
+
+	if(ret < 0)
+		{
+		EVPerr(EVP_F_AES_INIT_KEY,EVP_R_AES_KEY_SETUP_FAILED);
+		return 0;
+		}
+
+	return 1;
+	}
+
+#endif
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d58 2
+d72 1
+a72 1
+		       0, aes_init_key, NULL, 
+d78 1
+a78 1
+		       0, aes_init_key, NULL, 
+d84 1
+a84 1
+		       0, aes_init_key, NULL, 
+d89 6
+d96 3
+a98 1
+		   const unsigned char *iv, int enc) {
+d103 1
+a103 1
+		AES_set_encrypt_key(key, ctx->key_len * 8, ctx->cipher_data);
+d105 7
+a111 1
+		AES_set_decrypt_key(key, ctx->key_len * 8, ctx->cipher_data);
+d114 1
+a114 1
+}
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@sure enough they updated OpenSSL late
+but thanks mates, so I need not do it myself
+@
+text
+@d70 1
+a70 1
+		       EVP_CIPH_FLAG_FIPS, aes_init_key, NULL, 
+d76 1
+a76 1
+		       EVP_CIPH_FLAG_FIPS, aes_init_key, NULL, 
+d82 1
+a82 1
+		       EVP_CIPH_FLAG_FIPS, aes_init_key, NULL, 
+a86 10
+#define IMPLEMENT_AES_CFBR(ksize,cbits,flags)	IMPLEMENT_CFBR(aes,AES,EVP_AES_KEY,ks,ksize,cbits,16,flags)
+
+IMPLEMENT_AES_CFBR(128,1,0)
+IMPLEMENT_AES_CFBR(192,1,0)
+IMPLEMENT_AES_CFBR(256,1,0)
+
+IMPLEMENT_AES_CFBR(128,8,EVP_CIPH_FLAG_FIPS)
+IMPLEMENT_AES_CFBR(192,8,EVP_CIPH_FLAG_FIPS)
+IMPLEMENT_AES_CFBR(256,8,EVP_CIPH_FLAG_FIPS)
+
+d88 1
+a88 3
+		   const unsigned char *iv, int enc)
+	{
+	int ret;
+d93 1
+a93 1
+		ret=AES_set_encrypt_key(key, ctx->key_len * 8, ctx->cipher_data);
+d95 1
+a95 7
+		ret=AES_set_decrypt_key(key, ctx->key_len * 8, ctx->cipher_data);
+
+	if(ret < 0)
+		{
+		EVPerr(EVP_F_AES_INIT_KEY,EVP_R_AES_KEY_SETUP_FAILED);
+		return 0;
+		}
+d98 1
+a98 1
+	}
+@
+
+
+1.1.1.3
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d89 3
+a91 3
+IMPLEMENT_AES_CFBR(128,1,EVP_CIPH_FLAG_FIPS)
+IMPLEMENT_AES_CFBR(192,1,EVP_CIPH_FLAG_FIPS)
+IMPLEMENT_AES_CFBR(256,1,EVP_CIPH_FLAG_FIPS)
+@
+
+

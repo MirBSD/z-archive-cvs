@@ -1,0 +1,1574 @@
+head	1.9;
+access;
+symbols
+	MIRBSD_10:1.7.0.2
+	MIRBSD_10_BASE:1.7
+	MIRBSD_9_BASE:1.4
+	MIRBSD_8:1.4.0.2
+	MIRBSD_8_BASE:1.4
+	cvs-200509212000:1.1.1.3
+	cvs-200507211800:1.1.1.2
+	cvs-200504170300:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.9
+date	2016.01.02.21.33.02;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10056884200442406AA;
+
+1.8
+date	2008.11.08.23.03.56;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10049161AB22DF5DFC5;
+
+1.7
+date	2007.07.05.23.09.34;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100468D7A224CDB6D5A;
+
+1.6
+date	2006.11.01.20.01.21;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004548FD236EA4946C;
+
+1.5
+date	2006.10.17.19.10.17;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10045352A9430FDF64E;
+
+1.4
+date	2005.12.17.05.46.16;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10043A3A3E65E20A413;
+
+1.3
+date	2005.09.22.20.33.02;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	678e43331511a1e1;
+
+1.2
+date	2005.03.06.20.28.50;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.25.01;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.01;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.53.27;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2005.09.21.20.34.33;	author tg;	state Exp;
+branches;
+next	;
+commitid	20cd4331c3c732a2;
+
+
+desc
+@@
+
+
+1.9
+log
+@remove #ifndef __MirBSD__ before setlocale(); related changes
+@
+text
+@/**	$MirOS: src/lib/libc/time/zdump.c,v 1.8 2008/11/08 23:03:56 tg Exp $ */
+/*	$OpenBSD: zdump.c,v 1.17 2005/08/08 08:05:38 espie Exp $ */
+
+/*-
+ * Copyright (c) 2005
+ *	Thorsten "mirabilos" Glaser <tg@@mirbsd.org>
+ * Based upon work placed in the public domain Feb 14, 2003 by
+ *	Arthur David Olson (arthur_david_olson@@nih.gov)
+ *
+ * Licensee is hereby permitted to deal in this work without restric-
+ * tion, including unlimited rights to use, publicly perform, modify,
+ * merge, distribute, sell, give away or sublicence, provided all co-
+ * pyright notices above, these terms and the disclaimer are retained
+ * in all redistributions or reproduced in accompanying documentation
+ * or other materials provided with binary redistributions.
+ *
+ * Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+ * express, or implied, to the maximum extent permitted by applicable
+ * law, without malicious intent or gross negligence; in no event may
+ * licensor, an author or contributor be held liable for any indirect
+ * or other damage, or direct damage except proven a consequence of a
+ * direct error of said person and intended use of this work, loss or
+ * other issues arising in any way out of its use, even if advised of
+ * the possibility of such damage or existence of a defect.
+ */
+
+/*
+** This code has been made independent of the rest of the time
+** conversion package to increase confidence in the verification it provides.
+** You can use this code to help in verifying other implementations.
+*/
+
+#include "stdio.h"	/* for stdout, stderr, perror */
+#include "string.h"	/* for strlcpy */
+#include "ctype.h"	/* for isascii, isalpha, isdigit */
+#include "sys/types.h"	/* for time_t */
+#include "time.h"	/* for struct tm */
+#include "stdlib.h"	/* for exit, malloc, atoi */
+#include "float.h"	/* for FLT_MAX and DBL_MAX */
+
+#ifndef ZDUMP_LO_YEAR
+#define ZDUMP_LO_YEAR	(-500)
+#endif /* !defined ZDUMP_LO_YEAR */
+
+#ifndef ZDUMP_HI_YEAR
+#define ZDUMP_HI_YEAR	2500
+#endif /* !defined ZDUMP_HI_YEAR */
+
+__RCSID("$MirOS: src/lib/libc/time/zdump.c,v 1.8 2008/11/08 23:03:56 tg Exp $");
+
+#ifndef MAX_STRING_LENGTH
+#define MAX_STRING_LENGTH	1024
+#endif /* !defined MAX_STRING_LENGTH */
+
+#ifndef TRUE
+#define TRUE		1
+#endif /* !defined TRUE */
+
+#ifndef FALSE
+#define FALSE		0
+#endif /* !defined FALSE */
+
+#ifndef EXIT_SUCCESS
+#define EXIT_SUCCESS	0
+#endif /* !defined EXIT_SUCCESS */
+
+#ifndef EXIT_FAILURE
+#define EXIT_FAILURE	1
+#endif /* !defined EXIT_FAILURE */
+
+#ifndef SECSPERMIN
+#define SECSPERMIN	60
+#endif /* !defined SECSPERMIN */
+
+#ifndef MINSPERHOUR
+#define MINSPERHOUR	60
+#endif /* !defined MINSPERHOUR */
+
+#ifndef SECSPERHOUR
+#define SECSPERHOUR	(SECSPERMIN * MINSPERHOUR)
+#endif /* !defined SECSPERHOUR */
+
+#ifndef HOURSPERDAY
+#define HOURSPERDAY	24
+#endif /* !defined HOURSPERDAY */
+
+#ifndef EPOCH_YEAR
+#define EPOCH_YEAR	1970
+#endif /* !defined EPOCH_YEAR */
+
+#ifndef TM_YEAR_BASE
+#define TM_YEAR_BASE	1900
+#endif /* !defined TM_YEAR_BASE */
+
+#ifndef DAYSPERNYEAR
+#define DAYSPERNYEAR	365
+#endif /* !defined DAYSPERNYEAR */
+
+#ifndef isleap
+#define isleap(y) (((y) % 4) == 0 && (((y) % 100) != 0 || ((y) % 400) == 0))
+#endif /* !defined isleap */
+
+#ifndef isleap_sum
+/*
+** See tzfile.h for details on isleap_sum.
+*/
+#define isleap_sum(a, b)	isleap((a) % 400 + (b) % 400)
+#endif /* !defined isleap_sum */
+
+#define SECSPERDAY	((long) SECSPERHOUR * HOURSPERDAY)
+#define SECSPERNYEAR	(SECSPERDAY * DAYSPERNYEAR)
+#define SECSPERLYEAR	(SECSPERNYEAR + SECSPERDAY)
+
+#if HAVE_GETTEXT
+#include "locale.h"	/* for setlocale */
+#include "libintl.h"
+#endif /* HAVE_GETTEXT */
+
+#ifndef GNUC_or_lint
+#ifdef lint
+#define GNUC_or_lint
+#else /* !defined lint */
+#ifdef __GNUC__
+#define GNUC_or_lint
+#endif /* defined __GNUC__ */
+#endif /* !defined lint */
+#endif /* !defined GNUC_or_lint */
+
+#ifndef INITIALIZE
+#ifdef GNUC_or_lint
+#define INITIALIZE(x)	((x) = 0)
+#else /* !defined GNUC_or_lint */
+#define INITIALIZE(x)
+#endif /* !defined GNUC_or_lint */
+#endif /* !defined INITIALIZE */
+
+/*
+** For the benefit of GNU folk...
+** `_(MSGID)' uses the current locale's message library string for MSGID.
+** The default is to use gettext if available, and use MSGID otherwise.
+*/
+
+#ifndef _
+#if HAVE_GETTEXT
+#define _(msgid) gettext(msgid)
+#else /* !HAVE_GETTEXT */
+#define _(msgid) msgid
+#endif /* !HAVE_GETTEXT */
+#endif /* !defined _ */
+
+#ifndef TZ_DOMAIN
+#define TZ_DOMAIN "tz"
+#endif /* !defined TZ_DOMAIN */
+
+#ifndef P
+#ifdef __STDC__
+#define P(x)	x
+#else /* !defined __STDC__ */
+#define P(x)	()
+#endif /* !defined __STDC__ */
+#endif /* !defined P */
+
+#define ZDUMP
+
+extern char **	environ;
+extern int	getopt P((int argc, char * const argv[],
+			const char * options));
+extern char *	optarg;
+extern int	optind;
+extern char *	tzname[2];
+
+static time_t	absolute_min_time;
+static time_t	absolute_max_time;
+static size_t	longest;
+static char *	progname;
+static int	warned;
+
+static char *	abbr P((struct tm * tmp));
+static void	abbrok P((const char * abbr, const char * zone));
+static long	delta P((struct tm * newp, struct tm * oldp));
+static void	dumptime P((const struct tm * tmp));
+static time_t	hunt P((char * name, time_t lot, time_t	hit));
+static void	setabsolutes P((void));
+static void	show P((char * zone, time_t t, int v));
+static const char *	tformat P((void));
+static time_t	yeartot P((long y));
+
+#ifndef TYPECHECK
+#define my_localtime	localtime
+#else /* !defined TYPECHECK */
+static struct tm *
+my_localtime(tp)
+time_t *	tp;
+{
+	register struct tm *	tmp;
+
+	tmp = localtime(tp);
+	if (tp != NULL && tmp != NULL) {
+		struct tm	tm;
+		register time_t	t;
+
+		tm = *tmp;
+		t = mktime(&tm);
+		if (t - *tp >= 1 || *tp - t >= 1) {
+			(void) fflush(stdout);
+			(void) fprintf(stderr, "\n%s: ", progname);
+			(void) fprintf(stderr, tformat(), *tp);
+			(void) fprintf(stderr, " ->");
+			(void) fprintf(stderr, " year=%d", tmp->tm_year);
+			(void) fprintf(stderr, " mon=%d", tmp->tm_mon);
+			(void) fprintf(stderr, " mday=%d", tmp->tm_mday);
+			(void) fprintf(stderr, " hour=%d", tmp->tm_hour);
+			(void) fprintf(stderr, " min=%d", tmp->tm_min);
+			(void) fprintf(stderr, " sec=%d", tmp->tm_sec);
+			(void) fprintf(stderr, " isdst=%d", tmp->tm_isdst);
+			(void) fprintf(stderr, " -> ");
+			(void) fprintf(stderr, tformat(), t);
+			(void) fprintf(stderr, "\n");
+		}
+	}
+	return tmp;
+}
+#endif /* !defined TYPECHECK */
+
+static void
+abbrok(abbr, zone)
+const char * const	abbr;
+const char * const	zone;
+{
+	register const char *	cp;
+	register char *		wp;
+
+	if (warned)
+		return;
+	cp = abbr;
+	wp = NULL;
+	while (isascii(*cp) && isalpha(*cp))
+		++cp;
+	if (cp - abbr == 0)
+		wp = _("lacks alphabetic at start");
+	if (cp - abbr < 3)
+		wp = _("has fewer than 3 alphabetics");
+	if (cp - abbr > 6)
+		wp = _("has more than 6 alphabetics");
+	if (wp == NULL && (*cp == '+' || *cp == '-')) {
+		++cp;
+		if (isascii(*cp) && isdigit(*cp))
+			if (*cp++ == '1' && *cp >= '0' && *cp <= '4')
+				++cp;
+	}
+	if (*cp != '\0')
+		wp = _("differs from POSIX standard");
+	if (wp == NULL)
+		return;
+	(void) fflush(stdout);
+	(void) fprintf(stderr,
+		"%s: warning: zone \"%s\" abbreviation \"%s\" %s\n",
+		progname, zone, abbr, wp);
+	warned = TRUE;
+}
+
+int
+main(argc, argv)
+int	argc;
+char *	argv[];
+{
+	register int		i;
+	register int		c;
+	register int		vflag;
+	register char *		cutarg;
+	register long		cutloyear = ZDUMP_LO_YEAR;
+	register long		cuthiyear = ZDUMP_HI_YEAR;
+	register time_t		cutlotime;
+	register time_t		cuthitime;
+	register char **	fakeenv;
+	time_t			now;
+	time_t			t;
+	time_t			newt;
+	struct tm		tm;
+	struct tm		newtm;
+	register struct tm *	tmp;
+	register struct tm *	newtmp;
+
+	INITIALIZE(cutlotime);
+	INITIALIZE(cuthitime);
+#if HAVE_GETTEXT
+	(void) setlocale(LC_ALL, "");
+#ifdef TZ_DOMAINDIR
+	(void) bindtextdomain(TZ_DOMAIN, TZ_DOMAINDIR);
+#endif /* defined TEXTDOMAINDIR */
+	(void) textdomain(TZ_DOMAIN);
+#endif /* HAVE_GETTEXT */
+	progname = argv[0];
+	vflag = 0;
+	cutarg = NULL;
+	while ((c = getopt(argc, argv, "c:v")) == 'c' || c == 'v')
+		if (c == 'v')
+			vflag = 1;
+		else	cutarg = optarg;
+	if ((c != EOF && c != -1) ||
+		(optind == argc - 1 && strcmp(argv[optind], "=") == 0)) {
+			(void) fprintf(stderr,
+_("usage %s [-v] [-c [loyear,]hiyear] zonename ...\n"),
+				progname);
+			(void) exit(EXIT_FAILURE);
+	}
+	if (vflag) {
+		if (cutarg != NULL) {
+			long	lo;
+			long	hi;
+			char	dummy;
+
+			if (sscanf(cutarg, "%ld%c", &hi, &dummy) == 1) {
+				cuthiyear = hi;
+			} else if (sscanf(cutarg, "%ld,%ld%c",
+				&lo, &hi, &dummy) == 2) {
+					cutloyear = lo;
+					cuthiyear = hi;
+			} else {
+(void) fprintf(stderr, _("%s: wild -c argument %s\n"),
+					progname, cutarg);
+				(void) exit(EXIT_FAILURE);
+			}
+		}
+		setabsolutes();
+		cutlotime = yeartot(cutloyear);
+		cuthitime = yeartot(cuthiyear);
+	}
+	(void) time(&now);
+	longest = 0;
+	for (i = optind; i < argc; ++i)
+		if (strlen(argv[i]) > longest)
+			longest = strlen(argv[i]);
+	{
+		register int	from;
+		register int	to;
+
+		for (i = 0; environ[i] != NULL; ++i)
+			continue;
+		fakeenv = (char **) malloc((size_t) ((i + 2) *
+			sizeof *fakeenv));
+		if (fakeenv == NULL ||
+			(fakeenv[0] = (char *) malloc(longest + 4)) == NULL) {
+					(void) perror(progname);
+					(void) exit(EXIT_FAILURE);
+		}
+		to = 0;
+		strlcpy(fakeenv[to++], "TZ=", longest + 4);
+		for (from = 0; environ[from] != NULL; ++from)
+			if (strncmp(environ[from], "TZ=", 3) != 0)
+				fakeenv[to++] = environ[from];
+		fakeenv[to] = NULL;
+		environ = fakeenv;
+	}
+	for (i = optind; i < argc; ++i) {
+		static char	buf[MAX_STRING_LENGTH];
+
+		strlcpy(&fakeenv[0][3], argv[i], longest + 1);
+		if (!vflag) {
+			show(argv[i], now, FALSE);
+			continue;
+		}
+		warned = FALSE;
+		t = absolute_min_time;
+		show(argv[i], t, TRUE);
+		t += SECSPERHOUR * HOURSPERDAY;
+		show(argv[i], t, TRUE);
+		if (t < cutlotime)
+			t = cutlotime;
+		tmp = my_localtime(&t);
+		if (tmp != NULL) {
+			tm = *tmp;
+			strlcpy(buf, abbr(&tm), sizeof buf);
+		}
+		for ( ; ; ) {
+			if (t >= cuthitime)
+				break;
+			newt = t + SECSPERHOUR * 12;
+			if (newt >= cuthitime)
+				break;
+			if (newt <= t)
+				break;
+			newtmp = localtime(&newt);
+			if (newtmp != NULL)
+				newtm = *newtmp;
+			if ((tmp == NULL || newtmp == NULL) ? (tmp != newtmp) :
+				(delta(&newtm, &tm) != (newt - t) ||
+				newtm.tm_isdst != tm.tm_isdst ||
+				strcmp(abbr(&newtm), buf) != 0)) {
+					newt = hunt(argv[i], t, newt);
+					newtmp = localtime(&newt);
+					if (newtmp != NULL) {
+						newtm = *newtmp;
+						strlcpy(buf, abbr(&newtm),
+							sizeof buf);
+					}
+			}
+			t = newt;
+			tm = newtm;
+			tmp = newtmp;
+		}
+		t = absolute_max_time;
+		t -= SECSPERHOUR * HOURSPERDAY;
+		show(argv[i], t, TRUE);
+		t += SECSPERHOUR * HOURSPERDAY;
+		show(argv[i], t, TRUE);
+	}
+	if (fflush(stdout) || ferror(stdout)) {
+		(void) fprintf(stderr, "%s: ", progname);
+		(void) perror(_("Error writing standard output"));
+		(void) exit(EXIT_FAILURE);
+	}
+	exit(EXIT_SUCCESS);
+	/* If exit fails to exit... */
+	return EXIT_FAILURE;
+}
+
+static void
+setabsolutes()
+{
+	if (0.5 == (time_t) 0.5) {
+		/*
+		** time_t is floating.
+		*/
+		if (sizeof (time_t) == sizeof (float)) {
+			absolute_min_time = (time_t) -FLT_MAX;
+			absolute_max_time = (time_t) FLT_MAX;
+		} else if (sizeof (time_t) == sizeof (double)) {
+			absolute_min_time = (time_t) -DBL_MAX;
+			absolute_max_time = (time_t) DBL_MAX;
+		} else {
+			(void) fprintf(stderr,
+_("%s: use of -v on system with floating time_t other than float or double\n"),
+				progname);
+			(void) exit(EXIT_FAILURE);
+		}
+	} else if (0 > (time_t) -1) {
+		/*
+		** time_t is signed.
+		*/
+		register time_t	hibit;
+
+		for (hibit = 1; (hibit * 2) != 0; hibit *= 2)
+			continue;
+		absolute_min_time = hibit;
+		absolute_max_time = -(hibit + 1);
+	} else {
+		/*
+		** time_t is unsigned.
+		*/
+		absolute_min_time = 0;
+		absolute_max_time = absolute_min_time - 1;
+	}
+}
+
+static time_t
+yeartot(y)
+const long	y;
+{
+	register long	myy;
+	register long	seconds;
+	register time_t	t;
+
+	myy = EPOCH_YEAR;
+	t = 0;
+	while (myy != y) {
+		if (myy < y) {
+			seconds = isleap(myy) ? SECSPERLYEAR : SECSPERNYEAR;
+			++myy;
+			if (t > absolute_max_time - seconds) {
+				t = absolute_max_time;
+				break;
+			}
+			t += seconds;
+		} else {
+			--myy;
+			seconds = isleap(myy) ? SECSPERLYEAR : SECSPERNYEAR;
+			if (t < absolute_min_time + seconds) {
+				t = absolute_min_time;
+				break;
+			}
+			t -= seconds;
+		}
+	}
+	return t;
+}
+
+static time_t
+hunt(name, lot, hit)
+char *	name;
+time_t	lot;
+time_t	hit;
+{
+	time_t			t;
+	long			diff;
+	struct tm		lotm;
+	register struct tm *	lotmp;
+	struct tm		tm;
+	register struct tm *	tmp;
+	char			loab[MAX_STRING_LENGTH];
+
+	lotmp = my_localtime(&lot);
+	if (lotmp != NULL) {
+		lotm = *lotmp;
+		(void) strlcpy(loab, abbr(&lotm), sizeof loab);
+	}
+	for ( ; ; ) {
+		diff = (long) (hit - lot);
+		if (diff < 2)
+			break;
+		t = lot;
+		t += diff / 2;
+		if (t <= lot)
+			++t;
+		else if (t >= hit)
+			--t;
+		tmp = my_localtime(&t);
+		if (tmp != NULL)
+			tm = *tmp;
+		if ((lotmp == NULL || tmp == NULL) ? (lotmp == tmp) :
+			(delta(&tm, &lotm) == (t - lot) &&
+			tm.tm_isdst == lotm.tm_isdst &&
+			strcmp(abbr(&tm), loab) == 0)) {
+				lot = t;
+				lotm = tm;
+				lotmp = tmp;
+		} else	hit = t;
+	}
+	show(name, lot, TRUE);
+	show(name, hit, TRUE);
+	return hit;
+}
+
+/*
+** Thanks to Paul Eggert (eggert@@twinsun.com) for logic used in delta.
+*/
+
+static long
+delta(newp, oldp)
+struct tm *	newp;
+struct tm *	oldp;
+{
+	register long	result;
+	register int	tmy;
+
+	if (newp->tm_year < oldp->tm_year)
+		return -delta(oldp, newp);
+	result = 0;
+	for (tmy = oldp->tm_year; tmy < newp->tm_year; ++tmy)
+		result += DAYSPERNYEAR + isleap_sum(tmy, TM_YEAR_BASE);
+	result += newp->tm_yday - oldp->tm_yday;
+	result *= HOURSPERDAY;
+	result += newp->tm_hour - oldp->tm_hour;
+	result *= MINSPERHOUR;
+	result += newp->tm_min - oldp->tm_min;
+	result *= SECSPERMIN;
+	result += newp->tm_sec - oldp->tm_sec;
+	return result;
+}
+
+static void
+show(zone, t, v)
+char *	zone;
+time_t	t;
+int	v;
+{
+	register struct tm *	tmp;
+
+	(void) printf("%-*s  ", (int) longest, zone);
+	if (v) {
+		tmp = gmtime(&t);
+		if (tmp == NULL) {
+			(void) printf(tformat(), t);
+		} else {
+			dumptime(tmp);
+			(void) printf(" UTC");
+		}
+		(void) printf(" = ");
+	}
+	tmp = my_localtime(&t);
+	dumptime(tmp);
+	if (tmp != NULL) {
+		if (*abbr(tmp) != '\0')
+			(void) printf(" %s", abbr(tmp));
+		if (v) {
+			(void) printf(" isdst=%d", tmp->tm_isdst);
+#ifdef TM_GMTOFF
+			(void) printf(" gmtoff=%ld", tmp->TM_GMTOFF);
+#endif /* defined TM_GMTOFF */
+		}
+	}
+	(void) printf("\n");
+	if (tmp != NULL && *abbr(tmp) != '\0')
+		abbrok(abbr(tmp), zone);
+}
+
+static char *
+abbr(tmp)
+struct tm *	tmp;
+{
+	register char *	result;
+	static char	nada;
+
+	if (tmp->tm_isdst != 0 && tmp->tm_isdst != 1)
+		return &nada;
+	result = tzname[tmp->tm_isdst];
+	return (result == NULL) ? &nada : result;
+}
+
+/*
+** The code below can fail on certain theoretical systems;
+** it works on all known real-world systems as of 2004-12-30.
+*/
+
+static const char *
+tformat()
+{
+	if (0.5 == (time_t) 0.5) {	/* floating */
+		if (sizeof (time_t) > sizeof (double))
+			return "%Lg";
+		return "%g";
+	}
+	if (0 > (time_t) -1) {		/* signed */
+		if (sizeof (time_t) > sizeof (long))
+			return "%lld";
+		if (sizeof (time_t) > sizeof (int))
+			return "%ld";
+		return "%d";
+	}
+	if (sizeof (time_t) > sizeof (unsigned long))
+		return "%llu";
+	if (sizeof (time_t) > sizeof (unsigned int))
+		return "%lu";
+	return "%u";
+}
+
+static void
+dumptime(timeptr)
+register const struct tm *	timeptr;
+{
+	static const char	wday_name[][3] = {
+		"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
+	};
+	static const char	mon_name[][3] = {
+		"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+		"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+	};
+	register const char *	wn;
+	register const char *	mn;
+#ifndef TM_YEAR_BASE
+#define TM_YEAR_BASE	1900
+#endif
+
+	if (timeptr == NULL) {
+		(void) printf("NULL");
+		return;
+	}
+	/*
+	** The packaged versions of localtime and gmtime never put out-of-range
+	** values in tm_wday or tm_mon, but since this code might be compiled
+	** with other (perhaps experimental) versions, paranoia is in order.
+	*/
+	if (timeptr->tm_wday < 0 || timeptr->tm_wday >=
+		(int) (sizeof wday_name / sizeof wday_name[0]))
+			wn = "???";
+	else		wn = wday_name[timeptr->tm_wday];
+	if (timeptr->tm_mon < 0 || timeptr->tm_mon >=
+		(int) (sizeof mon_name / sizeof mon_name[0]))
+			mn = "???";
+	else		mn = mon_name[timeptr->tm_mon];
+	(void) printf(
+#ifdef ZDUMP
+	    "%.3s %.3s%3d %.2d:%.2d:%.2d %lld",
+	    wn, mn, timeptr->tm_mday,
+#else
+	    "%.3s %.3s%3d (%d) %lld %.2d:%.2d:%.2d %s (%ld%s)",
+	    wn, mn, timeptr->tm_mday, timeptr->tm_yday,
+	    (int64_t)timeptr->tm_year + (long long) TM_YEAR_BASE,
+#endif
+	    timeptr->tm_hour, timeptr->tm_min, timeptr->tm_sec,
+#ifdef ZDUMP
+		(int64_t)timeptr->tm_year + (long long) TM_YEAR_BASE);
+#else
+	    timeptr->tm_zone ? timeptr->tm_zone : "(null)",
+	    timeptr->tm_gmtoff,
+	    timeptr->tm_isdst ? " DST" : "");
+#endif
+}
+@
+
+
+1.8
+log
+@more mass conversions, including ancient eMail addresses
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/time/zdump.c,v 1.7 2007/07/05 23:09:34 tg Exp $ */
+d49 1
+a49 1
+__RCSID("$MirOS: src/lib/libc/time/zdump.c,v 1.7 2007/07/05 23:09:34 tg Exp $");
+a285 1
+#ifndef __MirBSD__
+a292 1
+#endif
+@
+
+
+1.7
+log
+@• #ifdef __MirBSD__
+  do not use setlocale() and nl_langinfo(), hardcode it
+  #endif
+• rcs ids
+
+should greatly reduce space usage of ramdisc
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/time/zdump.c,v 1.6 2006/11/01 20:01:21 tg Exp $ */
+d6 1
+a6 1
+ *	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+d49 1
+a49 1
+__RCSID("$MirOS: src/lib/libc/time/zdump.c,v 1.6 2006/11/01 20:01:21 tg Exp $");
+@
+
+
+1.6
+log
+@sync licences, minor wcwidth KNF
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/time/zdump.c,v 1.5 2006/10/17 19:10:17 tg Exp $ */
+d49 1
+a49 1
+__RCSID("$MirOS: src/lib/libc/time/zdump.c,v 1.5 2006/10/17 19:10:17 tg Exp $");
+d286 1
+d294 1
+@
+
+
+1.5
+log
+@* date(1): implement a -D option using the TAI functions to
+  dump current time (at the time of option parsing)
+* zdump.c: fix format string error found during implementing the above
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/time/zdump.c,v 1.4 2005/12/17 05:46:16 tg Exp $ */
+d7 1
+a7 1
+ * Bases upon work placed in the public domain Feb 14, 2003 by
+d24 1
+a24 1
+ * the possibility of such damage or existence of a nontrivial bug.
+d49 1
+a49 1
+__RCSID("$MirOS: src/lib/libc/time/zdump.c,v 1.4 2005/12/17 05:46:16 tg Exp $");
+@
+
+
+1.4
+log
+@big fat licence update (I left some which are bsiegert@@'s alone though)
+also, remove licence boilerplate from some .h files who don't deserve it
+and remove and add some advertising clauses because I say so
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/time/zdump.c,v 1.3 2005/09/22 20:33:02 tg Exp $ */
+d49 1
+a49 1
+__RCSID("$MirOS: src/lib/libc/time/zdump.c,v 1.3 2005/09/22 20:33:02 tg Exp $");
+d676 1
+a676 1
+	    "%.3s %.3s%3d (%d) %lld %.2d:%.2d:%.2d %s (%d%s)",
+@
+
+
+1.3
+log
+@merge and hope it does not break
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/time/zdump.c,v 1.2 2005/03/06 20:28:50 tg Exp $ */
+d7 2
+d17 8
+a24 7
+ * Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+ * any kind, expressed or implied, to the maximum extent permitted by
+ * applicable law, but with the warranty of being written without ma-
+ * licious intent or gross negligence; in no event shall licensor, an
+ * author or contributor be held liable for any damage, direct, indi-
+ * rect or other, however caused, arising in any way out of the usage
+ * of this work, even if advised of the possibility of such damage.
+a27 5
+** This file is in the public domain, so clarified as of
+** Feb 14, 2003 by Arthur David Olson (arthur_david_olson@@nih.gov).
+*/
+
+/*
+d49 1
+a49 1
+__RCSID("$MirOS: src/lib/libc/time/zdump.c,v 1.2 2005/03/06 20:28:50 tg Exp $");
+@
+
+
+1.2
+log
+@merge src/lib
+@
+text
+@d1 2
+a2 1
+/**	$MirOS$ */
+a28 8
+#if 0
+#if defined(LIBC_SCCS) && !defined(lint) && !defined(NOID)
+static char elsieid[] = "@@(#)zdump.c	7.31";
+static char rcsid[] = "$OpenBSD: zdump.c,v 1.15 2004/10/19 05:01:01 deraadt Exp $";
+static char	elsieid[] = "@@(#)zdump.c	7.40";
+#endif /* LIBC_SCCS and not lint */
+#endif /* 0 */
+
+d37 1
+d41 9
+d51 1
+a51 1
+__RCSID("$MirOS$");
+d102 1
+a102 1
+#define isleap(y) ((((y) % 4) == 0 && ((y) % 100) != 0) || ((y) % 400) == 0)
+d105 11
+d169 1
+a169 1
+			  const char * options));
+d174 6
+d181 1
+d183 1
+d185 1
+a185 2
+static size_t	longest;
+static char *	progname;
+d187 76
+a262 1
+static void	dumptime P((const struct tm * tmp));
+d272 6
+a277 4
+	register char *		cutoff;
+	register int		cutyear;
+	register long		cuttime;
+	char **			fakeenv;
+a280 1
+	time_t			hibit;
+d283 2
+d286 2
+a287 1
+	INITIALIZE(cuttime);
+d289 1
+a289 1
+	(void) setlocale(LC_MESSAGES, "");
+d297 1
+a297 1
+	cutoff = NULL;
+d301 1
+a301 1
+		else	cutoff = optarg;
+d305 2
+a306 2
+_("%s: usage is %s [-v] [-c cutoffyear] zonename ...\n"),
+				argv[0], argv[0]);
+d309 21
+a329 8
+	if (cutoff != NULL) {
+		int	y;
+
+		cutyear = atoi(cutoff);
+		cuttime = 0;
+		for (y = EPOCH_YEAR; y < cutyear; ++y)
+			cuttime += DAYSPERNYEAR + isleap(y);
+		cuttime *= SECSPERHOUR * HOURSPERDAY;
+a335 2
+	for (hibit = 1; (hibit << 1) != 0; hibit <<= 1)
+		continue;
+d340 1
+a340 1
+		for (i = 0;  environ[i] != NULL;  ++i)
+d365 2
+a366 6
+		/*
+		** Get lowest value of t.
+		*/
+		t = hibit;
+		if (t > 0)		/* time_t is unsigned */
+			t = 0;
+d370 7
+a376 2
+		tm = *localtime(&t);
+		strlcpy(buf, abbr(&tm), (sizeof buf));
+d378 1
+a378 1
+			if (cutoff != NULL && t >= cuttime)
+d381 1
+a381 1
+			if (cutoff != NULL && newt >= cuttime)
+d385 5
+a389 2
+			newtm = *localtime(&newt);
+			if (delta(&newtm, &tm) != (newt - t) ||
+d391 1
+a391 1
+				strcmp(abbr(&newtm), buf) != 0) {
+d393 6
+a398 3
+					newtm = *localtime(&newt);
+					strlcpy(buf, abbr(&newtm),
+						(sizeof buf));
+d402 1
+d404 1
+a404 6
+		/*
+		** Get highest value of t.
+		*/
+		t = ~((time_t) 0);
+		if (t < 0)		/* time_t is signed */
+			t &= ~hibit;
+d411 1
+a411 1
+		(void) fprintf(stderr, "%s: ", argv[0]);
+d416 3
+d420 68
+a487 3
+	/* gcc -Wall pacifier */
+	for ( ; ; )
+		continue;
+d496 19
+a514 9
+	time_t		t;
+	struct tm	lotm;
+	struct tm	tm;
+	static char	loab[MAX_STRING_LENGTH];
+
+	lotm = *localtime(&lot);
+	strlcpy(loab, abbr(&lotm), (sizeof loab));
+	while ((hit - lot) >= 2) {
+		t = lot / 2 + hit / 2;
+d519 5
+a523 2
+		tm = *localtime(&t);
+		if (delta(&tm, &lotm) == (t - lot) &&
+d525 1
+a525 1
+			strcmp(abbr(&tm), loab) == 0) {
+d528 1
+d545 2
+a546 2
+	long	result;
+	int	tmy;
+d552 1
+a552 1
+		result += DAYSPERNYEAR + isleap(tmy + (long) TM_YEAR_BASE);
+d569 1
+a569 1
+	struct tm *	tmp;
+d573 8
+a580 2
+		dumptime(gmtime(&t));
+		(void) printf(" UTC = ");
+d582 1
+a582 1
+	tmp = localtime(&t);
+d584 5
+a588 4
+	if (*abbr(tmp) != '\0')
+		(void) printf(" %s", abbr(tmp));
+	if (v) {
+		(void) printf(" isdst=%d", tmp->tm_isdst);
+d590 1
+a590 1
+		(void) printf(" gmtoff=%ld", tmp->TM_GMTOFF);
+d592 1
+d595 2
+d612 27
+d656 4
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 22
+d28 1
+d34 1
+d48 2
+d151 2
+d419 3
+d436 17
+a452 5
+	(void) printf("%.3s %.3s%3d %.2d:%.2d:%.2d %ld",
+		wn, mn,
+		timeptr->tm_mday, timeptr->tm_hour,
+		timeptr->tm_min, timeptr->tm_sec,
+		timeptr->tm_year + (long) TM_YEAR_BASE);
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d7 3
+a9 2
+static char elsieid[] = "@@(#)zdump.c	7.65";
+static char rcsid[] = "$OpenBSD: zdump.c,v 1.16 2005/07/05 13:40:51 millert Exp $";
+a19 1
+#include "ctype.h"	/* for isascii, isalpha, isdigit */
+a22 9
+#include "float.h"	/* for FLT_MAX and DBL_MAX */
+
+#ifndef ZDUMP_LO_YEAR
+#define ZDUMP_LO_YEAR	(-500)
+#endif /* !defined ZDUMP_LO_YEAR */
+
+#ifndef ZDUMP_HI_YEAR
+#define ZDUMP_HI_YEAR	2500
+#endif /* !defined ZDUMP_HI_YEAR */
+d73 1
+a73 1
+#define isleap(y) (((y) % 4) == 0 && (((y) % 100) != 0 || ((y) % 400) == 0))
+a75 11
+#ifndef isleap_sum
+/*
+** See tzfile.h for details on isleap_sum.
+*/
+#define isleap_sum(a, b)	isleap((a) % 400 + (b) % 400)
+#endif /* !defined isleap_sum */
+
+#define SECSPERDAY	((long) SECSPERHOUR * HOURSPERDAY)
+#define SECSPERNYEAR	(SECSPERDAY * DAYSPERNYEAR)
+#define SECSPERLYEAR	(SECSPERNYEAR + SECSPERDAY)
+
+d127 1
+a127 1
+			const char * options));
+a131 6
+static time_t	absolute_min_time;
+static time_t	absolute_max_time;
+static size_t	longest;
+static char *	progname;
+static int	warned;
+
+a132 1
+static void	abbrok P((const char * abbr, const char * zone));
+a133 1
+static void	dumptime P((const struct tm * tmp));
+d135 2
+a136 1
+static void	setabsolutes P((void));
+d138 1
+a138 76
+static const char *	tformat P((void));
+static time_t	yeartot P((long y));
+
+#ifndef TYPECHECK
+#define my_localtime	localtime
+#else /* !defined TYPECHECK */
+static struct tm *
+my_localtime(tp)
+time_t *	tp;
+{
+	register struct tm *	tmp;
+
+	tmp = localtime(tp);
+	if (tp != NULL && tmp != NULL) {
+		struct tm	tm;
+		register time_t	t;
+
+		tm = *tmp;
+		t = mktime(&tm);
+		if (t - *tp >= 1 || *tp - t >= 1) {
+			(void) fflush(stdout);
+			(void) fprintf(stderr, "\n%s: ", progname);
+			(void) fprintf(stderr, tformat(), *tp);
+			(void) fprintf(stderr, " ->");
+			(void) fprintf(stderr, " year=%d", tmp->tm_year);
+			(void) fprintf(stderr, " mon=%d", tmp->tm_mon);
+			(void) fprintf(stderr, " mday=%d", tmp->tm_mday);
+			(void) fprintf(stderr, " hour=%d", tmp->tm_hour);
+			(void) fprintf(stderr, " min=%d", tmp->tm_min);
+			(void) fprintf(stderr, " sec=%d", tmp->tm_sec);
+			(void) fprintf(stderr, " isdst=%d", tmp->tm_isdst);
+			(void) fprintf(stderr, " -> ");
+			(void) fprintf(stderr, tformat(), t);
+			(void) fprintf(stderr, "\n");
+		}
+	}
+	return tmp;
+}
+#endif /* !defined TYPECHECK */
+
+static void
+abbrok(abbr, zone)
+const char * const	abbr;
+const char * const	zone;
+{
+	register const char *	cp;
+	register char *		wp;
+
+	if (warned)
+		return;
+	cp = abbr;
+	wp = NULL;
+	while (isascii(*cp) && isalpha(*cp))
+		++cp;
+	if (cp - abbr == 0)
+		wp = _("lacks alphabetic at start");
+	if (cp - abbr < 3)
+		wp = _("has fewer than 3 alphabetics");
+	if (cp - abbr > 6)
+		wp = _("has more than 6 alphabetics");
+	if (wp == NULL && (*cp == '+' || *cp == '-')) {
+		++cp;
+		if (isascii(*cp) && isdigit(*cp))
+			if (*cp++ == '1' && *cp >= '0' && *cp <= '4')
+				++cp;
+	}
+	if (*cp != '\0')
+		wp = _("differs from POSIX standard");
+	if (wp == NULL)
+		return;
+	(void) fflush(stdout);
+	(void) fprintf(stderr,
+		"%s: warning: zone \"%s\" abbreviation \"%s\" %s\n",
+		progname, zone, abbr, wp);
+	warned = TRUE;
+}
+d148 4
+a151 6
+	register char *		cutarg;
+	register long		cutloyear = ZDUMP_LO_YEAR;
+	register long		cuthiyear = ZDUMP_HI_YEAR;
+	register time_t		cutlotime;
+	register time_t		cuthitime;
+	register char **	fakeenv;
+d155 1
+a157 2
+	register struct tm *	tmp;
+	register struct tm *	newtmp;
+d159 1
+a159 2
+	INITIALIZE(cutlotime);
+	INITIALIZE(cuthitime);
+d161 1
+a161 1
+	(void) setlocale(LC_ALL, "");
+d169 1
+a169 1
+	cutarg = NULL;
+d173 1
+a173 1
+		else	cutarg = optarg;
+d177 2
+a178 2
+_("usage %s [-v] [-c [loyear,]hiyear] zonename ...\n"),
+				progname);
+d181 8
+a188 21
+	if (vflag) {
+		if (cutarg != NULL) {
+			long	lo;
+			long	hi;
+			char	dummy;
+
+			if (sscanf(cutarg, "%ld%c", &hi, &dummy) == 1) {
+				cuthiyear = hi;
+			} else if (sscanf(cutarg, "%ld,%ld%c",
+				&lo, &hi, &dummy) == 2) {
+					cutloyear = lo;
+					cuthiyear = hi;
+			} else {
+(void) fprintf(stderr, _("%s: wild -c argument %s\n"),
+					progname, cutarg);
+				(void) exit(EXIT_FAILURE);
+			}
+		}
+		setabsolutes();
+		cutlotime = yeartot(cutloyear);
+		cuthitime = yeartot(cuthiyear);
+d195 2
+d201 1
+a201 1
+		for (i = 0; environ[i] != NULL; ++i)
+d226 6
+a231 2
+		warned = FALSE;
+		t = absolute_min_time;
+d235 2
+a236 7
+		if (t < cutlotime)
+			t = cutlotime;
+		tmp = my_localtime(&t);
+		if (tmp != NULL) {
+			tm = *tmp;
+			strlcpy(buf, abbr(&tm), sizeof buf);
+		}
+d238 1
+a238 1
+			if (t >= cuthitime)
+d241 1
+a241 1
+			if (newt >= cuthitime)
+d245 2
+a246 5
+			newtmp = localtime(&newt);
+			if (newtmp != NULL)
+				newtm = *newtmp;
+			if ((tmp == NULL || newtmp == NULL) ? (tmp != newtmp) :
+				(delta(&newtm, &tm) != (newt - t) ||
+d248 1
+a248 1
+				strcmp(abbr(&newtm), buf) != 0)) {
+d250 3
+a252 6
+					newtmp = localtime(&newt);
+					if (newtmp != NULL) {
+						newtm = *newtmp;
+						strlcpy(buf, abbr(&newtm),
+							sizeof buf);
+					}
+a255 1
+			tmp = newtmp;
+d257 6
+a262 1
+		t = absolute_max_time;
+d269 1
+a269 1
+		(void) fprintf(stderr, "%s: ", progname);
+a273 28
+	/* If exit fails to exit... */
+	return EXIT_FAILURE;
+}
+
+static void
+setabsolutes()
+{
+	if (0.5 == (time_t) 0.5) {
+		/*
+		** time_t is floating.
+		*/
+		if (sizeof (time_t) == sizeof (float)) {
+			absolute_min_time = (time_t) -FLT_MAX;
+			absolute_max_time = (time_t) FLT_MAX;
+		} else if (sizeof (time_t) == sizeof (double)) {
+			absolute_min_time = (time_t) -DBL_MAX;
+			absolute_max_time = (time_t) DBL_MAX;
+		} else {
+			(void) fprintf(stderr,
+_("%s: use of -v on system with floating time_t other than float or double\n"),
+				progname);
+			(void) exit(EXIT_FAILURE);
+		}
+	} else if (0 > (time_t) -1) {
+		/*
+		** time_t is signed.
+		*/
+		register time_t	hibit;
+d275 3
+a277 43
+		for (hibit = 1; (hibit * 2) != 0; hibit *= 2)
+			continue;
+		absolute_min_time = hibit;
+		absolute_max_time = -(hibit + 1);
+	} else {
+		/*
+		** time_t is unsigned.
+		*/
+		absolute_min_time = 0;
+		absolute_max_time = absolute_min_time - 1;
+	}
+}
+
+static time_t
+yeartot(y)
+const long	y;
+{
+	register long	myy;
+	register long	seconds;
+	register time_t	t;
+
+	myy = EPOCH_YEAR;
+	t = 0;
+	while (myy != y) {
+		if (myy < y) {
+			seconds = isleap(myy) ? SECSPERLYEAR : SECSPERNYEAR;
+			++myy;
+			if (t > absolute_max_time - seconds) {
+				t = absolute_max_time;
+				break;
+			}
+			t += seconds;
+		} else {
+			--myy;
+			seconds = isleap(myy) ? SECSPERLYEAR : SECSPERNYEAR;
+			if (t < absolute_min_time + seconds) {
+				t = absolute_min_time;
+				break;
+			}
+			t -= seconds;
+		}
+	}
+	return t;
+d286 9
+a294 19
+	time_t			t;
+	long			diff;
+	struct tm		lotm;
+	register struct tm *	lotmp;
+	struct tm		tm;
+	register struct tm *	tmp;
+	char			loab[MAX_STRING_LENGTH];
+
+	lotmp = my_localtime(&lot);
+	if (lotmp != NULL) {
+		lotm = *lotmp;
+		(void) strlcpy(loab, abbr(&lotm), sizeof loab);
+	}
+	for ( ; ; ) {
+		diff = (long) (hit - lot);
+		if (diff < 2)
+			break;
+		t = lot;
+		t += diff / 2;
+d299 2
+a300 5
+		tmp = my_localtime(&t);
+		if (tmp != NULL)
+			tm = *tmp;
+		if ((lotmp == NULL || tmp == NULL) ? (lotmp == tmp) :
+			(delta(&tm, &lotm) == (t - lot) &&
+d302 1
+a302 1
+			strcmp(abbr(&tm), loab) == 0)) {
+a304 1
+				lotmp = tmp;
+d321 2
+a322 2
+	register long	result;
+	register int	tmy;
+d328 1
+a328 1
+		result += DAYSPERNYEAR + isleap_sum(tmy, TM_YEAR_BASE);
+d345 1
+a345 1
+	register struct tm *	tmp;
+d349 2
+a350 8
+		tmp = gmtime(&t);
+		if (tmp == NULL) {
+			(void) printf(tformat(), t);
+		} else {
+			dumptime(tmp);
+			(void) printf(" UTC");
+		}
+		(void) printf(" = ");
+d352 1
+a352 1
+	tmp = my_localtime(&t);
+d354 4
+a357 5
+	if (tmp != NULL) {
+		if (*abbr(tmp) != '\0')
+			(void) printf(" %s", abbr(tmp));
+		if (v) {
+			(void) printf(" isdst=%d", tmp->tm_isdst);
+d359 1
+a359 1
+			(void) printf(" gmtoff=%ld", tmp->TM_GMTOFF);
+a360 1
+		}
+a362 2
+	if (tmp != NULL && *abbr(tmp) != '\0')
+		abbrok(abbr(tmp), zone);
+a377 27
+/*
+** The code below can fail on certain theoretical systems;
+** it works on all known real-world systems as of 2004-12-30.
+*/
+
+static const char *
+tformat()
+{
+	if (0.5 == (time_t) 0.5) {	/* floating */
+		if (sizeof (time_t) > sizeof (double))
+			return "%Lg";
+		return "%g";
+	}
+	if (0 > (time_t) -1) {		/* signed */
+		if (sizeof (time_t) > sizeof (long))
+			return "%lld";
+		if (sizeof (time_t) > sizeof (int))
+			return "%ld";
+		return "%d";
+	}
+	if (sizeof (time_t) > sizeof (unsigned long))
+		return "%llu";
+	if (sizeof (time_t) > sizeof (unsigned int))
+		return "%lu";
+	return "%u";
+}
+
+a390 2
+	register int		lead;
+	register int		trail;
+a391 4
+	if (timeptr == NULL) {
+		(void) printf("NULL");
+		return;
+	}
+d405 1
+a405 1
+	(void) printf("%.3s %.3s%3d %.2d:%.2d:%.2d ",
+d408 2
+a409 16
+		timeptr->tm_min, timeptr->tm_sec);
+#define DIVISOR	10
+	trail = timeptr->tm_year % DIVISOR + TM_YEAR_BASE % DIVISOR;
+	lead = timeptr->tm_year / DIVISOR + TM_YEAR_BASE / DIVISOR +
+		trail / DIVISOR;
+	trail %= DIVISOR;
+	if (trail < 0 && lead > 0) {
+		trail += DIVISOR;
+		--lead;
+	} else if (lead < 0 && trail > 0) {
+		trail -= DIVISOR;
+		++lead;
+	}
+	if (lead == 0)
+		(void) printf("%d", trail);
+	else	(void) printf("%d%d", lead, ((trail < 0) ? -trail : trail));
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD's libc as of today, minus some of the locale stuff,
+and with brk malloc instead of mmap malloc
+@
+text
+@a0 1
+/*	$OpenBSD: zdump.c,v 1.17 2005/08/08 08:05:38 espie Exp $ */
+d6 5
+@
+
+

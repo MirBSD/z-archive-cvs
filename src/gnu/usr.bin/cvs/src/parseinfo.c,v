@@ -1,0 +1,1648 @@
+head	1.15;
+access;
+symbols
+	MIRBSD_10:1.8.0.2
+	MIRBSD_10_BASE:1.8
+	MIRBSD_9_BASE:1.5
+	MIRBSD_8:1.5.0.2
+	MIRBSD_8_BASE:1.5
+	cvs-1_12_13:1.1.101.3
+	cvs-1_12_12:1.1.101.2
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.15
+date	2017.03.27.16.37.47;	author tg;	state Exp;
+branches;
+next	1.14;
+commitid	10058D93FF222F12610;
+
+1.14
+date	2017.03.26.19.32.58;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	10058D81778779D5567;
+
+1.12
+date	2016.08.08.16.48.30;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	10057A8B7F4539FFC58;
+
+1.11
+date	2015.04.06.21.31.07;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1005522FAEA664528F2;
+
+1.10
+date	2010.09.19.19.43.07;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004C9667C83946BB2E;
+
+1.9
+date	2010.09.16.20.56.07;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004C928463526833A8;
+
+1.8
+date	2007.03.10.23.53.42;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10045F344D65465EF23;
+
+1.7
+date	2007.02.17.01.40.39;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10045D65D1B41545736;
+
+1.6
+date	2006.09.21.21.48.37;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100451308B24B1C2E71;
+
+1.5
+date	2005.12.05.22.12.48;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	78e44394bb6132ce;
+
+1.4
+date	2005.04.19.22.23.09;	author tg;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2005.04.19.20.58.21;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.03.13.15.50.38;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.03.06.15.17.56;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.03.06.15.17.56;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.04.19.20.33.18;	author tg;	state Exp;
+branches;
+next	1.1.101.3;
+
+1.1.101.3
+date	2005.12.05.21.43.45;	author tg;	state Exp;
+branches;
+next	;
+commitid	2cec4394b499b817;
+
+
+desc
+@@
+
+
+1.15
+log
+@more precise in error
+@
+text
+@/*
+ * Copyright (C) 1986-2005 The Free Software Foundation, Inc.
+ *
+ * Portions Copyright (C) 1998-2005 Derek Price, Ximbiot <http://ximbiot.com>,
+ *                                  and others.
+ *
+ * Portions Copyright (C) 1992, Brian Berliner and Jeff Polk
+ * Portions Copyright (C) 1989-1992, Brian Berliner
+ * 
+ * You may distribute under the terms of the GNU General Public License as
+ * specified in the README file that comes with the CVS source distribution.
+ */
+
+#include "cvs.h"
+#include "getline.h"
+#include "history.h"
+
+__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/parseinfo.c,v 1.11 2015/04/06 21:31:07 tg Exp $");
+
+/*
+ * Parse the INFOFILE file for the specified REPOSITORY.  Invoke CALLPROC for
+ * the first line in the file that matches the REPOSITORY, or if ALL != 0, any
+ * lines matching "ALL", or if no lines match, the last line matching
+ * "DEFAULT".
+ *
+ * Return 0 for success, -1 if there was not an INFOFILE, and >0 for failure.
+ */
+int
+Parse_Info (const char *infofile, const char *repository, CALLPROC callproc,
+            int opt, void *closure)
+{
+    int err = 0;
+    FILE *fp_info;
+    char *infopath;
+    char *line = NULL;
+    size_t line_allocated = 0;
+    char *default_value = NULL;
+    int default_line = 0;
+    char *expanded_value;
+    bool callback_done;
+    int line_number;
+    char *cp, *exp, *value;
+    const char *srepos;
+    const char *regex_err;
+
+    assert (repository);
+
+    if (!current_parsed_root)
+    {
+	/* XXX - should be error maybe? */
+	error (0, 0, "CVSROOT variable not set");
+	return 1;
+    }
+
+    /* find the info file and open it */
+    infopath = Xasprintf ("%s/%s/%s", current_parsed_root->directory,
+			  CVSROOTADM, infofile);
+    fp_info = CVS_FOPEN (infopath, "r");
+    if (!fp_info)
+    {
+	/* If no file, don't do anything special.  */
+	if (!existence_error (errno))
+	    error (0, errno, "cannot open %s", infopath);
+	free (infopath);
+	return 0;
+    }
+
+    /* strip off the CVSROOT if repository was absolute */
+    srepos = Short_Repository (repository);
+
+    TRACE (TRACE_FUNCTION, "Parse_Info (%s, %s, %s)",
+	   infopath, srepos,  (opt & PIOPT_ALL) ? "ALL" : "not ALL");
+
+    /* search the info file for lines that match */
+    callback_done = false;
+    line_number = 0;
+    while (getline (&line, &line_allocated, fp_info) >= 0)
+    {
+	line_number++;
+
+	/* skip lines starting with # */
+	if (line[0] == '#')
+	    continue;
+
+	/* skip whitespace at beginning of line */
+	for (cp = line; *cp && isspace ((unsigned char) *cp); cp++)
+	    ;
+
+	/* if *cp is null, the whole line was blank */
+	if (*cp == '\0')
+	    continue;
+
+	/* the regular expression is everything up to the first space */
+	for (exp = cp; *cp && !isspace ((unsigned char) *cp); cp++)
+	    ;
+	if (*cp != '\0')
+	    *cp++ = '\0';
+
+	/* skip whitespace up to the start of the matching value */
+	while (*cp && isspace ((unsigned char) *cp))
+	    cp++;
+
+	/* no value to match with the regular expression is an error */
+	if (*cp == '\0')
+	{
+	    error (0, 0, "syntax error at line %d file %s; ignored",
+		   line_number, infopath);
+	    continue;
+	}
+	value = cp;
+
+	/* strip the newline off the end of the value */
+	cp = strrchr (value, '\n');
+	if (cp) *cp = '\0';
+
+	/*
+	 * At this point, exp points to the regular expression, and value
+	 * points to the value to call the callback routine with.  Evaluate
+	 * the regular expression against srepos and callback with the value
+	 * if it matches.
+	 */
+
+	/* save the default value so we have it later if we need it */
+	if (strcmp (exp, "DEFAULT") == 0)
+	{
+	    if (default_value)
+	    {
+		error (0, 0, "Multiple `DEFAULT' lines (%d and %d) in %s file",
+		       default_line, line_number, infofile);
+		free (default_value);
+	    }
+	    default_value = xstrdup (value);
+	    default_line = line_number;
+	    continue;
+	}
+
+	/*
+	 * For a regular expression of "ALL", do the callback always We may
+	 * execute lots of ALL callbacks in addition to *one* regular matching
+	 * callback or default
+	 */
+	if (strcmp (exp, "ALL") == 0)
+	{
+	    if (!(opt & PIOPT_ALL))
+		error (0, 0, "Keyword `ALL' is ignored at line %d in %s file",
+		       line_number, infofile);
+	    else if ((expanded_value =
+			expand_path (value, current_parsed_root->directory,
+				     true, infofile, line_number)))
+	    {
+		err += callproc (repository, expanded_value, closure);
+		free (expanded_value);
+	    }
+	    else
+		err++;
+	    continue;
+	}
+
+	if (callback_done)
+	    /* only first matching, plus "ALL"'s */
+	    continue;
+
+	/* see if the repository matched this regular expression */
+	regex_err = re_comp (exp);
+	if (regex_err)
+	{
+	    error (0, 0, "bad regular expression at line %d file %s: %s",
+		   line_number, infofile, regex_err);
+	    continue;
+	}
+	if (re_exec (srepos) == 0)
+	    continue;				/* no match */
+
+	/* it did, so do the callback and note that we did one */
+	expanded_value = expand_path (value, current_parsed_root->directory,
+				      true, infofile, line_number);
+	if (expanded_value)
+	{
+	    err += callproc (repository, expanded_value, closure);
+	    free (expanded_value);
+	}
+	else
+	    err++;
+	callback_done = true;
+    }
+    if (ferror (fp_info))
+	error (0, errno, "cannot read %s", infopath);
+    if (fclose (fp_info) < 0)
+	error (0, errno, "cannot close %s", infopath);
+
+    /* if we fell through and didn't callback at all, do the default */
+    if (!callback_done && default_value)
+    {
+	expanded_value = expand_path (default_value,
+				      current_parsed_root->directory,
+				      true, infofile, line_number);
+	if (expanded_value)
+	{
+	    err += callproc (repository, expanded_value, closure);
+	    free (expanded_value);
+	}
+	else
+	    err++;
+    }
+
+    /* free up space if necessary */
+    if (default_value) free (default_value);
+    free (infopath);
+    if (line) free (line);
+
+    return err;
+}
+
+
+
+/* Print a warning and return false if P doesn't look like a string specifying
+ * something that can be converted into a size_t.
+ *
+ * Sets *VAL to the parsed value when it is found to be valid.  *VAL will not
+ * be altered when false is returned.
+ */
+static bool
+readSizeT (const char *infopath, const char *option, const char *p,
+	   size_t *val)
+{
+    const char *q;
+    size_t num, factor = 1;
+
+    if (!strcasecmp ("unlimited", p))
+    {
+	*val = SIZE_MAX;
+	return true;
+    }
+
+    /* Record the factor character (kibi, mebi, gibi, tebi).  */
+    if (!isdigit (p[strlen(p) - 1]))
+    {
+	switch (p[strlen(p) - 1])
+	{
+	    case 'T':
+		factor = xtimes (factor, 1024);
+	    case 'G':
+		factor = xtimes (factor, 1024);
+	    case 'M':
+		factor = xtimes (factor, 1024);
+	    case 'K':
+		factor = xtimes (factor, 1024);
+		break;
+	    default:
+		error (0, 0,
+    "%s: Unknown %s factor: `%c'",
+		       infopath, option, p[strlen(p) - 1]);
+		return false;
+	}
+	TRACE (TRACE_DATA, "readSizeT(): Found factor %zu for %s",
+	       factor, option);
+    }
+
+    /* Verify that *q is a number.  */
+    q = p;
+    while (q < p + strlen(p) - 1 /* Checked last character above.  */)
+    {
+	if (!isdigit(*q))
+	{
+	    error (0, 0,
+"%s: %s must be a postitive integer, not '%s'",
+		   infopath, option, p);
+	    return false;
+	}
+	q++;
+    }
+
+    /* Compute final value.  */
+    num = strtoul (p, NULL, 10);
+    if (num == ULONG_MAX || num > SIZE_MAX)
+	/* Don't return an error, just max out.  */
+	num = SIZE_MAX;
+
+    TRACE (TRACE_DATA, "readSizeT(): read number %zu for %s", num, option);
+    *val = xtimes (strtoul (p, NULL, 10), factor);
+    TRACE (TRACE_DATA, "readSizeT(): returnning %zu for %s", *val, option);
+    return true;
+}
+
+
+
+/* Allocate and initialize a new config struct.  */
+static inline struct config *
+new_config (void)
+{
+    struct config *new = xcalloc (1, sizeof (struct config));
+
+    TRACE (TRACE_FLOW, "new_config ()");
+
+    new->logHistory = xstrdup (ALL_HISTORY_REC_TYPES);
+    new->RereadLogAfterVerify = LOGMSG_REREAD_ALWAYS;
+    new->UserAdminOptions = xstrdup ("k");
+    new->MaxCommentLeaderLength = 20;
+#ifdef SERVER_SUPPORT
+    new->MaxCompressionLevel = 9;
+#endif /* SERVER_SUPPORT */
+#ifdef PROXY_SUPPORT
+    new->MaxProxyBufferSize = (size_t)(8 * 1024 * 1024); /* 8 mebibytes,
+                                                          * by default.
+                                                          */
+#endif /* PROXY_SUPPORT */
+#ifdef AUTH_SERVER_SUPPORT
+    new->system_auth = true;
+#endif /* AUTH_SERVER_SUPPORT */
+
+    return new;
+}
+
+
+
+void
+free_config (struct config *data)
+{
+    if (data->keywords) free_keywords (data->keywords);
+    free (data);
+}
+
+
+
+/* Return true if this function has already been called for line LN of file
+ * INFOPATH.
+ */
+bool
+parse_error (const char *infopath, unsigned int ln)
+{
+    static List *errors = NULL;
+    char *nodename = NULL;
+
+    if (!errors)
+	errors = getlist();
+
+    nodename = Xasprintf ("%s/%u", infopath, ln);
+    if (findnode (errors, nodename))
+    {
+	free (nodename);
+	return true;
+    }
+
+    push_string (errors, nodename);
+    return false;
+}
+
+
+
+#ifdef ALLOW_CONFIG_OVERRIDE
+const char * const allowed_config_prefixes[] = { ALLOW_CONFIG_OVERRIDE };
+#endif /* ALLOW_CONFIG_OVERRIDE */
+
+
+
+/* Parse the CVS config file.  The syntax right now is a bit ad hoc
+ * but tries to draw on the best or more common features of the other
+ * *info files and various unix (or non-unix) config file syntaxes.
+ * Lines starting with # are comments.  Settings are lines of the form
+ * KEYWORD=VALUE.  There is currently no way to have a multi-line
+ * VALUE (would be nice if there was, probably).
+ *
+ * CVSROOT is the $CVSROOT directory
+ * (current_parsed_root->directory might not be set yet, so this
+ * function takes the cvsroot as a function argument).
+ *
+ * RETURNS
+ *   Always returns a fully initialized config struct, which on error may
+ *   contain only the defaults.
+ *
+ * ERRORS
+ *   Calls error(0, ...) on errors in addition to the return value.
+ *
+ *   xmalloc() failures are fatal, per usual.
+ */
+struct config *
+parse_config (const char *cvsroot, const char *path)
+{
+    const char *infopath;
+    char *freeinfopath = NULL;
+    FILE *fp_info;
+    char *line = NULL;
+    unsigned int ln;		/* Input file line counter.  */
+    char *buf = NULL;
+    size_t buf_allocated = 0;
+    size_t len;
+    char *p;
+    struct config *retval;
+    /* PROCESSING	Whether config keys are currently being processed for
+     *			this root.
+     * PROCESSED	Whether any keys have been processed for this root.
+     *			This is initialized to true so that any initial keys
+     *			may be processed as global defaults.
+     */
+    bool processing = true;
+    bool processed = true;
+#ifdef SERVER_SUPPORT
+    size_t dummy_sizet;
+#endif
+
+    TRACE (TRACE_FUNCTION, "parse_config (%s)", cvsroot);
+
+#ifdef ALLOW_CONFIG_OVERRIDE
+    if (path)
+    {
+	const char * const *prefix;
+	char *npath = xcanonicalize_file_name (path);
+	bool approved = false;
+	for (prefix = allowed_config_prefixes; *prefix != NULL; prefix++)
+	{
+	    char *nprefix;
+
+	    if (!isreadable (*prefix)) continue;
+	    nprefix = xcanonicalize_file_name (*prefix);
+	    if (!strncmp (nprefix, npath, strlen (nprefix))
+		&& (((*prefix)[strlen (*prefix)] != '/'
+		     && strlen (npath) == strlen (nprefix))
+		    || ((*prefix)[strlen (*prefix)] == '/'
+			&& npath[strlen (nprefix)] == '/')))
+		approved = true;
+	    free (nprefix);
+	    if (approved) break;
+	}
+	if (!approved)
+	    error (1, 0, "Invalid path to config file specified: `%s'",
+		   path);
+	infopath = path;
+	free (npath);
+    }
+    else
+#endif
+	infopath = freeinfopath =
+	    Xasprintf ("%s/%s/%s", cvsroot, CVSROOTADM, CVSROOTADM_CONFIG);
+
+    retval = new_config ();
+
+    fp_info = CVS_FOPEN (infopath, "r");
+    if (!fp_info)
+    {
+	/* If no file, don't do anything special.  */
+	if (!existence_error (errno))
+	{
+	    /* Just a warning message; doesn't affect return
+	       value, currently at least.  */
+	    error (0, errno, "cannot open %s", infopath);
+	}
+	if (freeinfopath) free (freeinfopath);
+	return retval;
+    }
+
+    ln = 0;  /* Have not read any lines yet.  */
+    while (getline (&buf, &buf_allocated, fp_info) >= 0)
+    {
+	ln++; /* Keep track of input file line number for error messages.  */
+
+	line = buf;
+
+	/* Skip leading white space.  */
+	while (isspace (*line)) line++;
+
+	/* Skip comments.  */
+	if (line[0] == '#')
+	    continue;
+
+	/* Is there any kind of written standard for the syntax of this
+	   sort of config file?  Anywhere in POSIX for example (I guess
+	   makefiles are sort of close)?  Red Hat Linux has a bunch of
+	   these too (with some GUI tools which edit them)...
+
+	   Along the same lines, we might want a table of keywords,
+	   with various types (boolean, string, &c), as a mechanism
+	   for making sure the syntax is consistent.  Any good examples
+	   to follow there (Apache?)?  */
+
+	/* Strip the trailing newline.  There will be one unless we
+	   read a partial line without a newline, and then got end of
+	   file (or error?).  */
+
+	len = strlen (line) - 1;
+	if (line[len] == '\n')
+	    line[len--] = '\0';
+
+	/* Skip blank lines.  */
+	if (line[0] == '\0')
+	    continue;
+
+	TRACE (TRACE_DATA, "parse_info() examining line: `%s'", line);
+
+	/* Check for a root specification.  */
+	if (line[0] == '[' && line[len] == ']')
+	{
+	    cvsroot_t *tmproot;
+
+	    line++[len] = '\0';
+	    tmproot = parse_cvsroot (line);
+
+	    /* Ignoring method.  */
+	    if (!tmproot
+#if defined CLIENT_SUPPORT || defined SERVER_SUPPORT
+		|| (tmproot->method != local_method
+		    && (!tmproot->hostname || !isThisHost (tmproot->hostname)))
+#endif /* CLIENT_SUPPORT || SERVER_SUPPORT */
+		|| !isSamePath (tmproot->directory, cvsroot))
+	    {
+		if (processed) processing = false;
+	    }
+	    else
+	    {
+		TRACE (TRACE_FLOW, "Matched root section`%s'", line);
+		processing = true;
+		processed = false;
+	    }
+
+	    continue;
+	}
+
+	/* There is data on this line.  */
+
+	/* Even if the data is bad or ignored, consider data processed for
+	 * this root.
+	 */
+	processed = true;
+
+	if (!processing)
+	    /* ...but it is for a different root.  */
+	     continue;
+
+	/* The first '=' separates keyword from value.  */
+	p = strchr (line, '=');
+	if (!p)
+	{
+	    if (!parse_error (infopath, ln))
+		error (0, 0,
+"%s [%d]: syntax error: missing `=' between keyword and value",
+		       infopath, ln);
+	    continue;
+	}
+
+	*p++ = '\0';
+
+	if (strcmp (line, "RCSBIN") == 0)
+	{
+	    /* This option used to specify the directory for RCS
+	       executables.  But since we don't run them any more,
+	       this is a noop.  Silently ignore it so that a
+	       repository can work with either new or old CVS.  */
+	    ;
+	}
+	else if (strcmp (line, "SystemAuth") == 0)
+#ifdef AUTH_SERVER_SUPPORT
+	    readBool (infopath, "SystemAuth", p, &retval->system_auth);
+#else
+	{
+	    /* Still parse the syntax but ignore the option.  That way the same
+	     * config file can be used for local and server.
+	     */
+	    bool dummy;
+	    readBool (infopath, "SystemAuth", p, &dummy);
+	}
+#endif
+	else if (strcmp (line, "LocalKeyword") == 0)
+	    RCS_setlocalid (infopath, ln, &retval->keywords, p);
+	else if (strcmp (line, "KeywordExpand") == 0)
+	    RCS_setincexc (&retval->keywords, p);
+	else if (strcmp (line, "PreservePermissions") == 0)
+	{
+#ifdef PRESERVE_PERMISSIONS_SUPPORT
+	    readBool (infopath, "PreservePermissions", p,
+		      &retval->preserve_perms);
+#else
+	    if (!parse_error (infopath, ln))
+		error (0, 0, "\
+%s [%u]: warning: this CVS does not support PreservePermissions",
+		       infopath, ln);
+#endif
+	}
+	else if (strcmp (line, "TopLevelAdmin") == 0)
+	    readBool (infopath, "TopLevelAdmin", p, &retval->top_level_admin);
+	else if (strcmp (line, "LockDir") == 0)
+	{
+	    if (retval->lock_dir)
+		free (retval->lock_dir);
+	    retval->lock_dir = expand_path (p, cvsroot, false, infopath, ln);
+	    /* Could try some validity checking, like whether we can
+	       opendir it or something, but I don't see any particular
+	       reason to do that now rather than waiting until lock.c.  */
+	}
+	else if (strcmp (line, "HistoryLogPath") == 0)
+	{
+	    if (retval->HistoryLogPath) free (retval->HistoryLogPath);
+
+	    /* Expand ~ & $VARs.  */
+	    retval->HistoryLogPath = expand_path (p, cvsroot, false,
+						  infopath, ln);
+
+	    if (retval->HistoryLogPath && !ISABSOLUTE (retval->HistoryLogPath))
+	    {
+		error (0, 0, "%s [%u]: HistoryLogPath must be absolute.",
+		       infopath, ln);
+		free (retval->HistoryLogPath);
+		retval->HistoryLogPath = NULL;
+	    }
+	}
+	else if (strcmp (line, "HistorySearchPath") == 0)
+	{
+	    if (retval->HistorySearchPath) free (retval->HistorySearchPath);
+	    retval->HistorySearchPath = expand_path (p, cvsroot, false,
+						     infopath, ln);
+
+	    if (retval->HistorySearchPath
+		&& !ISABSOLUTE (retval->HistorySearchPath))
+	    {
+		error (0, 0, "%s [%u]: HistorySearchPath must be absolute.",
+		       infopath, ln);
+		free (retval->HistorySearchPath);
+		retval->HistorySearchPath = NULL;
+	    }
+	}
+	else if (strcmp (line, "LogHistory") == 0)
+	{
+	    static char *prevpath = NULL;
+	    static unsigned int prevln;
+
+	    if (prevpath != NULL) {
+		error (0, 0, "\
+%s [%u]: warning: duplicate LogHistory entry found.",
+		  infopath, ln);
+		error (0, 0, "\
+%s [%u]: notice: this was the first definition.",
+		  prevpath, prevln);
+	    } else {
+		prevln = ln;
+		prevpath = xstrdup(infopath);
+	    }
+	    free(retval->logHistory);
+	    retval->logHistory = xstrdup(strcmp(p, "all") ? p :
+	      ALL_HISTORY_REC_TYPES);
+	}
+	else if (strcmp (line, "RereadLogAfterVerify") == 0)
+	{
+	    if (!strcasecmp (p, "never"))
+	      retval->RereadLogAfterVerify = LOGMSG_REREAD_NEVER;
+	    else if (!strcasecmp (p, "always"))
+	      retval->RereadLogAfterVerify = LOGMSG_REREAD_ALWAYS;
+	    else if (!strcasecmp (p, "stat"))
+	      retval->RereadLogAfterVerify = LOGMSG_REREAD_STAT;
+	    else
+	    {
+		bool tmp;
+		if (readBool (infopath, "RereadLogAfterVerify", p, &tmp))
+		{
+		    if (tmp)
+			retval->RereadLogAfterVerify = LOGMSG_REREAD_ALWAYS;
+		    else
+			retval->RereadLogAfterVerify = LOGMSG_REREAD_NEVER;
+		}
+	    }
+	}
+	else if (strcmp (line, "TmpDir") == 0)
+	{
+	    if (retval->TmpDir) free (retval->TmpDir);
+	    retval->TmpDir = expand_path (p, cvsroot, false, infopath, ln);
+	    /* Could try some validity checking, like whether we can
+	     * opendir it or something, but I don't see any particular
+	     * reason to do that now rather than when the first function
+	     * tries to create a temp file.
+	     */
+	}
+	else if (strcmp (line, "UserAdminOptions") == 0)
+	    retval->UserAdminOptions = xstrdup (p);
+	else if (strcmp (line, "UseNewInfoFmtStrings") == 0)
+#ifdef SUPPORT_OLD_INFO_FMT_STRINGS
+	    readBool (infopath, "UseNewInfoFmtStrings", p,
+		      &retval->UseNewInfoFmtStrings);
+#else /* !SUPPORT_OLD_INFO_FMT_STRINGS */
+	{
+	    bool dummy;
+	    if (readBool (infopath, "UseNewInfoFmtStrings", p, &dummy)
+		&& !dummy)
+		error (1, 0,
+"%s [%u]: Old style info format strings not supported by this executable.",
+		       infopath, ln);
+	}
+#endif /* SUPPORT_OLD_INFO_FMT_STRINGS */
+	else if (strcmp (line, "ImportNewFilesToVendorBranchOnly") == 0)
+	    readBool (infopath, "ImportNewFilesToVendorBranchOnly", p,
+		      &retval->ImportNewFilesToVendorBranchOnly);
+	else if (strcmp (line, "PrimaryServer") == 0)
+	    retval->PrimaryServer = parse_cvsroot (p);
+#ifdef PROXY_SUPPORT
+	else if (!strcmp (line, "MaxProxyBufferSize"))
+	    readSizeT (infopath, "MaxProxyBufferSize", p,
+		       &retval->MaxProxyBufferSize);
+#endif /* PROXY_SUPPORT */
+	else if (!strcmp (line, "MaxCommentLeaderLength"))
+	    readSizeT (infopath, "MaxCommentLeaderLength", p,
+		       &retval->MaxCommentLeaderLength);
+	else if (!strcmp (line, "UseArchiveCommentLeader"))
+	    readBool (infopath, "UseArchiveCommentLeader", p,
+		      &retval->UseArchiveCommentLeader);
+#ifdef SERVER_SUPPORT
+	else if (!strcmp (line, "MinCompressionLevel")) {
+	    readSizeT (infopath, "MinCompressionLevel", p, &dummy_sizet);
+	    retval->MinCompressionLevel = dummy_sizet;
+	}
+	else if (!strcmp (line, "MaxCompressionLevel")) {
+	    readSizeT (infopath, "MaxCompressionLevel", p, &dummy_sizet);
+	    retval->MaxCompressionLevel = dummy_sizet;
+	}
+#endif /* SERVER_SUPPORT */
+	else if (!strcmp (line, "tag")) {
+	    char *pp;
+
+	    pp = Xasprintf("%s=Id", p);
+	    RCS_setlocalid (infopath, ln, &retval->keywords, pp);
+	    free(pp);
+
+#if !defined(LOCK_COMPATIBILITY) || !defined(SUPPORT_OLD_INFO_FMT_STRINGS)
+	    error (0, 0, "%s: found keyword '%s' in repository",
+		   infopath, line);
+	    error (readonlyfs ? 0 : 1, 0, readonlyfs
+		? "Danger: Granting read access to incompatible repository!"
+		: "Do not try to access a cvs 1.11 repository!");
+#endif
+	}
+#if !defined(LOCK_COMPATIBILITY) || !defined(SUPPORT_OLD_INFO_FMT_STRINGS)
+	else if ((!strcmp (line, "umask"))
+	  || (!strcmp (line, "DisableXProg")) || (!strcmp (line, "dlimit"))
+	  || (!strcmp (line, "forceReadOnlyFS"))) {
+	    /* We are dealing with keywords removed between cvs 1.11.1p1
+	       and cvs 1.12.10; odds are we are not being able to handle
+	       access or concurrent access with 1.11 cvs correctly */
+	    error (0, 0, "%s: found keyword '%s' in repository",
+		   infopath, line);
+	    error (readonlyfs ? 0 : 1, 0, readonlyfs
+		? "Danger: Granting read access to incompatible repository!"
+		: "Do not try to access a cvs 1.11 repository!");
+	}
+#endif
+	else
+	    /* We may be dealing with a keyword which was added in a
+	       subsequent version of CVS.  In that case it is a good idea
+	       to complain, as (1) the keyword might enable a behavior like
+	       alternate locking behavior, in which it is dangerous and hard
+	       to detect if some CVS's have it one way and others have it
+	       the other way, (2) in general, having us not do what the user
+	       had in mind when they put in the keyword violates the
+	       principle of least surprise.  Note that one corollary is
+	       adding new keywords to your CVSROOT/config file is not
+	       particularly recommended unless you are planning on using
+	       the new features.  */
+	    if (!parse_error (infopath, ln))
+		error (0, 0, "%s [%u]: unrecognized keyword `%s'",
+		       infopath, ln, line);
+    }
+    if (ferror (fp_info))
+	error (0, errno, "cannot read %s", infopath);
+    if (fclose (fp_info) < 0)
+	error (0, errno, "cannot close %s", infopath);
+    if (freeinfopath) free (freeinfopath);
+    if (buf) free (buf);
+
+    return retval;
+}
+@
+
+
+1.14
+log
+@keep track of the first definition for duplicate elimination
+@
+text
+@d629 1
+a629 1
+%s [%u]: notice: this is the previous definition.",
+@
+
+
+1.12
+log
+@remove useless double case
+@
+text
+@d621 5
+a625 5
+	    if (strcmp (p, "all") != 0)
+	    {
+		static bool gotone = false;
+		if (gotone)
+		    error (0, 0, "\
+d627 7
+a633 5
+			   infopath, ln);
+		else
+		    gotone = true;
+		free (retval->logHistory);
+		retval->logHistory = xstrdup (p);
+d635 3
+@
+
+
+1.11
+log
+@support obsd-gnucvs-1.11-style “tag” option in config, for compatibility
+
+this allows us to run a (patched, see gh:MirBSD/git-scripts) cvs2git on
+all repos (ocvs, ncvs, cvs) and have stable output that mostly seems to
+match what was in CVS at that time
+@
+text
+@d18 1
+a18 1
+__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/parseinfo.c,v 1.10 2010/09/19 19:43:07 tg Exp $");
+d722 1
+a722 1
+	else if ((!strcmp (line, "tag")) || (!strcmp (line, "umask"))
+@
+
+
+1.10
+log
+@merge from ports/devel/cvs
+@
+text
+@d18 1
+a18 1
+__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_parseinfo_c,v 1.4 2010/09/18 22:35:09 tg Exp $");
+d706 15
+@
+
+
+1.9
+log
+@begin attempting to synchronise with the port
+@
+text
+@d18 1
+a18 1
+__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_parseinfo_c,v 1.3 2010/09/15 20:57:02 tg Exp $");
+d252 1
+a252 1
+		       infopath, option, p[strlen(p)]);
+@
+
+
+1.8
+log
+@sync the cvs port and the cvs in the base system;
+RCSID stuff like in commitid 10045F33CB2157CFEAE
+@
+text
+@d18 1
+a18 1
+__RCSID("$MirOS$");
+@
+
+
+1.7
+log
+@gcc version 4.1.2 20061115 (prerelease) (Debian 4.1.1-21)
+-Wformat clean: size_t is unsigned long on MirOS, but not always on Debian
+@
+text
+@a0 2
+/* $MirOS: src/gnu/usr.bin/cvs/src/parseinfo.c,v 1.6 2006/09/21 21:48:37 tg Exp $ */
+
+d18 2
+@
+
+
+1.6
+log
+@more size_t and ptrdiff_t fallout
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/gnu/usr.bin/cvs/src/parseinfo.c,v 1.5 2005/12/05 22:12:48 tg Exp $ */
+d255 1
+a255 1
+	TRACE (TRACE_DATA, "readSizeT(): Found factor %lu for %s",
+d279 1
+a279 1
+    TRACE (TRACE_DATA, "readSizeT(): read number %lu for %s", num, option);
+d281 1
+a281 1
+    TRACE (TRACE_DATA, "readSizeT(): returnning %lu for %s", *val, option);
+@
+
+
+1.5
+log
+@merge (sans generated files)
+re-do the commitid generator
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/gnu/usr.bin/cvs/src/parseinfo.c,v 1.4 2005/04/19 22:23:09 tg Exp $ */
+d255 1
+a255 1
+	TRACE (TRACE_DATA, "readSizeT(): Found factor %u for %s",
+d279 1
+a279 1
+    TRACE (TRACE_DATA, "readSizeT(): read number %u for %s", num, option);
+d281 1
+a281 1
+    TRACE (TRACE_DATA, "readSizeT(): returnning %u for %s", *val, option);
+d397 3
+d697 8
+a704 6
+	else if (!strcmp (line, "MinCompressionLevel"))
+	    readSizeT (infopath, "MinCompressionLevel", p,
+		       &retval->MinCompressionLevel);
+	else if (!strcmp (line, "MaxCompressionLevel"))
+	    readSizeT (infopath, "MaxCompressionLevel", p,
+		       &retval->MaxCompressionLevel);
+@
+
+
+1.4
+log
+@* cvsadmin (gid) -> _cvsadmin
+* `...' -> '...'
+* Men in Black^W^W^WKibibytes &c.
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/gnu/usr.bin/cvs/src/parseinfo.c,v 1.3 2005/04/19 20:58:21 tg Exp $ */
+a19 2
+
+
+d40 2
+a41 1
+    int callback_done, line_number;
+d48 1
+a48 1
+    if (current_parsed_root == NULL)
+d59 1
+a59 1
+    if (fp_info == NULL)
+d75 2
+a76 1
+    callback_done = line_number = 0;
+d113 2
+a114 2
+	if ((cp = strrchr (value, '\n')) != NULL)
+	    *cp = '\0';
+d126 1
+a126 1
+	    if (default_value != NULL)
+d147 3
+a149 3
+	    else if ((expanded_value = expand_path (value, infofile,
+	                                            line_number, 1))
+	             != NULL )
+d164 2
+a165 1
+	if ((regex_err = re_comp (exp)) != NULL)
+d175 3
+a177 2
+	if ((expanded_value = expand_path( value, infofile, line_number, 1)
+	    ) != NULL)
+d184 1
+a184 1
+	callback_done = 1;
+d192 1
+a192 1
+    if (callback_done == 0 && default_value != NULL)
+d194 4
+a197 3
+	if ((expanded_value = expand_path (default_value, infofile,
+	                                   line_number, 1)
+	    ) != NULL)
+d207 1
+a207 2
+    if (default_value != NULL)
+	free (default_value);
+d209 1
+a209 2
+    if (line != NULL)
+	free (line);
+d299 3
+d350 6
+d377 1
+a377 1
+parse_config (const char *cvsroot)
+d379 2
+a380 1
+    char *infopath;
+d384 2
+a385 1
+    size_t line_allocated = 0;
+d389 8
+d400 32
+a433 2
+    infopath = Xasprintf ("%s/%s/%s", cvsroot, CVSROOTADM, CVSROOTADM_CONFIG);
+
+d435 1
+a435 1
+    if (fp_info == NULL)
+d444 1
+a444 1
+	free (infopath);
+d449 1
+a449 1
+    while (getline (&line, &line_allocated, fp_info) >= 0)
+d453 5
+d462 1
+a462 6
+	/* At least for the moment we don't skip whitespace at the start
+	   of the line.  Too picky?  Maybe.  But being insufficiently
+	   picky leads to all sorts of confusion, and it is a lot easier
+	   to start out picky and relax it than the other way around.
+
+	   Is there any kind of written standard for the syntax of this
+d478 1
+a478 1
+	    line[len] = '\0';
+d486 39
+d527 1
+a527 1
+	if (p == NULL)
+d578 1
+a578 1
+	    if (retval->lock_dir != NULL)
+d580 1
+a580 1
+	    retval->lock_dir = xstrdup (p);
+d585 31
+d651 10
+d693 8
+d735 3
+a737 3
+    free (infopath);
+    if (line != NULL)
+	free (line);
+@
+
+
+1.3
+log
+@initial fubar'ing of the CVS port
+this won't even build right now...
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/gnu/usr.bin/cvs/src/parseinfo.c,v 1.2 2005/03/13 15:50:38 tg Exp $ */
+d234 1
+a234 1
+    /* Record the factor character (kilo, mega, giga, tera).  */
+d245 1
+a245 1
+	    case 'k':
+d299 1
+a299 1
+    new->MaxProxyBufferSize = (size_t)(8 * 1024 * 1024); /* 8 megabytes,
+@
+
+
+1.2
+log
+@merge src/gnu except binutils, lynx and generated files
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d4 7
+a10 2
+ * Copyright (c) 1992, Brian Berliner and Jeff Polk
+ * Copyright (c) 1989-1992, Brian Berliner
+d47 2
+d57 2
+a58 6
+    infopath = xmalloc (strlen (current_parsed_root->directory)
+			+ strlen (infofile)
+			+ sizeof (CVSROOTADM)
+			+ 3);
+    (void) sprintf (infopath, "%s/%s/%s", current_parsed_root->directory,
+		    CVSROOTADM, infofile);
+d72 1
+a72 1
+    TRACE (1, "Parse_Info (%s, %s, %s)",
+d294 1
+a294 1
+    new->logHistory = ALL_HISTORY_REC_TYPES;
+d321 25
+d372 1
+d398 1
+d401 2
+d440 4
+a443 3
+	    /* Probably should be printing line number.  */
+	    error (0, 0, "syntax error in %s: line '%s' is missing '='",
+		   infopath, line);
+d470 1
+a470 1
+	    RCS_setlocalid (&retval->keywords, p);
+d474 1
+d479 4
+a482 2
+	    error (0, 0, "\
+warning: this CVS does not support PreservePermissions");
+d484 1
+d499 9
+d509 1
+d543 2
+a544 2
+"%s: Old style info format strings not supported by this executable.",
+		       infopath);
+a549 1
+#ifdef PROXY_SUPPORT
+a550 1
+	{
+d552 1
+a552 11
+	    if (retval->PrimaryServer->method != fork_method
+		&& retval->PrimaryServer->method != ext_method)
+	    {
+		/* I intentionally neglect to mention :fork: here.  It is
+	         * really only useful for testing.
+		 */
+	        error (1, 0,
+"%s: Only PrimaryServers with :ext: methods are valid, not `%s'.",
+		       infopath, p);
+	    }
+	}
+d589 3
+a591 2
+	    error (0, 0, "%s: unrecognized keyword '%s'",
+		   infopath, line);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+d528 14
+@
+
+
+1.1.101.1
+log
+@GNU CVS 1.12.11 with the following directories removed:
+- contrib/pam
+- emx
+- os2
+- tools
+- vms
+- windows-NT
+- zlib
+@
+text
+@@
+
+
+1.1.101.2
+log
+@GNU CVS 1.12.12 "should" fix security issues
+@
+text
+@d2 2
+a3 7
+ * Copyright (C) 1986-2005 The Free Software Foundation, Inc.
+ *
+ * Portions Copyright (C) 1998-2005 Derek Price, Ximbiot <http://ximbiot.com>,
+ *                                  and others.
+ *
+ * Portions Copyright (C) 1992, Brian Berliner and Jeff Polk
+ * Portions Copyright (C) 1989-1992, Brian Berliner
+a39 2
+    assert (repository);
+
+d48 6
+a53 2
+    infopath = Xasprintf ("%s/%s/%s", current_parsed_root->directory,
+			  CVSROOTADM, infofile);
+d67 1
+a67 1
+    TRACE (TRACE_FUNCTION, "Parse_Info (%s, %s, %s)",
+d289 1
+a289 1
+    new->logHistory = xstrdup (ALL_HISTORY_REC_TYPES);
+a315 25
+/* Return true if this function has already been called for line LN of file
+ * INFOPATH.
+ */
+bool
+parse_error (const char *infopath, unsigned int ln)
+{
+    static List *errors = NULL;
+    char *nodename = NULL;
+
+    if (!errors)
+	errors = getlist();
+
+    nodename = Xasprintf ("%s/%u", infopath, ln);
+    if (findnode (errors, nodename))
+    {
+	free (nodename);
+	return true;
+    }
+
+    push_string (errors, nodename);
+    return false;
+}
+
+
+
+a341 1
+    unsigned int ln;		/* Input file line counter.  */
+a366 1
+    ln = 0;  /* Have not read any lines yet.  */
+a368 2
+	ln++; /* Keep track of input file line number for error messages.  */
+
+d406 3
+a408 4
+	    if (!parse_error (infopath, ln))
+		error (0, 0,
+"%s [%d]: syntax error: missing `=' between keyword and value",
+		       infopath, ln);
+d435 1
+a435 1
+	    RCS_setlocalid (infopath, ln, &retval->keywords, p);
+a438 1
+	{
+d443 2
+a444 4
+	    if (!parse_error (infopath, ln))
+		error (0, 0, "\
+%s [%u]: warning: this CVS does not support PreservePermissions",
+		       infopath, ln);
+a445 1
+	}
+a459 9
+	    {
+		static bool gotone = false;
+		if (gotone)
+		    error (0, 0, "\
+%s [%u]: warning: duplicate LogHistory entry found.",
+			   infopath, ln);
+		else
+		    gotone = true;
+		free (retval->logHistory);
+a460 1
+	    }
+d494 2
+a495 2
+"%s [%u]: Old style info format strings not supported by this executable.",
+		       infopath, ln);
+d501 1
+d503 1
+d505 11
+a515 1
+#ifdef PROXY_SUPPORT
+d538 2
+a539 3
+	    if (!parse_error (infopath, ln))
+		error (0, 0, "%s [%u]: unrecognized keyword `%s'",
+		       infopath, ln, line);
+@
+
+
+1.1.101.3
+log
+@Import current version of GNU CVS, in the hope to actually fix bugs...
+@
+text
+@d18 2
+d40 1
+a40 2
+    bool callback_done;
+    int line_number;
+d47 1
+a47 1
+    if (!current_parsed_root)
+d58 1
+a58 1
+    if (!fp_info)
+d74 1
+a74 2
+    callback_done = false;
+    line_number = 0;
+d111 2
+a112 2
+	cp = strrchr (value, '\n');
+	if (cp) *cp = '\0';
+d124 1
+a124 1
+	    if (default_value)
+d145 3
+a147 3
+	    else if ((expanded_value =
+			expand_path (value, current_parsed_root->directory,
+				     true, infofile, line_number)))
+d162 1
+a162 2
+	regex_err = re_comp (exp);
+	if (regex_err)
+d172 2
+a173 3
+	expanded_value = expand_path (value, current_parsed_root->directory,
+				      true, infofile, line_number);
+	if (expanded_value)
+d180 1
+a180 1
+	callback_done = true;
+d188 1
+a188 1
+    if (!callback_done && default_value)
+d190 3
+a192 4
+	expanded_value = expand_path (default_value,
+				      current_parsed_root->directory,
+				      true, infofile, line_number);
+	if (expanded_value)
+d202 2
+a203 1
+    if (default_value) free (default_value);
+d205 2
+a206 1
+    if (line) free (line);
+a295 3
+#ifdef SERVER_SUPPORT
+    new->MaxCompressionLevel = 9;
+#endif /* SERVER_SUPPORT */
+a343 6
+#ifdef ALLOW_CONFIG_OVERRIDE
+const char * const allowed_config_prefixes[] = { ALLOW_CONFIG_OVERRIDE };
+#endif /* ALLOW_CONFIG_OVERRIDE */
+
+
+
+d365 1
+a365 1
+parse_config (const char *cvsroot, const char *path)
+d367 1
+a367 2
+    const char *infopath;
+    char *freeinfopath = NULL;
+d371 1
+a371 2
+    char *buf = NULL;
+    size_t buf_allocated = 0;
+a374 8
+    /* PROCESSING	Whether config keys are currently being processed for
+     *			this root.
+     * PROCESSED	Whether any keys have been processed for this root.
+     *			This is initialized to true so that any initial keys
+     *			may be processed as global defaults.
+     */
+    bool processing = true;
+    bool processed = true;
+d378 1
+a378 31
+#ifdef ALLOW_CONFIG_OVERRIDE
+    if (path)
+    {
+	const char * const *prefix;
+	char *npath = xcanonicalize_file_name (path);
+	bool approved = false;
+	for (prefix = allowed_config_prefixes; *prefix != NULL; prefix++)
+	{
+	    char *nprefix;
+
+	    if (!isreadable (*prefix)) continue;
+	    nprefix = xcanonicalize_file_name (*prefix);
+	    if (!strncmp (nprefix, npath, strlen (nprefix))
+		&& (((*prefix)[strlen (*prefix)] != '/'
+		     && strlen (npath) == strlen (nprefix))
+		    || ((*prefix)[strlen (*prefix)] == '/'
+			&& npath[strlen (nprefix)] == '/')))
+		approved = true;
+	    free (nprefix);
+	    if (approved) break;
+	}
+	if (!approved)
+	    error (1, 0, "Invalid path to config file specified: `%s'",
+		   path);
+	infopath = path;
+	free (npath);
+    }
+    else
+#endif
+	infopath = freeinfopath =
+	    Xasprintf ("%s/%s/%s", cvsroot, CVSROOTADM, CVSROOTADM_CONFIG);
+d380 1
+a380 1
+    retval = new_config ();
+d383 1
+a383 1
+    if (!fp_info)
+d392 1
+a392 1
+	if (freeinfopath) free (freeinfopath);
+d397 1
+a397 1
+    while (getline (&buf, &buf_allocated, fp_info) >= 0)
+a400 5
+	line = buf;
+
+	/* Skip leading white space.  */
+	while (isspace (*line)) line++;
+
+d405 6
+a410 1
+	/* Is there any kind of written standard for the syntax of this
+d426 1
+a426 1
+	    line[len--] = '\0';
+a433 39
+	/* Check for a root specification.  */
+	if (line[0] == '[' && line[len] == ']')
+	{
+	    cvsroot_t *tmproot;
+
+	    line++[len] = '\0';
+	    tmproot = parse_cvsroot (line);
+
+	    /* Ignoring method.  */
+	    if (!tmproot
+#if defined CLIENT_SUPPORT || defined SERVER_SUPPORT
+		|| (tmproot->method != local_method
+		    && (!tmproot->hostname || !isThisHost (tmproot->hostname)))
+#endif /* CLIENT_SUPPORT || SERVER_SUPPORT */
+		|| !isSamePath (tmproot->directory, cvsroot))
+	    {
+		if (processed) processing = false;
+	    }
+	    else
+	    {
+		TRACE (TRACE_FLOW, "Matched root section`%s'", line);
+		processing = true;
+		processed = false;
+	    }
+
+	    continue;
+	}
+
+	/* There is data on this line.  */
+
+	/* Even if the data is bad or ignored, consider data processed for
+	 * this root.
+	 */
+	processed = true;
+
+	if (!processing)
+	    /* ...but it is for a different root.  */
+	     continue;
+
+d436 1
+a436 1
+	if (!p)
+d487 1
+a487 1
+	    if (retval->lock_dir)
+d489 1
+a489 1
+	    retval->lock_dir = expand_path (p, cvsroot, false, infopath, ln);
+a493 31
+	else if (strcmp (line, "HistoryLogPath") == 0)
+	{
+	    if (retval->HistoryLogPath) free (retval->HistoryLogPath);
+
+	    /* Expand ~ & $VARs.  */
+	    retval->HistoryLogPath = expand_path (p, cvsroot, false,
+						  infopath, ln);
+
+	    if (retval->HistoryLogPath && !ISABSOLUTE (retval->HistoryLogPath))
+	    {
+		error (0, 0, "%s [%u]: HistoryLogPath must be absolute.",
+		       infopath, ln);
+		free (retval->HistoryLogPath);
+		retval->HistoryLogPath = NULL;
+	    }
+	}
+	else if (strcmp (line, "HistorySearchPath") == 0)
+	{
+	    if (retval->HistorySearchPath) free (retval->HistorySearchPath);
+	    retval->HistorySearchPath = expand_path (p, cvsroot, false,
+						     infopath, ln);
+
+	    if (retval->HistorySearchPath
+		&& !ISABSOLUTE (retval->HistorySearchPath))
+	    {
+		error (0, 0, "%s [%u]: HistorySearchPath must be absolute.",
+		       infopath, ln);
+		free (retval->HistorySearchPath);
+		retval->HistorySearchPath = NULL;
+	    }
+	}
+a528 10
+	else if (strcmp (line, "TmpDir") == 0)
+	{
+	    if (retval->TmpDir) free (retval->TmpDir);
+	    retval->TmpDir = expand_path (p, cvsroot, false, infopath, ln);
+	    /* Could try some validity checking, like whether we can
+	     * opendir it or something, but I don't see any particular
+	     * reason to do that now rather than when the first function
+	     * tries to create a temp file.
+	     */
+	}
+a560 8
+#ifdef SERVER_SUPPORT
+	else if (!strcmp (line, "MinCompressionLevel"))
+	    readSizeT (infopath, "MinCompressionLevel", p,
+		       &retval->MinCompressionLevel);
+	else if (!strcmp (line, "MaxCompressionLevel"))
+	    readSizeT (infopath, "MaxCompressionLevel", p,
+		       &retval->MaxCompressionLevel);
+#endif /* SERVER_SUPPORT */
+d581 3
+a583 3
+    if (freeinfopath) free (freeinfopath);
+    if (buf) free (buf);
+
+@
+
+

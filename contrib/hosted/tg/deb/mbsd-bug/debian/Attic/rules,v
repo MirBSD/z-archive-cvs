@@ -1,0 +1,352 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2017.04.24.21.30.55;	author tg;	state dead;
+branches;
+next	1.2;
+commitid	10058FE6E986DB3996E;
+
+1.2
+date	2011.11.12.00.11.28;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004EBDB9BD4C7CAAED;
+
+1.1
+date	2009.11.22.22.08.50;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004B09B67E4C994FE3;
+
+
+desc
+@@
+
+
+1.3
+log
+@drop; this requires MirMake now and probably won’t work any more anyway
+@
+text
+@#!/usr/bin/make -f
+# -*- makefile -*-
+# Sample debian/rules that uses debhelper.
+# This file was originally written by Joey Hess and Craig Small.
+# As a special exception, when this file is copied by dh-make into a
+# dh-make output file, you may use that output file without restriction.
+# This special exception was added by Craig Small in version 0.37 of dh-make.
+
+mbsd_arch?=	i386
+mbsd_ver?=	10
+mbsd_arches=	i386 sparc
+mbsd=		${mbsd_arch}-ecce-mirbsd${mbsd_ver}
+pkgname=	${mbsd_arch}-mirbsd-toolchain
+_cwd:=		$(shell pwd)
+LIBIBERTY_HDRS=	${_cwd}/gnu/usr.bin/binutils/include
+
+CC?=		gcc
+CFLAGS=		-Wall -g
+
+ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
+	CFLAGS += -O0
+else
+	CFLAGS += -O2
+endif
+
+ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+	NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+	MAKEFLAGS += -j$(NUMJOBS)
+endif
+
+# nostrip: we use dh_strip, no action needed
+
+CPPFLAGS+=	-include ${_cwd}/debian/mirdefs.h
+CPPFLAGS+=	-DMBSD_BUG
+#CPPFLAGS+=	-DMIRBSD_CROSS
+CFLAGS+=	-fno-strict-aliasing
+CFLAGS+=	-fwrapv
+
+BUILD_ENV:=	CC='${CC}' HOSTCC='${CC}'
+BUILD_ENV+=	CFLAGS='${CFLAGS}'
+BUILD_ENV+=	CPPFLAGS='${CPPFLAGS}'
+BUILD_ENV+=	HOSTCFLAGS='${CPPFLAGS} ${CFLAGS}'
+BUILD_ENV+=	LDFLAGS='${LDFLAGS}' HOSTLDFLAGS='${LDFLAGS}'
+BUILD_ENV+=	GNUSYSTEM_AUX_DIR='${_cwd}/gnu/share'
+BUILD_ENV+=	LIBIBERTY_HDRS='${LIBIBERTY_HDRS}'
+BUILD_ENV+=	PATH=${_cwd}/builddir/dest/usr/bin:$$PATH
+BUILD_ENV+=	GCC_NO_WERROR=1 GCC_HONOUR_COPTS=0
+BUILD_ENV+=	gcc_cv_as_ix86_gotoff_in_data=no
+
+CONFOPT+=	--prefix=/usr
+CONFOPT+=	--sysconfdir=/etc
+CONFOPT+=	--libexecdir=/usr/lib
+CONFOPT+=	--disable-nls
+CONFOPT+=	--target=${mbsd}
+CONFOPT+=	--disable-dependency-tracking
+CONFOPT+=	--disable-libtool-lock
+CONFOPT+=	--enable-static
+CONFOPT+=	--enable-fast-install
+CONFOPT+=	--disable-werror
+CONFOPT+=	--with-sysroot=/usr/${mbsd}
+
+CONFOPT_B+=	${CONFOPT}
+CONFOPT_B+=	--disable-install-libbfd
+CONFOPT_B+=	--disable-shared
+CONFOPT_B+=	--enable-targets=all --enable-64-bit-bfd
+
+CONFOPT_G+=	${CONFOPT}
+CONFOPT_G+=	--disable-threads
+CONFOPT_G+=	--disable-sjlj-exceptions
+CONFOPT_G+=	--enable-stack-protector
+CONFOPT_G+=	--with-gnu-as
+CONFOPT_G+=	--with-gnu-ld
+CONFOPT_G+=	--with-as=${mbsd}-as
+CONFOPT_G+=	--with-ld=${mbsd}-ld
+CONFOPT_G+=	--with-system-zlib
+CONFOPT_G+=	--enable-languages=c,c++
+CONFOPT_G+=	--enable-version-specific-runtime-libs
+CONFOPT_G+=	--enable-shared
+CONFOPT_G+=	--with-local-prefix=/usr
+CONFOPT_G+=	--with-gxx-include-dir=/usr/${mbsd}/usr/include/gxx
+
+MAKEARG_G+=	BUILD_LIBIBERTY="-liberty"
+MAKEARG_G+=	LIBIBERTY="-liberty"
+MAKEARG_G+=	SUB_LIBERTY="-liberty"
+MAKEARG_G+=	VALGRIND_DRIVER_DEFINES="-DNO_SHARED_LIBGCC_MULTILIB"
+MAKEARG_G+=	STMP_FIXINC=
+MAKEARG_G+=	LANGUAGES='c $$(CONFIG_LANGUAGES)'
+MAKEARG_G+=	LIBGCC= INSTALL_LIBGCC= EXTRA_PARTS=
+MAKEARG_G+=	INSTALL_TARGET='install-common lang.install-normal install-cpp install-driver install-man'
+
+patch:
+build: debian/.build_stamp
+
+build=		builddir/${mbsd}
+
+debian/.build_stamp:
+	dh_testdir
+	test -e ${_cwd}/gnu/share/install-sh
+	-rm -rf builddir debian/.build_stamp debian/lintian-overrides
+	-rm -f ${_cwd}/gnu/usr.bin/binutils/include/mbsd_md5.h \
+	    ${_cwd}/gnu/usr.bin/binutils/include/md5.c
+	mkdir -p builddir/dest debian/lintian-overrides
+	ln -s ${_cwd}/include/md5.h \
+	    ${_cwd}/gnu/usr.bin/binutils/include/mbsd_md5.h
+	ln -s ${_cwd}/lib/libc/hash/md5.c \
+	    ${_cwd}/gnu/usr.bin/binutils/include/md5.c
+	mkdir -p builddir/bfd builddir/opcodes
+	cd builddir/bfd; env ${BUILD_ENV} sh \
+	    ${_cwd}/gnu/usr.bin/binutils/bfd/configure ${CONFOPT_B} && \
+	    env ${BUILD_ENV} ${MAKE}
+	cd builddir/opcodes; env ${BUILD_ENV} sh \
+	    ${_cwd}/gnu/usr.bin/binutils/opcodes/configure ${CONFOPT_B} && \
+	    env ${BUILD_ENV} ${MAKE}
+	for arch in ${mbsd_arches}; do \
+		${MAKE} -f debian/rules build_md mbsd_arch=$$arch; \
+	done
+	touch $@@
+
+build_md:
+	sed -e 's@@TRIPLET@@${mbsd}g' -e 's@@PKG@@${pkgname}g' \
+	    <debian/PKG.install >debian/${pkgname}.install
+	sed -e 's@@TRIPLET@@${mbsd}g' -e 's@@PKG@@${pkgname}g' \
+	    <debian/PKG.lintian-overrides >debian/lintian-overrides/${pkgname}
+	mkdir -p ${build}/gcc ${build}/binutils ${build}/gas ${build}/ld
+	cd ${build} && \
+	    ln -s ${_cwd}/builddir/bfd && \
+	    ln -s ${_cwd}/builddir/opcodes
+	cd ${build}/binutils; env ${BUILD_ENV} sh \
+	    ${_cwd}/gnu/usr.bin/binutils/binutils/configure ${CONFOPT_B} && \
+	    env ${BUILD_ENV} ${MAKE} && \
+	    env ${BUILD_ENV} ${MAKE} DESTDIR=${_cwd}/builddir/dest install
+	cd ${build}/gas; env ${BUILD_ENV} sh \
+	    ${_cwd}/gnu/usr.bin/binutils/gas/configure ${CONFOPT_B} && \
+	    env ${BUILD_ENV} ${MAKE} && \
+	    env ${BUILD_ENV} ${MAKE} DESTDIR=${_cwd}/builddir/dest install
+	cd ${build}/ld; env ${BUILD_ENV} sh \
+	    ${_cwd}/gnu/usr.bin/binutils/ld/configure ${CONFOPT_B} && \
+	    env ${BUILD_ENV} ${MAKE} && \
+	    env ${BUILD_ENV} ${MAKE} DESTDIR=${_cwd}/builddir/dest install
+	cd builddir/dest/usr/bin; \
+	    ln ${mbsd}-ar ${mbsd}-ranlib && \
+	    ln ${mbsd}-objcopy ${mbsd}-strip
+	cd ${build}/gcc; env ${BUILD_ENV} \
+	    CPPFLAGS='${CPPFLAGS} -I${LIBIBERTY_HDRS}' sh \
+	    ${_cwd}/gcc/gcc/configure ${CONFOPT_G} && \
+	    env ${BUILD_ENV} ${MAKEENV_G} ${MAKE} ${MAKEARG_G} && \
+	    env ${BUILD_ENV} ${MAKEENV_G} ${MAKE} ${MAKEARG_G} \
+	    DESTDIR=${_cwd}/builddir/dest install
+
+clean:
+	dh_testdir
+	-rm -rf builddir debian/.build_stamp debian/lintian-overrides
+	-rm -f ${_cwd}/gnu/usr.bin/binutils/include/mbsd_md5.h \
+	    ${_cwd}/gnu/usr.bin/binutils/include/md5.c
+	for arch in ${mbsd_arches}; do \
+		${MAKE} -f debian/rules clean_md mbsd_arch=$$arch; \
+	done
+	dh_clean
+
+clean_md:
+	-rm -f debian/${pkgname}.install
+
+postinst_md:
+	cd debian/${pkgname}/usr/lib/gcc/${mbsd}; \
+	for i in ../../../bin/${mbsd}-*; do \
+		ln -sf $$i $${i##*/${mbsd}-}; \
+	done
+	cd debian/${pkgname}/usr/lib/gcc/${mbsd}/3.4.6; \
+	for i in 0 begin beginS beginT end endS i n; do \
+		ln -sf ../../../../${mbsd}/usr/lib/gcc/${mbsd}/3.4.6/crt$${i}.o; \
+	done
+
+binary-indep:
+
+binary-arch: debian/.build_stamp
+	dh_testdir
+	dh_testroot
+	dh_clean -k
+	dh_installchangelogs
+	dh_installdocs
+#	dh_installexamples
+	dh_install
+	for arch in ${mbsd_arches}; do \
+		${MAKE} -f debian/rules postinst_md mbsd_arch=$$arch; \
+	done
+#	dh_installmenu
+#	dh_installdebconf
+#	dh_installlogrotate
+#	dh_installemacsen
+#	dh_installpam
+#	dh_installmime
+#	dh_installinit
+#	dh_installcron
+#	dh_installinfo
+#	dh_installman
+	dh_link
+	dh_strip
+	dh_compress
+	dh_fixperms
+#	dh_perl
+#	dh_python
+#	dh_makeshlibs
+	dh_installdeb
+	dh_shlibdeps
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary: binary-indep binary-arch
+.PHONY: binary binary-arch binary-indep build build-arch build-indep clean
+@
+
+
+1.2
+log
+@lintian and d/rules cleanup round
+@
+text
+@@
+
+
+1.1
+log
+@dump almost all of the MirDebian “WTF” Repository in here
+for further improvements, backups, collaboration possibilities, etc.
+CVS: ----------------------------------------------------------------------
+CVS: ATTENTION: read-only mode selected!
+CVS: Enter Log.  Lines beginning with `CVS:' are removed automatically
+CVS:
+CVS: Committing in .
+CVS:
+CVS: Added Files:
+CVS: 	ca-bundle/bsd/certdata.txt ca-bundle/bsd/keystore.jks
+CVS: 	ca-bundle/bsd/ksslcalist ca-bundle/bsd/ssl.certs.shar
+CVS: 	ca-bundle/debian/ca-bundle.install
+CVS: 	ca-bundle/debian/ca-bundle.links
+CVS: 	ca-bundle/debian/ca-bundle.manpages
+CVS: 	ca-bundle/debian/ca-bundle.postinst
+CVS: 	ca-bundle/debian/ca-bundle.postrm ca-bundle/debian/changelog
+CVS: 	ca-bundle/debian/compat ca-bundle/debian/control
+CVS: 	ca-bundle/debian/copyright ca-bundle/debian/rules
+CVS: 	ca-bundle/debian/source.lintian-overrides
+CVS: 	ca-bundle/debian/lintian/ca-bundle
+CVS: 	ca-bundle/sbin/update-ca-certificates
+CVS: 	ca-bundle/sbin/update-ca-certificates.8
+CVS: 	mbsd-bug/debian/NOTE.crtstuff mbsd-bug/debian/NOTE.sysroot
+CVS: 	mbsd-bug/debian/PKG.install
+CVS: 	mbsd-bug/debian/PKG.lintian-overrides
+CVS: 	mbsd-bug/debian/changelog mbsd-bug/debian/compat
+CVS: 	mbsd-bug/debian/control mbsd-bug/debian/copyright
+CVS: 	mbsd-bug/debian/mirdefs.h mbsd-bug/debian/rules
+CVS: 	mbsd-bug/debian/source.lintian-overrides
+CVS: 	mircpio/debian/changelog mircpio/debian/compat
+CVS: 	mircpio/debian/control mircpio/debian/copyright
+CVS: 	mircpio/debian/install mircpio/debian/manpages
+CVS: 	mircpio/debian/rules mircpio/debian/watch
+CVS: 	mircpio/debian/diffs/extern.h.diff mirmake/debian/changelog
+CVS: 	mirmake/debian/compat mirmake/debian/control
+CVS: 	mirmake/debian/copyright mirmake/debian/instnames.ed
+CVS: 	mirmake/debian/mirmake.install mirmake/debian/mirmake.manpages
+CVS: 	mirmake/debian/rules mirmake/debian/watch
+CVS: 	openntpd/debian/changelog openntpd/debian/compat
+CVS: 	openntpd/debian/control openntpd/debian/copyright
+CVS: 	openntpd/debian/ntp.conf openntpd/debian/ntp.cron.daily
+CVS: 	openntpd/debian/ntp.default openntpd/debian/ntp.dhcp
+CVS: 	openntpd/debian/ntp.init openntpd/debian/ntpdate.default
+CVS: 	openntpd/debian/ntpdate.dhcp openntpd/debian/ntpdate.if-up
+CVS: 	openntpd/debian/openntpd.default openntpd/debian/openntpd.docs
+CVS: 	openntpd/debian/openntpd.init
+CVS: 	openntpd/debian/openntpd.postinst
+CVS: 	openntpd/debian/openntpd.postrm openntpd/debian/openntpd.prerm
+CVS: 	openntpd/debian/rules openntpd/debian/source.lintian-overrides
+CVS: 	openntpd/debian/watch openntpd/debian/patches/00list
+CVS: 	openntpd/debian/patches/01-config.dpatch
+CVS: 	openntpd/debian/patches/02-reconnect.dpatch
+CVS: 	openntpd/debian/patches/03-ipv4only.patch
+CVS: 	openntpd/debian/patches/04-backslash.patch
+CVS: 	openntpd/debian/patches/05-mirtropy.dpatch
+CVS: 	openntpd/debian/patches/06-libbsd.dpatch
+CVS: 	openntpd/debian/patches/07-fixsympas.dpatch
+CVS: 	openntpd/debian/patches/openntpd-3.9p1-linux-adjtimex.diff
+CVS: 	openntpd/debian/script/openntpd php-perl/debian/changelog
+CVS: 	php-perl/debian/changelog.xsl php-perl/debian/compat
+CVS: 	php-perl/debian/control php-perl/debian/copyright
+CVS: 	php-perl/debian/docs php-perl/debian/pecl
+CVS: 	php-perl/debian/perl.ini php-perl/debian/php5-perl.dirs
+CVS: 	php-perl/debian/rules php-perl/debian/watch
+CVS: 	wtf-debian-keyring/debian/changelog
+CVS: 	wtf-debian-keyring/debian/control
+CVS: 	wtf-debian-keyring/debian/copyright
+CVS: 	wtf-debian-keyring/debian/postinst
+CVS: 	wtf-debian-keyring/debian/prerm
+CVS: 	wtf-debian-keyring/debian/rules
+CVS: 	wtf-debian-keyring/keyrings/wtf-debian-keyring.gpg
+CVS: 	wtf-debian-keyring/keyrings/wtf-debian-removed-keys.gpg
+CVS: ----------------------------------------------------------------------
+@
+text
+@d173 3
+a175 1
+install: debian/.build_stamp
+a178 10
+	dh_installdirs
+
+# Build architecture-independent files here.
+binary-indep: build install
+# We have nothing to do by default.
+
+# Build architecture-dependent files here.
+binary-arch: build install
+	dh_testdir
+	dh_testroot
+d210 1
+a210 1
+.PHONY: build clean binary-indep binary-arch binary install check
+@
+

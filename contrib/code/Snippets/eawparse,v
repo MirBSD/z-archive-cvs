@@ -1,0 +1,517 @@
+head	1.12;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.12
+date	2017.09.06.16.05.45;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	10059B01CF13DA5D5CC;
+
+1.11
+date	2017.09.06.15.48.58;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	10059B018D31D449C47;
+
+1.10
+date	2017.07.12.22.47.26;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1005966A6E40370CCAE;
+
+1.9
+date	2017.07.11.13.53.01;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1005964D843041B5D79;
+
+1.8
+date	2017.07.11.13.35.09;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1005964D419681D40AD;
+
+1.7
+date	2017.07.11.13.25.23;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1005964D1C62D6FC536;
+
+1.6
+date	2017.07.11.13.18.40;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1005964D04034BAC564;
+
+1.5
+date	2017.07.11.13.11.59;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005964CEA413BD1DE1;
+
+1.4
+date	2017.07.11.13.09.54;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005964CE267876912C;
+
+1.3
+date	2014.11.16.12.16.24;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100546895A24DE6792D;
+
+1.2
+date	2013.11.30.13.45.17;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1005299EBBC46543D75;
+
+1.1
+date	2013.05.31.23.27.16;	author tg;	state Exp;
+branches;
+next	;
+commitid	10051A931CB73794C1D;
+
+
+desc
+@@
+
+
+1.12
+log
+@comment more
+@
+text
+@#!/bin/mksh
+# $MirOS: contrib/code/Snippets/eawparse,v 1.10 2017/07/12 22:47:26 tg Exp $
+#-
+# Copyright © 2013, 2014, 2017
+#	mirabilos <m@@mirbsd.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un‐
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided “AS IS” and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person’s immediate fault when using the work as intended.
+#-
+# Parse the UCD EastAsianWidth.txt, PropList.txt and UnicodeData.txt
+# files into wcwidth (for a binary search algorithm) lists. Act more
+# glibc-compatible if the -g flag is passed.
+
+[[ $1 != -g ]]; glibc=$?
+
+cwd=$(realpath .)
+lpd=$(realpath "$(dirname "$0")")
+rpd=$(realpath "$0/..")
+function findfile {
+	local x
+
+	for x in "$cwd" "$lpd" "$rpd"; do
+		REPLY=$(realpath "$x/$1")
+		[[ -s $REPLY ]] && return
+	done
+	print -ru2 Need $1 file.
+	exit 1
+}
+
+eaw=${|findfile EastAsianWidth.txt;}
+ucd=${|findfile UnicodeData.txt;}
+prp=${|findfile PropList.txt;}
+cd "$rpd"
+rm -f eawparse.*
+for x in eawparse.*; do
+	[[ -e $x ]] || continue
+	print -u2 Cannot delete temporary files.
+	exit 1
+done
+
+cat >eawparse.hlp.c <<'EOF'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+uint8_t w[0x110000];
+
+#define Q_N  0	/* Neutral */
+#define Q_A  2	/* Ambiguous */
+#define Q_H  0	/* Halfwidth */
+#define Q_W  1	/* Wide */
+#define Q_F  1	/* Fullwidth */
+#define Q_Na 0	/* Narrow */
+#define QC   3	/* Combining */
+
+int
+main(void)
+{
+	register unsigned int x;
+	unsigned int s = 0;
+
+	/* everything is 0 (narrow) by default, i.e. no action */
+	bzero(w, sizeof(w));
+
+EOF
+
+(( glibc )) || cat >>eawparse.hlp.c <<'EOF'
+	/* default CJK/Yi blocks to Wide (mgk25) */
+	for (x = 0x2E80; x <= 0xA4CF; ++x)
+		w[x] = Q_W;
+	for (x = 0xA960; x <= 0xA97F; ++x)
+		w[x] = Q_W;
+	for (x = 0xFE30; x <= 0xFE6F; ++x)
+		w[x] = Q_W;
+
+EOF
+
+function do_type_beg_end {
+	while read type beg end rest; do
+		if [[ -z $end ]]; then
+			print "	w[0x$beg] = $type;"
+		else
+			print "	for (x = 0x$beg; x <= 0x$end; ++x)"
+			print "		w[x] = $type;"
+		fi
+	done >>eawparse.hlp.c
+}
+
+print '	/* handle EastAsianWidth.txt lines */' >>eawparse.hlp.c
+set -A sedargs -- -n
+(( glibc )) && sedargs+=(-e '/<reserved-.*>\.\.<reserved-.*>/d')
+sedargs+=(-e '/^\([0-9A-F]\{4,6\}\)\(\.\.\([0-9A-F]\{4,6\}\)\)\{0,1\};\([NAHWF]a*\).*$/s//Q_\4 \1 \3/p')
+sed "${sedargs[@@]}" <"$eaw" | do_type_beg_end
+print >>eawparse.hlp.c
+
+print '	/* handle UnicodeData.txt lines */' >>eawparse.hlp.c
+# codepoint name category combining bidi decomp decimal digit numeric mirrored uni1name 10646comment uppermap lowermap titlemap
+while IFS=';' read cp name category combining bidi rest; do
+	# combining characters are at least one of:
+	# - category Mn (Mark, Non-Spacing)
+	# - category Me (Mark, Enclosing)
+	# - category Cf (Other, Format)
+	# - bidi NSM (Nonspacing Mark)
+	[[ $category = @@(Me|Mn|Cf) || $bidi = NSM ]] || continue
+	print "	w[0x$cp] = QC;"
+done <"$ucd" >>eawparse.hlp.c
+print >>eawparse.hlp.c
+
+print '	/* handle PropList.txt lines */' >>eawparse.hlp.c
+set -A sedargs -- -n
+sedargs+=(-e '/^\([0-9A-F]\{4,6\}\)\(\.\.\([0-9A-F]\{4,6\}\)\)\{0,1\} *; *Prepended_Concatenation_Mark\([^a-zA-Z_].*\)*$/s//Q_Na \1 \3/p')
+sed "${sedargs[@@]}" <"$prp" | do_type_beg_end
+print >>eawparse.hlp.c
+
+cat >eawparse.out <<'EOF'
+struct mb_ucsrange {
+	unsigned int beg;
+	unsigned int end;
+};
+
+EOF
+
+(( glibc )) && cat >>eawparse.out <<'EOF'
+/* WARNING: glibc compat mode, do NOT commit to MirBSD! */
+
+EOF
+
+cat >>eawparse.hlp.c <<'EOF'
+	/* deliberately force a column width of 1 for the soft hyphen */
+	w[0x00AD] = Q_N;
+
+	/* Hangul Jamo medial vowels and final consonants are combining */
+	for (x = 0x1160; x <= 0x11FF; ++x)
+		w[x] = QC;
+
+	/* resolve ambiguous circled numbers */
+	for (x = 0x3248; x <= 0x324F; ++x)
+		w[x] = Q_W;
+
+	/* resolve neutral hexagrams */
+	for (x = 0x4DC0; x <= 0x4DFF; ++x)
+		w[x] = Q_W;
+
+#define dorange(label, condition) do {					\
+	unsigned char matching = 0;					\
+	const char *lineend = "";					\
+									\
+	printf("static const struct mb_ucsrange %s[] = {\n", label);	\
+	for (x = 0; x <= 0x10FFFF; ++x)					\
+		if (condition) {					\
+			if (!matching) {				\
+				matching = 1;				\
+				printf("%s\t{ 0x%04X, ", lineend, x);	\
+				lineend = " },\n";			\
+			}						\
+			s = x;						\
+		} else if (matching) {					\
+			printf("0x%04X", s);				\
+			matching = 0;					\
+		}							\
+	if (matching)							\
+		printf("0x%04X", s);					\
+	printf(" }\n" /*{*/"};\n\n");					\
+} while (/* CONSTCOND */ 0)
+
+	dorange("mb_ucs_combining", w[x] == QC);
+	dorange("mb_ucs_fullwidth", w[x] == Q_F);
+	dorange("mb_ucs_ambiguous", w[x] == Q_A);
+
+	return (0);
+}
+EOF
+
+if ! make -f /usr/share/mk/bsd.prog.mk PROG=eawparse.hlp eawparse.hlp \
+    __CRAZY=Yes; then
+	print -u2 Internal error: program failed to compile
+	exit 1
+fi
+
+./eawparse.hlp >>eawparse.out || exit 1
+echo All done!
+ls -l eawparse.out
+@
+
+
+1.11
+log
+@explicitly set Prepended_Concatenation_Mark to width 1 (not 0)
+from https://sourceware.org/bugzilla/show_bug.cgi?id=22070
+@
+text
+@d75 1
+d77 1
+d81 1
+a81 1
+	/* default CJK/Yi blocks to Wide */
+d88 1
+d98 1
+a98 1
+		fi 
+d102 1
+d107 1
+d109 1
+d120 1
+d122 1
+d126 1
+@
+
+
+1.10
+log
+@like jupptables do not even output the trailing comma I used to hand-delete
+
+now we need more flags (use wchar_t), output BMP vs. full Unicode to
+separate files, then just commit their output as-is and #include them…
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/Snippets/eawparse,v 1.5 2017/07/11 13:11:59 tg Exp $
+d22 3
+a24 2
+# Parse the Unicode EastAsianWidth.txt and UnicodeData.txt file into
+# wcwidth lists. Act more glibc-compatible if -g flag is passed.
+d44 1
+d88 11
+d101 2
+a102 9
+sedargs+=(-e '/^\([0-9A-F]\{4,6\}\)\(\.\.\([0-9A-F]\{4,6\}\)\)\{0,1\};\([NAHWF]a*\).*$/s//\4 \1 \3/p')
+sed "${sedargs[@@]}" <"$eaw" | while read type beg end; do
+	if [[ -z $end ]]; then
+		print "	w[0x$beg] = Q_$type;"
+		continue
+	fi
+	print "	for (x = 0x$beg; x <= 0x$end; ++x)"
+	print "		w[x] = Q_$type;"
+done >>eawparse.hlp.c
+d115 4
+@
+
+
+1.9
+log
+@remove special handling for 200B (unnecessary) and FF00 (doesn’t exist)
+@
+text
+@d138 3
+a140 2
+#define dorange(label, condenter) do {					\
+	enum { out, in } state = out;					\
+d144 5
+a148 4
+		if (state == out) {					\
+			if (condenter) {				\
+				printf("\t{ 0x%04X, ", s = x);		\
+				state = in;				\
+a149 1
+		} else if (condenter) {					\
+d151 3
+a153 3
+		} else {						\
+			printf("0x%04X },\n", s);			\
+			state = out;					\
+d155 3
+a157 3
+	if (state == in)						\
+		printf("0x%04X },\n", s);				\
+	printf(/*{*/"};\n\n");						\
+@
+
+
+1.8
+log
+@in glibc mode, limit EAW parsing to existent codepoints
+@
+text
+@d123 1
+a123 1
+	/* special rules for combining chars */
+d125 2
+a128 1
+	w[0x200B] = QC;
+a129 2
+	/* special rules for wcwidth */
+	w[0xFF00] = Q_W;
+d133 1
+@
+
+
+1.7
+log
+@in glibc-compatible mode, do not prefill entire ranges
+(glibc only defines entries for valid/existing chars)
+@
+text
+@d86 4
+a89 2
+sed -n '/^\([0-9A-F]\{4,6\}\)\(\.\.\([0-9A-F]\{4,6\}\)\)\{0,1\};\([NAHWF]a*\).*$/s//\4 \1 \3/p' \
+    <"$eaw" | while read type beg end; do
+@
+
+
+1.6
+log
+@also handle bidi class NSM as combining, like glibc (no output change)
+@
+text
+@d23 3
+a25 1
+# wcwidth lists.
+d74 1
+d76 1
+d115 5
+@
+
+
+1.5
+log
+@constant folding, no code change, after previous commit
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/Snippets/eawparse,v 1.2 2013/11/30 13:45:17 tg Exp $
+d92 8
+a99 2
+while IFS=';' read cp name type rest; do
+	[[ $type = @@(Me|Mn|Cf) ]] || continue
+@
+
+
+1.4
+log
+@combining characters have wcwidth 0, always, even if in a fullwidth block
+
+(the bug was likely introduced when filtering fonts)
+@
+text
+@d121 1
+a121 1
+#define dorange(label, condenter, condstay) do {			\
+d133 1
+a133 1
+		} else if (!(/* CONSTCOND */ condstay)) {		\
+d139 1
+a139 1
+	printf("};\n\n");						\
+d142 3
+a144 3
+	dorange("mb_ucs_combining", w[x] == QC, 0);
+	dorange("mb_ucs_fullwidth", w[x] == Q_F, 0);
+	dorange("mb_ucs_ambiguous", w[x] == Q_A, 0);
+@
+
+
+1.3
+log
+@mydir=$(realpath "$0/..") # mksh is cool like that, no dirname needed
+@
+text
+@d4 2
+a5 2
+# Copyright © 2013, 2014
+#	Thorsten Glaser <tg@@mirbsd.org>
+d143 1
+a143 1
+	dorange("mb_ucs_fullwidth", w[x] == Q_F, w[x] & 1);
+@
+
+
+1.2
+log
+@$(dirname "$(realpath "$0")") allows users to symlink-install scripts
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/Snippets/eawparse,v 1.1 2013/05/31 23:27:16 tg Exp $
+d4 1
+a4 1
+# Copyright © 2013
+d25 17
+a41 13
+if ! eaw=$(realpath EastAsianWidth.txt); then
+	if ! eaw=$(dirname "$(realpath "$0")"/EastAsianWidth.txt); then
+		print -u2 Need EastAsianWidth.txt file.
+		exit 1
+	fi
+fi
+if ! ucd=$(realpath UnicodeData.txt); then
+	if ! ucd=$(dirname "$(realpath "$0")"/UnicodeData.txt); then
+		print -u2 Need UnicodeData.txt file.
+		exit 1
+	fi
+fi
+cd "$(dirname "$0")"
+@
+
+
+1.1
+log
+@Replace wcwidth code by mine based on Unicode 6.2.0
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $
+d26 1
+a26 1
+	if ! eaw=$(realpath "$(dirname "$0")"/EastAsianWidth.txt); then
+d32 1
+a32 1
+	if ! ucd=$(realpath "$(dirname "$0")"/UnicodeData.txt); then
+@
+

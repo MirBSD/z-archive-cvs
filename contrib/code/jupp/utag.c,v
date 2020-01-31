@@ -1,0 +1,623 @@
+head	1.11;
+access;
+symbols
+	joe-3_1jupp38:1.11
+	joe-3_1jupp37:1.11
+	joe-3_1jupp36:1.11
+	joe-3_1jupp35:1.11
+	joe-3_1jupp34:1.11
+	joe-3_1jupp33:1.11
+	joe-3_1jupp32:1.11
+	joe-2_8jupp3:1.1.21.1
+	joe-3_1jupp31:1.3
+	joe-3_1jupp30:1.2
+	joe-3_1jupp29:1.2
+	joe-3_1jupp28:1.2
+	joe-3_1jupp27:1.2
+	joe-3_1jupp26:1.2
+	joe-3_1jupp25:1.2
+	joe-3_1jupp24:1.2
+	joe-3_1jupp23:1.2
+	joe-3_1jupp22:1.2
+	joe-3_1jupp21:1.2
+	joe-3_1jupp20:1.2
+	joe-3_1jupp19:1.2
+	joe-3_1jupp18:1.2
+	joe-3_1jupp17:1.2
+	joe-2_8jupp2:1.1.21.1
+	joe-3_1jupp16:1.2
+	joe-3_1jupp15:1.2
+	joe-3_1jupp14:1.2
+	joe-3_1jupp12:1.2
+	joe-3_1jupp11:1.2
+	joe-2_8jupp1:1.1.21.1
+	joe-3_1jupp10:1.2
+	joe-3_1jupp9:1.2
+	joe-3_1jupp8:1.1.201.1
+	joe-3_1jupp7:1.1.201.1
+	joe-3_1jupp6:1.1.201.1
+	joe-3_1jupp5:1.1.201.1
+	joe-3_1jupp4:1.1.201.1
+	joe-2_8-msdos:1.1.21.1.0.2
+	joe-2_8:1.1.21.1
+	joe28:1.1.21
+	joe-3_1:1.1.201.1
+	tg:1.1.201;
+locks; strict;
+comment	@ * @;
+
+
+1.11
+date	2017.12.07.02.10.19;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1005A28A3145E1FF911;
+
+1.10
+date	2017.12.06.23.58.39;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1005A2884424C3F3AD8;
+
+1.9
+date	2017.12.06.23.02.08;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1005A2876FC4FFE7EF5;
+
+1.8
+date	2017.12.06.21.41.05;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1005A28640547F64250;
+
+1.7
+date	2017.12.04.21.53.35;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1005A25C3E151C5344D;
+
+1.6
+date	2017.12.03.02.36.03;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1005A2363204B0C4612;
+
+1.5
+date	2017.12.02.04.32.43;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005A222CF2122034D9;
+
+1.4
+date	2017.12.02.02.07.36;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005A220AD65C90E687;
+
+1.3
+date	2017.08.09.00.46.02;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100598A5B577446A109;
+
+1.2
+date	2008.05.13.13.08.30;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100482992BC01EE89A1;
+
+1.1
+date	2005.02.05.00.37.25;	author tg;	state Exp;
+branches
+	1.1.21.1
+	1.1.201.1;
+next	;
+
+1.1.21.1
+date	2005.02.12.15.40.25;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.201.1
+date	2005.02.05.00.37.25;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.11
+log
+@feeble first attempt at using a union to break up the UB in the polymorphism
+@
+text
+@/*
+ *	tags file symbol lookup
+ *	Copyright
+ *		(C) 1992 Joseph H. Allen
+ *
+ * 	This file is part of JOE (Joe's Own Editor)
+ */
+#include "config.h"
+#include "types.h"
+
+__RCSID("$MirOS: contrib/code/jupp/utag.c,v 1.10 2017/12/06 23:58:39 tg Exp $");
+
+#include "b.h"
+#include "bw.h"
+#include "main.h"
+#include "pw.h"
+#include "tab.h"
+#include "ufile.h"
+#include "usearch.h"
+#include "utag.h"
+#include "utils.h"
+#include "vs.h"
+#include "charmap.h"
+#include "w.h"
+
+static int dotag(BW *bw, unsigned char *s, void *obj, int *notify)
+{
+	unsigned char buf[512];
+	FILE *f;
+	unsigned char *t = NULL;
+
+	if (notify) {
+		*notify = 1;
+	}
+	if (bw->b->name) {
+		t = vsncpy(t, 0, sz(bw->b->name));
+		t = vsncpy(sv(t), sc(":"));
+		t = vsncpy(sv(t), sv(s));
+	}
+	f = fopen("tags", "r");
+	if (!f) {
+		msgnw(bw->parent, UC "Couldn't open tags file");
+		vsrm(s);
+		vsrm(t);
+		return -1;
+	}
+	while (fgets((char *)buf, 512, f)) {
+		int x, y, c;
+
+		for (x = 0; buf[x] && buf[x] != ' ' && buf[x] != '\t'; ++x) ;
+		c = buf[x];
+		buf[x] = 0;
+		if (!strcmp(s, buf) || (t && !strcmp(t, buf))) {
+			buf[x] = c;
+			while (buf[x] == ' ' || buf[x] == '\t') {
+				++x;
+			}
+			for (y = x; buf[y] && buf[y] != ' ' && buf[y] != '\t' && buf[y] != '\n'; ++y) ;
+			if (x != y) {
+				c = buf[y];
+				buf[y] = 0;
+				if (doswitch(bw, vsncpy(NULL, 0, sz(buf + x)), NULL, NULL)) {
+					vsrm(s);
+					vsrm(t);
+					fclose(f);
+					return -1;
+				}
+				bw = maint->curwin->object.bw;
+				buf[y] = c;
+				while (buf[y] == ' ' || buf[y] == '\t') {
+					++y;
+				}
+				for (x = y; buf[x] && buf[x] != '\n'; ++x) ;
+				buf[x] = 0;
+				if (x != y) {
+					long line = 0;
+
+					if (buf[y] >= '0' && buf[y] <= '9') {
+						line = ustol(buf + y, NULL, USTOL_AUTO);
+						if (line >= 1) {
+							int omid = mid;
+
+							mid = 1;
+							pline(bw->cursor, line - 1), bw->cursor->xcol = piscol(bw->cursor);
+							dofollows();
+							mid = omid;
+						} else {
+							msgnw(bw->parent, UC "Invalid line number");
+						}
+					} else {
+						if (buf[y] == '/' || buf[y] == '?') {
+							++y;
+							if (buf[y] == '^')
+								buf[--y] = '\\';
+							for (x = y+1; buf[x] && buf[x] != '\n' && buf[x-1] != '/'; ++x);
+						}
+						if (buf[x - 1] == '/' || buf[x - 1] == '?') {
+							--x;
+							buf[x] = 0;
+							if (buf[x - 1] == '$') {
+								buf[x - 1] = '\\';
+								buf[x] = '$';
+								++x;
+								buf[x] = 0;
+							}
+						}
+						if (x != y) {
+							vsrm(s);
+							vsrm(t);
+							fclose(f);
+							return dopfnext(bw, mksrch(vsncpy(NULL, 0, sz(buf + y)), NULL, 0, 0, -1, 0, 0), NULL);
+						}
+					}
+				}
+				vsrm(s);
+				vsrm(t);
+				fclose(f);
+				return 0;
+			}
+		}
+	}
+	msgnw(bw->parent, UC "Not found");
+	vsrm(s);
+	vsrm(t);
+	fclose(f);
+	return -1;
+}
+
+static B *taghist = NULL;
+
+int utag(BW *bw)
+{
+	BW *pbw;
+
+	pbw = wmkpw(bw->parent, UC "Tag search: ", &taghist, dotag, NULL, NULL, cmplt, NULL, NULL, locale_map);
+	if (pbw && joe_isalnux(bw->b->o.charmap,brch(bw->cursor))) {
+		P *p = pdup(bw->cursor);
+		P *q = pdup(p);
+		int c;
+
+		while (joe_isalnux(bw->b->o.charmap,(c = prgetc(p))))
+			/* do nothing */;
+		if (c != NO_MORE_DATA) {
+			pgetc(p);
+		}
+		pset(q, p);
+		while (joe_isalnux(bw->b->o.charmap,(c = pgetc(q))))
+			/* do nothing */;
+		if (c != NO_MORE_DATA) {
+			prgetc(q);
+		}
+		binsb(pbw->cursor, bcpy(p, q));
+		pset(pbw->cursor, pbw->b->eof);
+		pbw->cursor->xcol = piscol(pbw->cursor);
+		prm(p);
+		prm(q);
+	}
+	if (pbw) {
+		return 0;
+	} else {
+		return -1;
+	}
+}
+@
+
+
+1.10
+log
+@make wmkpw const again
+@
+text
+@d11 1
+a11 1
+__RCSID("$MirOS: contrib/code/jupp/utag.c,v 1.8 2017/12/06 21:41:05 tg Exp $");
+d68 1
+a68 1
+				bw = (BW *) maint->curwin->object;
+@
+
+
+1.9
+log
+@lots of fixes related to prototyping
+@
+text
+@d135 1
+a135 1
+	pbw = wmkpw(bw->parent, US "Tag search: ", &taghist, dotag, NULL, NULL, cmplt, NULL, NULL, locale_map);
+@
+
+
+1.8
+log
+@const cleanup
+@
+text
+@d11 1
+a11 1
+__RCSID("$MirOS: contrib/code/jupp/utag.c,v 1.4 2017/12/02 02:07:36 tg Exp $");
+d20 1
+@
+
+
+1.7
+log
+@rename alpha_ to alphx and alnum_ to alnux
+
+• matches mksh
+• stuff with trailing underscore may not be allowed in C99
+@
+text
+@d41 1
+a41 1
+		msgnw(bw->parent, US "Couldn't open tags file");
+d87 1
+a87 1
+							msgnw(bw->parent, US "Invalid line number");
+d121 1
+a121 1
+	msgnw(bw->parent, US "Not found");
+@
+
+
+1.6
+log
+@first cut at getting rid of stdio: scanf half
+@
+text
+@d135 1
+a135 1
+	if (pbw && joe_isalnum_(bw->b->o.charmap,brch(bw->cursor))) {
+d140 1
+a140 1
+		while (joe_isalnum_(bw->b->o.charmap,(c = prgetc(p))))
+d146 1
+a146 1
+		while (joe_isalnum_(bw->b->o.charmap,(c = pgetc(q))))
+@
+
+
+1.5
+log
+@some fallout of the includes changes, some more reduction
+@
+text
+@d78 1
+a78 1
+						sscanf((char *)(buf + y), "%ld", &line);
+@
+
+
+1.4
+log
+@overhaul the way includes work; give jupp proper RCS IDs
+
+(after all, empty source files are UB; win32.c is likely)
+@
+text
+@d11 1
+a11 1
+__RCSID("$MirOS$");
+a21 1
+#include "utf8.h"
+@
+
+
+1.3
+log
+@doedit → doswitch, to avoid segfaults; from joe-3.2
+@
+text
+@a0 1
+/* $MirOS: contrib/code/jupp/utag.c,v 1.2 2008/05/13 13:08:30 tg Exp $ */
+d11 1
+a11 1
+#include <stdio.h>
+@
+
+
+1.2
+log
+@prepare for joe-3.1jupp9:
+* sync NEWS
+* bump vsn in configure.ac
+* tag all files with RCS ID
+* sync licence template
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d63 1
+a63 1
+				if (doedit(bw, vsncpy(NULL, 0, sz(buf + x)), NULL, NULL)) {
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+@
+
+
+1.1.21.1
+log
+@Import joe-2.8 sources into vendor branch so it doesn't get lost
+@
+text
+@d1 9
+a9 2
+/* tags file symbol lookup
+   Copyright (C) 1992 Joseph H. Allen
+d11 1
+a11 1
+This file is part of JOE (Joe's Own Editor)
+a12 15
+JOE is free software; you can redistribute it and/or modify it under the 
+terms of the GNU General Public License as published by the Free Software 
+Foundation; either version 1, or (at your option) any later version.  
+
+JOE is distributed in the hope that it will be useful, but WITHOUT ANY 
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS 
+FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more 
+details.  
+
+You should have received a copy of the GNU General Public License along with 
+JOE; see the file COPYING.  If not, write to the Free Software Foundation, 
+675 Mass Ave, Cambridge, MA 02139, USA.  */ 
+
+#include <stdio.h>
+#include "config.h"
+d15 1
+a15 1
+#include "w.h"
+d17 4
+a20 1
+#include "qw.h"
+d22 3
+a24 5
+#include "zstr.h"
+#include "usearch.h"
+#include "tab.h"
+#include "main.h"
+#include "utag.h"
+d26 138
+a163 129
+static int dotag(bw,s,obj,notify)
+BW *bw;
+char *s;
+void *obj;
+int *notify;
+ {
+ char buf[512];
+ FILE *f;
+ char *t=0;
+ if(notify) *notify=1;
+ if(bw->b->name)
+  {
+  t=vsncpy(t,0,sz(bw->b->name));
+  t=vsncpy(sv(t),sc(":"));
+  t=vsncpy(sv(t),sv(s));
+  }
+ f=fopen("tags","r");
+ if(!f)
+  {
+  msgnw(bw,"Couldn't open tags file");
+  vsrm(s);
+  vsrm(t);
+  return -1;
+  }
+ while(fgets(buf,512,f))
+  {
+  int x, y, c;
+  for(x=0;buf[x] && buf[x]!=' ' && buf[x]!='\t';++x);
+  c=buf[x]; buf[x]=0;
+  if(!zcmp(s,buf) || t && !zcmp(t,buf))
+   {
+   buf[x]=c;
+   while(buf[x]==' ' || buf[x]=='\t') ++x;
+   for(y=x;buf[y] && buf[y]!=' ' && buf[y]!='\t' && buf[y]!='\n';++y);
+   if(x!=y)
+    {
+    B *b;
+    c=buf[y]; buf[y]=0;
+    if(doedit(bw,vsncpy(NULL,0,sz(buf+x)),NULL,NULL))
+     {
+     vsrm(s);
+     vsrm(t);
+     fclose(f);
+     return -1;
+     }
+    bw=(BW *)maint->curwin->object;
+    buf[y]=c;
+    while(buf[y]==' ' || buf[y]=='\t') ++y;
+    for(x=y;buf[x] && buf[x]!='\n';++x);
+    buf[x]=0;
+    if(x!=y)
+     {
+     long line=0;
+     if(buf[y]>='0' && buf[y]<='9')
+      {
+      sscanf(buf+y,"%ld",&line);
+      if(line>=1)
+       {
+       int omid=mid;
+       mid=1;
+       pline(bw->cursor,line-1), bw->cursor->xcol=piscol(bw->cursor);
+       dofollows();
+       mid=omid;
+       }
+      else msgnw(bw,"Invalid line number");
+      }
+     else
+      {
+      if(buf[y]=='/' || buf[y]=='?')
+       {
+       ++y;
+       if(buf[y]=='^') buf[--y]='\\';
+       }
+      if(buf[x-1]=='/' || buf[x-1]=='?')
+       {
+       --x;
+       buf[x]=0;
+       if(buf[x-1]=='$')
+        {
+        buf[x-1]='\\';
+        buf[x]='$';
+        ++x;
+        buf[x]=0;
+        }
+       }
+      if(x!=y)
+       {
+       vsrm(s);
+       vsrm(t);
+       fclose(f);
+       return dopfnext(bw,mksrch(vsncpy(NULL,0,sz(buf+y)),NULL,0,0,-1,0,0),NULL);
+       }
+      }
+     }
+    vsrm(s);
+    vsrm(t);
+    fclose(f);
+    return 0;
+    }
+   }
+  }
+ msgnw(bw,"Not found");
+ vsrm(s);
+ vsrm(t);
+ fclose(f);
+ return -1;
+ }
+
+static B *taghist=0;
+
+int utag(bw)
+BW *bw;
+ {
+ BW *pbw;
+ pbw=wmkpw(bw,"Tag search: ",&taghist,dotag,NULL,NULL,cmplt,NULL,NULL);
+ if(pbw && crest(brc(bw->cursor)))
+  {
+  P *p=pdup(bw->cursor);
+  P *q=pdup(p);
+  int c;
+  while(crest(c=prgetc(p))); if(c!=MAXINT) pgetc(p);
+  pset(q,p); while(crest(c=pgetc(q))); if(c!=MAXINT) prgetc(q);
+  binsb(pbw->cursor,bcpy(p,q));
+  pset(pbw->cursor,pbw->b->eof); pbw->cursor->xcol=piscol(pbw->cursor);
+  prm(p); prm(q);
+  }
+ if(pbw) return 0;
+ else return -1;
+ }
+@
+
+
+1.1.201.1
+log
+@JOE's Own Editor 3.1
+@
+text
+@@

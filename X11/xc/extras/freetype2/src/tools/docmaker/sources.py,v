@@ -1,0 +1,1542 @@
+head	1.6;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@# @;
+
+
+1.6
+date	2017.04.15.19.22.13;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.19.48.28;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520152445E05B912;
+
+1.4
+date	2008.06.12.20.54.50;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.05.09;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.25.08;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.18;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.40;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.39.25;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.43.18;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.52;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.19;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.22;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.13;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@#
+#  sources.py
+#
+#    Convert source code comments to multi-line blocks (library file).
+#
+#  Copyright 2002-2016 by
+#  David Turner.
+#
+#  This file is part of the FreeType project, and may only be used,
+#  modified, and distributed under the terms of the FreeType project
+#  license, LICENSE.TXT.  By continuing to use, modify, or distribute
+#  this file you indicate that you have read the license and
+#  understand and accept it fully.
+
+#
+# This library file contains definitions of classes needed to decompose C
+# source code files into a series of multi-line `blocks'.  There are two
+# kinds of blocks.
+#
+#   - Normal blocks, which contain source code or ordinary comments.
+#
+#   - Documentation blocks, which have restricted formatting, and whose text
+#     always start with a documentation markup tag like `<Function>',
+#     `<Type>', etc.
+#
+# The routines to process the content of documentation blocks are contained
+# in file `content.py'; the classes and methods found here only deal with
+# text parsing and basic documentation block extraction.
+#
+
+
+import fileinput, re, sys, os, string
+
+
+################################################################
+##
+##  SOURCE BLOCK FORMAT CLASS
+##
+##  A simple class containing compiled regular expressions to detect
+##  potential documentation format block comments within C source code.
+##
+##  The `column' pattern must contain a group to `unbox' the content of
+##  documentation comment blocks.
+##
+##  Later on, paragraphs are converted to long lines, which simplifies the
+##  regular expressions that act upon the text.
+##
+class  SourceBlockFormat:
+
+    def  __init__( self, id, start, column, end ):
+        """Create a block pattern, used to recognize special documentation
+           blocks."""
+        self.id     = id
+        self.start  = re.compile( start, re.VERBOSE )
+        self.column = re.compile( column, re.VERBOSE )
+        self.end    = re.compile( end, re.VERBOSE )
+
+
+#
+# Format 1 documentation comment blocks.
+#
+#    /************************************/ (at least 2 asterisks)
+#    /*                                  */
+#    /*                                  */
+#    /*                                  */
+#    /************************************/ (at least 2 asterisks)
+#
+start = r'''
+  \s*      # any number of whitespace
+  /\*{2,}/ # followed by '/' and at least two asterisks then '/'
+  \s*$     # probably followed by whitespace
+'''
+
+column = r'''
+  \s*      # any number of whitespace
+  /\*{1}   # followed by '/' and precisely one asterisk
+  ([^*].*) # followed by anything (group 1)
+  \*{1}/   # followed by one asterisk and a '/'
+  \s*$     # probably followed by whitespace
+'''
+
+re_source_block_format1 = SourceBlockFormat( 1, start, column, start )
+
+
+#
+# Format 2 documentation comment blocks.
+#
+#    /************************************ (at least 2 asterisks)
+#     *
+#     *                                    (1 asterisk)
+#     *
+#     */                                   (1 or more asterisks)
+#
+start = r'''
+  \s*     # any number of whitespace
+  /\*{2,} # followed by '/' and at least two asterisks
+  \s*$    # probably followed by whitespace
+'''
+
+column = r'''
+  \s*           # any number of whitespace
+  \*{1}(?![*/]) # followed by precisely one asterisk not followed by `/'
+  (.*)          # then anything (group1)
+'''
+
+end = r'''
+  \s*  # any number of whitespace
+  \*+/ # followed by at least one asterisk, then '/'
+'''
+
+re_source_block_format2 = SourceBlockFormat( 2, start, column, end )
+
+
+#
+# The list of supported documentation block formats.  We could add new ones
+# quite easily.
+#
+re_source_block_formats = [re_source_block_format1, re_source_block_format2]
+
+
+#
+# The following regular expressions correspond to markup tags within the
+# documentation comment blocks.  They are equivalent despite their different
+# syntax.
+#
+# A markup tag consists of letters or character `-', to be found in group 1.
+#
+# Notice that a markup tag _must_ begin a new paragraph.
+#
+re_markup_tag1 = re.compile( r'''\s*<((?:\w|-)*)>''' )  # <xxxx> format
+re_markup_tag2 = re.compile( r'''\s*@@((?:\w|-)*):''' )  # @@xxxx: format
+
+#
+# The list of supported markup tags.  We could add new ones quite easily.
+#
+re_markup_tags = [re_markup_tag1, re_markup_tag2]
+
+
+#
+# A regular expression to detect a cross reference, after markup tags have
+# been stripped off.
+#
+# Two syntax forms are supported:
+#
+#   @@<name>
+#   @@<name>[<id>]
+#
+# where both `<name>' and `<id>' consist of alphanumeric characters, `_',
+# and `-'.  Use `<id>' if there are multiple, valid `<name>' entries.
+#
+# Example: @@foo[bar]
+#
+re_crossref = re.compile( r"""
+                            @@
+                            (?P<name>(?:\w|-)+
+                                     (?:\[(?:\w|-)+\])?)
+                            (?P<rest>.*)
+                          """, re.VERBOSE )
+
+#
+# Two regular expressions to detect italic and bold markup, respectively.
+# Group 1 is the markup, group 2 the rest of the line.
+#
+# Note that the markup is limited to words consisting of letters, digits,
+# the characters `_' and `-', or an apostrophe (but not as the first
+# character).
+#
+re_italic = re.compile( r"_((?:\w|-)(?:\w|'|-)*)_(.*)" )     #  _italic_
+re_bold   = re.compile( r"\*((?:\w|-)(?:\w|'|-)*)\*(.*)" )   #  *bold*
+
+#
+# This regular expression code to identify an URL has been taken from
+#
+#   http://mail.python.org/pipermail/tutor/2002-September/017228.html
+#
+# (with slight modifications).
+#
+urls = r'(?:https?|telnet|gopher|file|wais|ftp)'
+ltrs = r'\w'
+gunk = r'/#~:.?+=&%@@!\-'
+punc = r'.:?\-'
+any  = "%(ltrs)s%(gunk)s%(punc)s" % { 'ltrs' : ltrs,
+                                      'gunk' : gunk,
+                                      'punc' : punc }
+url  = r"""
+         (
+           \b                    # start at word boundary
+           %(urls)s :            # need resource and a colon
+           [%(any)s] +?          # followed by one or more of any valid
+                                 # character, but be conservative and
+                                 # take only what you need to...
+           (?=                   # [look-ahead non-consumptive assertion]
+             [%(punc)s]*         # either 0 or more punctuation
+             (?:                 # [non-grouping parentheses]
+               [^%(any)s] | $    # followed by a non-url char
+                                 # or end of the string
+             )
+           )
+         )
+        """ % {'urls' : urls,
+               'any'  : any,
+               'punc' : punc }
+
+re_url = re.compile( url, re.VERBOSE | re.MULTILINE )
+
+#
+# A regular expression that stops collection of comments for the current
+# block.
+#
+re_source_sep = re.compile( r'\s*/\*\s*\*/' )   #  /* */
+
+#
+# A regular expression to find possible C identifiers while outputting
+# source code verbatim, covering things like `*foo' or `(bar'.  Group 1 is
+# the prefix, group 2 the identifier -- since we scan lines from left to
+# right, sequentially splitting the source code into prefix and identifier
+# is fully sufficient for our purposes.
+#
+re_source_crossref = re.compile( r'(\W*)(\w*)' )
+
+#
+# A regular expression that matches a list of reserved C source keywords.
+#
+re_source_keywords = re.compile( '''\\b ( typedef   |
+                                          struct    |
+                                          enum      |
+                                          union     |
+                                          const     |
+                                          char      |
+                                          int       |
+                                          short     |
+                                          long      |
+                                          void      |
+                                          signed    |
+                                          unsigned  |
+                                          \#include |
+                                          \#define  |
+                                          \#undef   |
+                                          \#if      |
+                                          \#ifdef   |
+                                          \#ifndef  |
+                                          \#else    |
+                                          \#endif   ) \\b''', re.VERBOSE )
+
+
+################################################################
+##
+##  SOURCE BLOCK CLASS
+##
+##  There are two important fields in a `SourceBlock' object.
+##
+##    self.lines
+##      A list of text lines for the corresponding block.
+##
+##    self.content
+##      For documentation comment blocks only, this is the block content
+##      that has been `unboxed' from its decoration.  This is `None' for all
+##      other blocks (i.e., sources or ordinary comments with no starting
+##      markup tag)
+##
+class  SourceBlock:
+
+    def  __init__( self, processor, filename, lineno, lines ):
+        self.processor = processor
+        self.filename  = filename
+        self.lineno    = lineno
+        self.lines     = lines[:]
+        self.format    = processor.format
+        self.content   = []
+
+        if self.format == None:
+            return
+
+        words = []
+
+        # extract comment lines
+        lines = []
+
+        for line0 in self.lines:
+            m = self.format.column.match( line0 )
+            if m:
+                lines.append( m.group( 1 ) )
+
+        # now, look for a markup tag
+        for l in lines:
+            l = string.strip( l )
+            if len( l ) > 0:
+                for tag in re_markup_tags:
+                    if tag.match( l ):
+                        self.content = lines
+                        return
+
+    def  location( self ):
+        return "(" + self.filename + ":" + repr( self.lineno ) + ")"
+
+    # debugging only -- not used in normal operations
+    def  dump( self ):
+        if self.content:
+            print "{{{content start---"
+            for l in self.content:
+                print l
+            print "---content end}}}"
+            return
+
+        fmt = ""
+        if self.format:
+            fmt = repr( self.format.id ) + " "
+
+        for line in self.lines:
+            print line
+
+
+################################################################
+##
+##  SOURCE PROCESSOR CLASS
+##
+##  The `SourceProcessor' is in charge of reading a C source file and
+##  decomposing it into a series of different `SourceBlock' objects.
+##
+##  A SourceBlock object consists of the following data.
+##
+##    - A documentation comment block using one of the layouts above.  Its
+##      exact format will be discussed later.
+##
+##    - Normal sources lines, including comments.
+##
+##
+class  SourceProcessor:
+
+    def  __init__( self ):
+        """Initialize a source processor."""
+        self.blocks   = []
+        self.filename = None
+        self.format   = None
+        self.lines    = []
+
+    def  reset( self ):
+        """Reset a block processor and clean up all its blocks."""
+        self.blocks = []
+        self.format = None
+
+    def  parse_file( self, filename ):
+        """Parse a C source file and add its blocks to the processor's
+           list."""
+        self.reset()
+
+        self.filename = filename
+
+        fileinput.close()
+        self.format = None
+        self.lineno = 0
+        self.lines  = []
+
+        for line in fileinput.input( filename ):
+            # strip trailing newlines, important on Windows machines!
+            if line[-1] == '\012':
+                line = line[0:-1]
+
+            if self.format == None:
+                self.process_normal_line( line )
+            else:
+                if self.format.end.match( line ):
+                    # A normal block end.  Add it to `lines' and create a
+                    # new block
+                    self.lines.append( line )
+                    self.add_block_lines()
+                elif self.format.column.match( line ):
+                    # A normal column line.  Add it to `lines'.
+                    self.lines.append( line )
+                else:
+                    # An unexpected block end.  Create a new block, but
+                    # don't process the line.
+                    self.add_block_lines()
+
+                    # we need to process the line again
+                    self.process_normal_line( line )
+
+        # record the last lines
+        self.add_block_lines()
+
+    def  process_normal_line( self, line ):
+        """Process a normal line and check whether it is the start of a new
+           block."""
+        for f in re_source_block_formats:
+            if f.start.match( line ):
+                self.add_block_lines()
+                self.format = f
+                self.lineno = fileinput.filelineno()
+
+        self.lines.append( line )
+
+    def  add_block_lines( self ):
+        """Add the current accumulated lines and create a new block."""
+        if self.lines != []:
+            block = SourceBlock( self,
+                                 self.filename,
+                                 self.lineno,
+                                 self.lines )
+
+            self.blocks.append( block )
+            self.format = None
+            self.lines  = []
+
+    # debugging only, not used in normal operations
+    def  dump( self ):
+        """Print all blocks in a processor."""
+        for b in self.blocks:
+            b.dump()
+
+# eof
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@a0 2
+#  Sources (c) 2002, 2003, 2004, 2006, 2007, 2008, 2009
+#    David Turner <david@@freetype.org>
+d2 1
+d4 1
+a4 3
+# this file contains definitions of classes needed to decompose
+# C sources files into a series of multi-line "blocks". There are
+# two kinds of blocks:
+d6 2
+a7 1
+#   - normal blocks, which contain source code or ordinary comments
+d9 10
+a18 3
+#   - documentation blocks, which have restricted formatting, and
+#     whose text always start with a documentation markup tag like
+#     "<Function>", "<Type>", etc..
+d20 1
+a20 2
+# the routines used to process the content of documentation blocks
+# are not contained here, but in "content.py"
+d22 3
+a24 2
+# the classes and methods found here only deal with text parsing
+# and basic documentation block extraction
+d26 5
+a34 1
+
+d37 4
+a40 1
+##  BLOCK FORMAT PATTERN
+d42 2
+a43 3
+##   A simple class containing compiled regular expressions used
+##   to detect potential documentation format block comments within
+##   C source code
+d45 2
+a46 2
+##   note that the 'column' pattern must contain a group that will
+##   be used to "unbox" the content of documentation comment blocks
+d51 2
+a52 1
+        """create a block pattern, used to recognize special documentation blocks"""
+a58 1
+
+d60 1
+a60 1
+# format 1 documentation comment blocks look like the following:
+d62 1
+a62 1
+#    /************************************/
+d66 1
+a66 3
+#    /************************************/
+#
+# we define a few regular expressions here to detect them
+a67 1
+
+d86 1
+a86 1
+# format 2 documentation comment blocks look like the following:
+d90 1
+d92 1
+a92 5
+#     *
+#     *
+#     **/       (1 or more asterisks at the end)
+#
+# we define a few regular expressions here to detect them
+d101 3
+a103 3
+  \s*        # any number of whitespace
+  \*{1}(?!/) # followed by precisely one asterisk not followed by `/'
+  (.*)       # then anything (group1)
+d115 2
+a116 2
+# the list of supported documentation block formats, we could add new ones
+# relatively easily
+d122 3
+a124 3
+# the following regular expressions corresponds to markup tags
+# within the documentation comment blocks. they're equivalent
+# despite their different syntax
+d126 1
+a126 1
+# notice how each markup tag _must_ begin a new line
+d128 4
+a131 2
+re_markup_tag1 = re.compile( r'''\s*<(\w*)>''' )  # <xxxx> format
+re_markup_tag2 = re.compile( r'''\s*@@(\w*):''' )  # @@xxxx: format
+d134 1
+a134 2
+# the list of supported markup tags, we could add new ones relatively
+# easily
+d138 4
+d143 1
+a143 1
+# used to detect a cross-reference, after markup tags have been stripped
+d145 25
+a169 1
+re_crossref = re.compile( r'@@(\w*)(.*)' )
+d172 1
+a172 1
+# used to detect italic and bold styles in paragraph text
+d174 31
+a204 2
+re_italic = re.compile( r"_(\w(\w|')*)_(.*)" )     #  _italic_
+re_bold   = re.compile( r"\*(\w(\w|')*)\*(.*)" )   #  *bold*
+d207 2
+a208 1
+# used to detect the end of commented source lines
+d210 1
+a210 1
+re_source_sep = re.compile( r'\s*/\*\s*\*/' )
+d213 5
+a217 1
+# used to perform cross-reference within source output
+d222 1
+a222 1
+# a list of reserved source keywords
+d250 1
+a250 6
+##   A SourceProcessor is in charge of reading a C source file
+##   and decomposing it into a series of different "SourceBlocks".
+##   each one of these blocks can be made of the following data:
+##
+##   - A documentation comment block that starts with "/**" and
+##     whose exact format will be discussed later
+d252 2
+a253 1
+##   - normal sources lines, including comments
+d255 5
+a259 9
+##   the important fields in a text block are the following ones:
+##
+##     self.lines   : a list of text lines for the corresponding block
+##
+##     self.content : for documentation comment blocks only, this is the
+##                    block content that has been "unboxed" from its
+##                    decoration. This is None for all other blocks
+##                    (i.e. sources or ordinary comments with no starting
+##                     markup tag)
+d296 1
+a296 1
+    # debugging only - not used in normal operations
+a312 1
+
+d317 2
+a318 3
+##   The SourceProcessor is in charge of reading a C source file
+##   and decomposing it into a series of different "SourceBlock"
+##   objects.
+d320 1
+a320 1
+##   each one of these blocks can be made of the following data:
+d322 2
+a323 2
+##   - A documentation comment block that starts with "/**" and
+##     whose exact format will be discussed later
+d325 1
+a325 1
+##   - normal sources lines, include comments
+d331 1
+a331 1
+        """initialize a source processor"""
+d338 1
+a338 1
+        """reset a block processor, clean all its blocks"""
+d343 2
+a344 1
+        """parse a C source file, and add its blocks to the processor's list"""
+d363 2
+a364 2
+                    # that's a normal block end, add it to 'lines' and
+                    # create a new block
+d368 1
+a368 1
+                    # that's a normal column line, add it to 'lines'
+d371 2
+a372 2
+                    # humm.. this is an unexpected block end,
+                    # create a new block, but don't process the line
+d382 2
+a383 1
+        """process a normal line and check whether it is the start of a new block"""
+d393 1
+a393 1
+        """add the current accumulated lines and create a new block"""
+d395 4
+a398 1
+            block = SourceBlock( self, self.filename, self.lineno, self.lines )
+d406 1
+a406 1
+        """print all blocks in a processor"""
+@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d1 1
+a1 1
+#  Sources (c) 2002, 2003, 2004, 2006, 2007, 2008
+d182 1
+a182 1
+##   A SourceProcessor is in charge or reading a C source file
+d189 1
+a189 1
+##   - normal sources lines, include comments
+d258 1
+a258 1
+##   The SourceProcessor is in charge or reading a C source file
+d304 1
+a304 1
+                    # that's a normal block end, add it to lines and
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d1 1
+a1 1
+#  Sources (c) 2002, 2003, 2004, 2006, 2007
+d21 1
+a25 3
+
+
+
+d37 1
+a37 1
+class SourceBlockFormat:
+d39 1
+a39 1
+    def __init__( self, id, start, column, end ):
+a40 1
+
+d61 3
+a63 3
+  \s*       # any number of whitespace
+  /\*{2,}/  # followed by '/' and at least two asterisks then '/'
+  \s*$      # eventually followed by whitespace
+d71 1
+a71 1
+  \s*$     # eventually followed by whitespace
+d76 1
+d92 1
+a92 1
+  \s*$    # eventually followed by whitespace
+d96 3
+a98 3
+  \s*         # any number of whitespace
+  \*{1}(?!/)  # followed by precisely one asterisk not followed by `/'
+  (.*)        # then anything (group1)
+d102 2
+a103 2
+  \s*     # any number of whitespace
+  \*+/    # followed by at least one asterisk, then '/'
+d108 1
+d113 1
+a113 1
+re_source_block_formats = [ re_source_block_format1, re_source_block_format2 ]
+d130 1
+a130 1
+re_markup_tags = [ re_markup_tag1, re_markup_tag2 ]
+d177 1
+d201 3
+a203 2
+class SourceBlock:
+    def __init__( self, processor, filename, lineno, lines ):
+d222 1
+a222 1
+                lines.append( m.group(1) )
+d226 2
+a227 2
+            l = string.strip(l)
+            if len(l) > 0:
+d231 1
+a231 4
+                return
+
+    def location( self ):
+        return "(" + self.filename + ":" + repr(self.lineno) + ")"
+d233 2
+d237 1
+a237 2
+    def dump( self ):
+
+d247 1
+a247 1
+            fmt = repr(self.format.id) + " "
+d253 1
+d270 1
+a270 1
+class SourceProcessor:
+a283 1
+
+d285 1
+a285 2
+        """parse a C source file, and adds its blocks to the processor's list"""
+
+d291 3
+a293 3
+        self.format    = None
+        self.lineno    = 0
+        self.lines     = []
+d296 2
+a297 3
+
+            # strip trailing newlines, important on Windows machines !!
+            if  line[-1] == '\012':
+a301 1
+
+a307 1
+
+a310 1
+
+d322 2
+a323 4
+
+
+    def process_normal_line( self, line ):
+        """process a normal line and check if it's the start of a new block"""
+d325 4
+a328 4
+          if f.start.match( line ):
+            self.add_block_lines()
+            self.format = f
+            self.lineno = fileinput.filelineno()
+d332 2
+a333 4
+
+
+    def add_block_lines( self ):
+        """add the current accumulated lines, and create a new block"""
+a340 1
+
+d342 1
+a342 1
+    def dump( self ):
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d1 3
+d74 1
+a74 1
+  \s*$     # enventually followed by whitespace
+d318 1
+a318 1
+                    # humm.. this is an unexcepted block end,
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d96 1
+a96 1
+  \*{1}       # followed by precisely one asterisk
+d138 2
+a139 2
+re_italic = re.compile( r'_(\w+)_' )
+re_bold   = re.compile( r'\*(\w+)\*' )
+d154 20
+a173 20
+re_source_keywords = re.compile( '''( typedef |
+                                       struct |
+                                       enum   |
+                                       union  |
+                                       const  |
+                                       char   |
+                                       int    |
+                                       short  |
+                                       long   |
+                                       void   |
+                                       signed |
+                                       unsigned |
+                                       \#include |
+                                       \#define  |
+                                       \#undef   |
+                                       \#if      |
+                                       \#ifdef   |
+                                       \#ifndef  |
+                                       \#else    |
+                                       \#endif   )''', re.VERBOSE )
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@a0 3
+#  Sources (c) 2002, 2003, 2004, 2006, 2007
+#    David Turner <david@@freetype.org>
+#
+d71 1
+a71 1
+  \s*$     # eventually followed by whitespace
+d96 1
+a96 1
+  \*{1}(?!/)  # followed by precisely one asterisk not followed by `/'
+d138 2
+a139 2
+re_italic = re.compile( r"_(\w(\w|')*)_(.*)" )     #  _italic_
+re_bold   = re.compile( r"\*(\w(\w|')*)\*(.*)" )   #  *bold*
+d154 20
+a173 20
+re_source_keywords = re.compile( '''\\b ( typedef   |
+                                          struct    |
+                                          enum      |
+                                          union     |
+                                          const     |
+                                          char      |
+                                          int       |
+                                          short     |
+                                          long      |
+                                          void      |
+                                          signed    |
+                                          unsigned  |
+                                          \#include |
+                                          \#define  |
+                                          \#undef   |
+                                          \#if      |
+                                          \#ifdef   |
+                                          \#ifndef  |
+                                          \#else    |
+                                          \#endif   ) \\b''', re.VERBOSE )
+d315 1
+a315 1
+                    # humm.. this is an unexpected block end,
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d1 1
+a1 1
+#  Sources (c) 2002, 2003, 2004, 2006, 2007, 2008
+d21 3
+a24 1
+import fileinput, re, sys, os, string
+d39 1
+a39 1
+class  SourceBlockFormat:
+d41 1
+a41 1
+    def  __init__( self, id, start, column, end ):
+d43 1
+d64 3
+a66 3
+  \s*      # any number of whitespace
+  /\*{2,}/ # followed by '/' and at least two asterisks then '/'
+  \s*$     # probably followed by whitespace
+d74 1
+a74 1
+  \s*$     # probably followed by whitespace
+a78 1
+
+d94 1
+a94 1
+  \s*$    # probably followed by whitespace
+d98 3
+a100 3
+  \s*        # any number of whitespace
+  \*{1}(?!/) # followed by precisely one asterisk not followed by `/'
+  (.*)       # then anything (group1)
+d104 2
+a105 2
+  \s*  # any number of whitespace
+  \*+/ # followed by at least one asterisk, then '/'
+a109 1
+
+d114 1
+a114 1
+re_source_block_formats = [re_source_block_format1, re_source_block_format2]
+d131 1
+a131 1
+re_markup_tags = [re_markup_tag1, re_markup_tag2]
+a177 1
+
+d201 2
+a202 3
+class  SourceBlock:
+
+    def  __init__( self, processor, filename, lineno, lines ):
+d221 1
+a221 1
+                lines.append( m.group( 1 ) )
+d225 2
+a226 2
+            l = string.strip( l )
+            if len( l ) > 0:
+d230 4
+a233 1
+                        return
+a234 2
+    def  location( self ):
+        return "(" + self.filename + ":" + repr( self.lineno ) + ")"
+d237 2
+a238 1
+    def  dump( self ):
+d248 1
+a248 1
+            fmt = repr( self.format.id ) + " "
+a253 1
+
+d270 1
+a270 1
+class  SourceProcessor:
+d284 1
+d286 2
+a287 1
+        """parse a C source file, and add its blocks to the processor's list"""
+d293 3
+a295 3
+        self.format = None
+        self.lineno = 0
+        self.lines  = []
+d298 3
+a300 2
+            # strip trailing newlines, important on Windows machines!
+            if line[-1] == '\012':
+d305 1
+d312 1
+d316 1
+d328 4
+a331 2
+    def  process_normal_line( self, line ):
+        """process a normal line and check whether it is the start of a new block"""
+d333 4
+a336 4
+            if f.start.match( line ):
+                self.add_block_lines()
+                self.format = f
+                self.lineno = fileinput.filelineno()
+d340 4
+a343 2
+    def  add_block_lines( self ):
+        """add the current accumulated lines and create a new block"""
+d351 1
+d353 1
+a353 1
+    def  dump( self ):
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d96 1
+a96 1
+  \*{1}(?!/)  # followed by precisely one asterisk not followed by `/'
+d138 2
+a139 2
+re_italic = re.compile( r"_(\w(\w|')*)_(.*)" )     #  _italic_
+re_bold   = re.compile( r"\*(\w(\w|')*)\*(.*)" )   #  *bold*
+d154 20
+a173 20
+re_source_keywords = re.compile( '''\\b ( typedef   |
+                                          struct    |
+                                          enum      |
+                                          union     |
+                                          const     |
+                                          char      |
+                                          int       |
+                                          short     |
+                                          long      |
+                                          void      |
+                                          signed    |
+                                          unsigned  |
+                                          \#include |
+                                          \#define  |
+                                          \#undef   |
+                                          \#if      |
+                                          \#ifdef   |
+                                          \#ifndef  |
+                                          \#else    |
+                                          \#endif   ) \\b''', re.VERBOSE )
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@a0 3
+#  Sources (c) 2002, 2003, 2004, 2006, 2007, 2008, 2009
+#    David Turner <david@@freetype.org>
+#
+d18 3
+a21 1
+import fileinput, re, sys, os, string
+d36 1
+a36 1
+class  SourceBlockFormat:
+d38 1
+a38 1
+    def  __init__( self, id, start, column, end ):
+d40 1
+d61 3
+a63 3
+  \s*      # any number of whitespace
+  /\*{2,}/ # followed by '/' and at least two asterisks then '/'
+  \s*$     # probably followed by whitespace
+d71 1
+a71 1
+  \s*$     # probably followed by whitespace
+a75 1
+
+d91 1
+a91 1
+  \s*$    # probably followed by whitespace
+d95 3
+a97 3
+  \s*        # any number of whitespace
+  \*{1}(?!/) # followed by precisely one asterisk not followed by `/'
+  (.*)       # then anything (group1)
+d101 2
+a102 2
+  \s*  # any number of whitespace
+  \*+/ # followed by at least one asterisk, then '/'
+a106 1
+
+d111 1
+a111 1
+re_source_block_formats = [re_source_block_format1, re_source_block_format2]
+d128 1
+a128 1
+re_markup_tags = [re_markup_tag1, re_markup_tag2]
+a174 1
+
+d179 1
+a179 1
+##   A SourceProcessor is in charge of reading a C source file
+d186 1
+a186 1
+##   - normal sources lines, including comments
+d198 2
+a199 3
+class  SourceBlock:
+
+    def  __init__( self, processor, filename, lineno, lines ):
+d218 1
+a218 1
+                lines.append( m.group( 1 ) )
+d222 2
+a223 2
+            l = string.strip( l )
+            if len( l ) > 0:
+d227 4
+a230 1
+                        return
+a231 2
+    def  location( self ):
+        return "(" + self.filename + ":" + repr( self.lineno ) + ")"
+d234 2
+a235 1
+    def  dump( self ):
+d245 1
+a245 1
+            fmt = repr( self.format.id ) + " "
+a250 1
+
+d255 1
+a255 1
+##   The SourceProcessor is in charge of reading a C source file
+d267 1
+a267 1
+class  SourceProcessor:
+d281 1
+d283 2
+a284 1
+        """parse a C source file, and add its blocks to the processor's list"""
+d290 3
+a292 3
+        self.format = None
+        self.lineno = 0
+        self.lines  = []
+d295 3
+a297 2
+            # strip trailing newlines, important on Windows machines!
+            if line[-1] == '\012':
+d302 1
+d305 1
+a305 1
+                    # that's a normal block end, add it to 'lines' and
+d309 1
+d313 1
+d315 1
+a315 1
+                    # humm.. this is an unexpected block end,
+d325 4
+a328 2
+    def  process_normal_line( self, line ):
+        """process a normal line and check whether it is the start of a new block"""
+d330 4
+a333 4
+            if f.start.match( line ):
+                self.add_block_lines()
+                self.format = f
+                self.lineno = fileinput.filelineno()
+d337 4
+a340 2
+    def  add_block_lines( self ):
+        """add the current accumulated lines and create a new block"""
+d348 1
+d350 1
+a350 1
+    def  dump( self ):
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d1 2
+a3 1
+#  sources.py
+d5 3
+a7 1
+#    Convert source code comments to multi-line blocks (library file).
+d9 1
+a9 2
+#  Copyright 2002-2016 by
+#  David Turner.
+d11 3
+a13 10
+#  This file is part of the FreeType project, and may only be used,
+#  modified, and distributed under the terms of the FreeType project
+#  license, LICENSE.TXT.  By continuing to use, modify, or distribute
+#  this file you indicate that you have read the license and
+#  understand and accept it fully.
+
+#
+# This library file contains definitions of classes needed to decompose C
+# source code files into a series of multi-line `blocks'.  There are two
+# kinds of blocks.
+d15 2
+a16 1
+#   - Normal blocks, which contain source code or ordinary comments.
+d18 2
+a19 7
+#   - Documentation blocks, which have restricted formatting, and whose text
+#     always start with a documentation markup tag like `<Function>',
+#     `<Type>', etc.
+#
+# The routines to process the content of documentation blocks are contained
+# in file `content.py'; the classes and methods found here only deal with
+# text parsing and basic documentation block extraction.
+d22 1
+a23 1
+import fileinput, re, sys, os, string
+d28 1
+a28 4
+##  SOURCE BLOCK FORMAT CLASS
+##
+##  A simple class containing compiled regular expressions to detect
+##  potential documentation format block comments within C source code.
+d30 3
+a32 2
+##  The `column' pattern must contain a group to `unbox' the content of
+##  documentation comment blocks.
+d34 2
+a35 2
+##  Later on, paragraphs are converted to long lines, which simplifies the
+##  regular expressions that act upon the text.
+d40 1
+a40 2
+        """Create a block pattern, used to recognize special documentation
+           blocks."""
+d47 1
+d49 1
+a49 1
+# Format 1 documentation comment blocks.
+d51 1
+a51 1
+#    /************************************/ (at least 2 asterisks)
+d55 3
+a57 1
+#    /************************************/ (at least 2 asterisks)
+d59 1
+d78 1
+a78 1
+# Format 2 documentation comment blocks.
+a81 1
+#     *                                    (1 asterisk)
+d83 5
+a87 1
+#     */                                   (1 or more asterisks)
+d96 3
+a98 3
+  \s*           # any number of whitespace
+  \*{1}(?![*/]) # followed by precisely one asterisk not followed by `/'
+  (.*)          # then anything (group1)
+d110 2
+a111 2
+# The list of supported documentation block formats.  We could add new ones
+# quite easily.
+d117 3
+a119 3
+# The following regular expressions correspond to markup tags within the
+# documentation comment blocks.  They are equivalent despite their different
+# syntax.
+d121 1
+a121 1
+# A markup tag consists of letters or character `-', to be found in group 1.
+d123 2
+a124 4
+# Notice that a markup tag _must_ begin a new paragraph.
+#
+re_markup_tag1 = re.compile( r'''\s*<((?:\w|-)*)>''' )  # <xxxx> format
+re_markup_tag2 = re.compile( r'''\s*@@((?:\w|-)*):''' )  # @@xxxx: format
+d127 2
+a128 1
+# The list of supported markup tags.  We could add new ones quite easily.
+a131 4
+
+#
+# A regular expression to detect a cross reference, after markup tags have
+# been stripped off.
+d133 1
+a133 1
+# Two syntax forms are supported:
+d135 1
+a135 25
+#   @@<name>
+#   @@<name>[<id>]
+#
+# where both `<name>' and `<id>' consist of alphanumeric characters, `_',
+# and `-'.  Use `<id>' if there are multiple, valid `<name>' entries.
+#
+# Example: @@foo[bar]
+#
+re_crossref = re.compile( r"""
+                            @@
+                            (?P<name>(?:\w|-)+
+                                     (?:\[(?:\w|-)+\])?)
+                            (?P<rest>.*)
+                          """, re.VERBOSE )
+
+#
+# Two regular expressions to detect italic and bold markup, respectively.
+# Group 1 is the markup, group 2 the rest of the line.
+#
+# Note that the markup is limited to words consisting of letters, digits,
+# the characters `_' and `-', or an apostrophe (but not as the first
+# character).
+#
+re_italic = re.compile( r"_((?:\w|-)(?:\w|'|-)*)_(.*)" )     #  _italic_
+re_bold   = re.compile( r"\*((?:\w|-)(?:\w|'|-)*)\*(.*)" )   #  *bold*
+d138 1
+a138 1
+# This regular expression code to identify an URL has been taken from
+d140 2
+a141 31
+#   http://mail.python.org/pipermail/tutor/2002-September/017228.html
+#
+# (with slight modifications).
+#
+urls = r'(?:https?|telnet|gopher|file|wais|ftp)'
+ltrs = r'\w'
+gunk = r'/#~:.?+=&%@@!\-'
+punc = r'.:?\-'
+any  = "%(ltrs)s%(gunk)s%(punc)s" % { 'ltrs' : ltrs,
+                                      'gunk' : gunk,
+                                      'punc' : punc }
+url  = r"""
+         (
+           \b                    # start at word boundary
+           %(urls)s :            # need resource and a colon
+           [%(any)s] +?          # followed by one or more of any valid
+                                 # character, but be conservative and
+                                 # take only what you need to...
+           (?=                   # [look-ahead non-consumptive assertion]
+             [%(punc)s]*         # either 0 or more punctuation
+             (?:                 # [non-grouping parentheses]
+               [^%(any)s] | $    # followed by a non-url char
+                                 # or end of the string
+             )
+           )
+         )
+        """ % {'urls' : urls,
+               'any'  : any,
+               'punc' : punc }
+
+re_url = re.compile( url, re.VERBOSE | re.MULTILINE )
+d144 1
+a144 2
+# A regular expression that stops collection of comments for the current
+# block.
+d146 1
+a146 1
+re_source_sep = re.compile( r'\s*/\*\s*\*/' )   #  /* */
+d149 1
+a149 5
+# A regular expression to find possible C identifiers while outputting
+# source code verbatim, covering things like `*foo' or `(bar'.  Group 1 is
+# the prefix, group 2 the identifier -- since we scan lines from left to
+# right, sequentially splitting the source code into prefix and identifier
+# is fully sufficient for our purposes.
+d154 1
+a154 1
+# A regular expression that matches a list of reserved C source keywords.
+d182 6
+a187 1
+##  There are two important fields in a `SourceBlock' object.
+d189 1
+a189 2
+##    self.lines
+##      A list of text lines for the corresponding block.
+d191 9
+a199 5
+##    self.content
+##      For documentation comment blocks only, this is the block content
+##      that has been `unboxed' from its decoration.  This is `None' for all
+##      other blocks (i.e., sources or ordinary comments with no starting
+##      markup tag)
+d236 1
+a236 1
+    # debugging only -- not used in normal operations
+d253 1
+d258 3
+a260 2
+##  The `SourceProcessor' is in charge of reading a C source file and
+##  decomposing it into a series of different `SourceBlock' objects.
+d262 1
+a262 1
+##  A SourceBlock object consists of the following data.
+d264 2
+a265 2
+##    - A documentation comment block using one of the layouts above.  Its
+##      exact format will be discussed later.
+d267 1
+a267 1
+##    - Normal sources lines, including comments.
+d273 1
+a273 1
+        """Initialize a source processor."""
+d280 1
+a280 1
+        """Reset a block processor and clean up all its blocks."""
+d285 1
+a285 2
+        """Parse a C source file and add its blocks to the processor's
+           list."""
+d304 2
+a305 2
+                    # A normal block end.  Add it to `lines' and create a
+                    # new block
+d309 1
+a309 1
+                    # A normal column line.  Add it to `lines'.
+d312 2
+a313 2
+                    # An unexpected block end.  Create a new block, but
+                    # don't process the line.
+d323 1
+a323 2
+        """Process a normal line and check whether it is the start of a new
+           block."""
+d333 1
+a333 1
+        """Add the current accumulated lines and create a new block."""
+d335 1
+a335 4
+            block = SourceBlock( self,
+                                 self.filename,
+                                 self.lineno,
+                                 self.lines )
+d343 1
+a343 1
+        """Print all blocks in a processor."""
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

@@ -1,0 +1,326 @@
+head	1.6;
+access;
+symbols
+	cvs-201110182115:1.1.3.2
+	MIRBSD_10:1.2.0.2
+	MIRBSD_10_BASE:1.2
+	cvs-200611031400:1.1.3.1
+	netbsd:1.1.3
+	OPENBSD_4_0:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2012.09.04.18.43.51;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10050464BFF0BF5A1CC;
+
+1.5
+date	2011.10.18.21.21.47;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004E9DEDEC47F5B9F6;
+
+1.4
+date	2011.10.18.20.07.43;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004E9DDC99373EA446;
+
+1.3
+date	2011.10.18.19.46.30;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	1004E9DD78368B8F2A9;
+
+1.2
+date	2006.11.03.18.11.01;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100454B862956081199;
+
+1.1
+date	2005.02.05.17.25.21;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.3.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.21;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.3.1
+date	2006.11.03.14.20.59;	author tg;	state Exp;
+branches;
+next	1.1.3.2;
+commitid	100454B505850533E95;
+
+1.1.3.2
+date	2011.10.18.19.21.00;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004E9DD18376042FF5;
+
+
+desc
+@@
+
+
+1.6
+log
+@quell last remnants of long double aliases, found on sparc
+@
+text
+@/* @@(#)s_scalbn.c 5.1 93/09/24 */
+/*
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
+ */
+
+#include <sys/cdefs.h>
+__RCSID("$MirOS$");
+#if defined(LIBM_SCCS) && !defined(lint)
+__RCSID("$NetBSD: s_scalbn.c,v 1.15 2011/07/26 16:10:16 joerg Exp $");
+#endif
+
+/*
+ * scalbn (double x, int n)
+ * scalbn(x,n) returns x* 2**n  computed by  exponent
+ * manipulation rather than by actually performing an
+ * exponentiation or a multiplication.
+ */
+
+#include "namespace.h"
+#include "math.h"
+#include "math_private.h"
+
+static const double
+two54   =  1.80143985094819840000e+16, /* 0x43500000, 0x00000000 */
+twom54  =  5.55111512312578270212e-17, /* 0x3C900000, 0x00000000 */
+huge   = 1.0e+300,
+tiny   = 1.0e-300;
+
+double
+scalbn(double x, int n)
+{
+	int32_t k,hx,lx;
+	EXTRACT_WORDS(hx,lx,x);
+        k = ((uint32_t)hx&0x7ff00000)>>20;		/* extract exponent */
+        if (k==0) {				/* 0 or subnormal x */
+            if ((lx|(hx&0x7fffffff))==0) return x; /* +-0 */
+	    x *= two54;
+	    GET_HIGH_WORD(hx,x);
+	    k = (((uint32_t)hx&0x7ff00000)>>20) - 54;
+            if (n< -50000) return tiny*x; 	/*underflow*/
+	    }
+        if (k==0x7ff) return x+x;		/* NaN or Inf */
+        k = k+n;
+        if (k >  0x7fe) return huge*copysign(huge,x); /* overflow  */
+        if (k > 0) 				/* normal result */
+	    {SET_HIGH_WORD(x,(hx&0x800fffff)|(k<<20)); return x;}
+        if (k <= -54) {
+            if (n > 50000) 	/* in case integer overflow in n+k */
+		return huge*copysign(huge,x);	/*overflow*/
+	    else return tiny*copysign(tiny,x); 	/*underflow*/
+	}
+        k += 54;				/* subnormal result */
+	SET_HIGH_WORD(x,(hx&0x800fffff)|(k<<20));
+        return x*twom54;
+}
+@
+
+
+1.5
+log
+@more cleaning up netbsdisms to ensure the DLL version and export table works
+@
+text
+@d14 1
+a29 4
+#ifndef __HAVE_LONG_DOUBLE
+__strong_alias(scalbnl, scalbn);
+#endif
+
+@
+
+
+1.4
+log
+@__{weak,strong}_alias need a terminating ; like all other such macros in .Mx
+@
+text
+@d30 1
+a30 6
+__strong_alias(_scalbnl, _scalbn);
+__weak_alias(scalbnl, _scalbnl);
+#endif
+
+#ifdef __weak_alias
+__weak_alias(scalbn, _scalbn);
+@
+
+
+1.3
+log
+@Merge NetBSD libm. Makefile needs more work, I think.
+@
+text
+@d30 2
+a31 2
+__strong_alias(_scalbnl, _scalbn)
+__weak_alias(scalbnl, _scalbnl)
+d35 1
+a35 1
+__weak_alias(scalbn, _scalbn)
+@
+
+
+1.2
+log
+@Switch to NetBSD libm
+@
+text
+@d15 1
+a15 1
+__RCSID("$NetBSD: s_scalbn.c,v 1.12 2002/05/26 22:01:58 wiz Exp $");
+d25 1
+d29 9
+d49 1
+a49 1
+        k = (hx&0x7ff00000)>>20;		/* extract exponent */
+d54 1
+a54 1
+	    k = ((hx&0x7ff00000)>>20) - 54;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d8 1
+a8 1
+ * software is freely granted, provided that this notice 
+d13 1
+d15 1
+a15 1
+static char rcsid[] = "$NetBSD: s_scalbn.c,v 1.8 1995/05/10 20:48:08 jtc Exp $";
+d18 1
+a18 1
+/* 
+d20 2
+a21 2
+ * scalbn(x,n) returns x* 2**n  computed by  exponent  
+ * manipulation rather than by actually performing an 
+d35 1
+a35 1
+scalbn (double x, int n)
+d42 1
+a42 1
+	    x *= two54; 
+d44 1
+a44 1
+	    k = ((hx&0x7ff00000)>>20) - 54; 
+d48 1
+a48 1
+        k = k+n; 
+d52 1
+a52 1
+        if (k <= -54)
+d56 1
+@
+
+
+1.1.3.1
+log
+@Laugh at OpenBSD's libm and import NetBSD's
+@
+text
+@d8 1
+a8 1
+ * software is freely granted, provided that this notice
+a12 1
+#include <sys/cdefs.h>
+d14 1
+a14 1
+__RCSID("$NetBSD: s_scalbn.c,v 1.12 2002/05/26 22:01:58 wiz Exp $");
+d17 1
+a17 1
+/*
+d19 2
+a20 2
+ * scalbn(x,n) returns x* 2**n  computed by  exponent
+ * manipulation rather than by actually performing an
+d34 1
+a34 1
+scalbn(double x, int n)
+d41 1
+a41 1
+	    x *= two54;
+d43 1
+a43 1
+	    k = ((hx&0x7ff00000)>>20) - 54;
+d47 1
+a47 1
+        k = k+n;
+d51 1
+a51 1
+        if (k <= -54) {
+a54 1
+	}
+@
+
+
+1.1.3.2
+log
+@Import current libm from NetBSD, with the directories complex, noieee_src, arch/!i387 removed.
+
+The idea is to get fmin and fmax, which are needed by some newer software.
+@
+text
+@d15 1
+a15 1
+__RCSID("$NetBSD: s_scalbn.c,v 1.15 2011/07/26 16:10:16 joerg Exp $");
+a24 1
+#include "namespace.h"
+a27 9
+#ifndef __HAVE_LONG_DOUBLE
+__strong_alias(_scalbnl, _scalbn)
+__weak_alias(scalbnl, _scalbnl)
+#endif
+
+#ifdef __weak_alias
+__weak_alias(scalbn, _scalbn)
+#endif
+
+d39 1
+a39 1
+        k = ((uint32_t)hx&0x7ff00000)>>20;		/* extract exponent */
+d44 1
+a44 1
+	    k = (((uint32_t)hx&0x7ff00000)>>20) - 54;
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

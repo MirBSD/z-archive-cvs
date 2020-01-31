@@ -1,0 +1,168 @@
+head	1.1;
+branch	1.1.103;
+access;
+symbols
+	MIRBSD_10_BASE:1.1.103.1
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2005.03.18.10.50.13;	author tg;	state Exp;
+branches
+	1.1.103.1;
+next	;
+
+1.1.103.1
+date	2005.03.18.10.50.13;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#!/bin/sh
+######################################################################
+#
+# $XFree86: xc/programs/Xserver/hw/xfree86/etc/svr3_rem_pch,v 3.3 1996/12/23 06:47:22 dawes Exp $
+#
+# Back out the patch to kernel that prevents losing IOPL on signals.
+#
+# Version 1.0 - 10/08/93
+#	adapted for svr3 by Steve Forsythe (forsse@@meaddata.com) from initial
+#	svr4 version by David Wexelblat (dwex@@goblin.org, dwex@@aib.com)
+#
+# $XConsortium: svr3_rem_pch /main/3 1996/02/21 17:48:32 kaleb $
+#
+
+N=`basename $0`
+
+#
+# Make sure we're running on SVR3!
+#
+uname -r | grep '3.2' > /dev/null
+if [ "$?" != "0" ]
+then
+	echo "$N: This only applies to SVR3!"
+	exit 1
+fi
+
+#
+# Next make sure we are running as root
+#
+id | grep 'uid=0' > /dev/null
+if [ "$?" != "0" ]
+then
+	echo "$N: Must be run as root!"
+	exit 1
+fi
+
+#
+# OK.  Now undo the patch.
+#
+PACK=/etc/conf/pack.d/kernel
+BKUP=${PACK}/.xfree86
+if [ ! -d ${BKUP} ]
+then
+	echo "$N: Backup directory ${BKUP} does not exist!"
+	exit 1
+fi
+OWD=${PWD}
+cd ${BKUP}
+
+./patcher -c ../os.o
+if [ "$?" != "0" ]
+then
+	echo "$N: Patch not applied. Aborting"
+	cd ${OWD}
+	exit 1
+fi
+
+LOC=`./patcher -u ../os.o ./Nos.o`
+if [ "$?" != "0" ]
+then
+	echo "$N: Patch removal failed!!!"
+	cd ${OWD}
+	exit 1
+fi
+LOC1=`cmp -l ../os.o ./Nos.o | awk '{print $1; exit}'`
+if [ "$LOC" != "$LOC1" ]
+then
+	echo "$N: Patch sanity check failed!!!"
+	cd ${OWD}
+	exit 1
+fi
+echo "$N: Patch successfully removed.  Installing unpatched module."
+mv ./Nos.o ../os.o
+
+#
+# OK.  Patch is removed.  Now do an idbuild
+#
+echo "$N: Building the new kernel."
+/etc/conf/bin/idbuild 2>/tmp/idb.$$
+if [ "$?" != "0" ]
+then
+	echo "$N: Kernel build failed!  Errors are in /tmp/idb.$$"
+	cd ${OWD}
+	exit 1
+fi
+rm -f /tmp/idb.$$
+
+#
+# Kernel is now rebuilt.  
+#
+echo "$N: Kernel successfully rebuilt."
+cd ${OWD}
+rm -fr ${BKUP}
+
+#
+# Kernel is now rebuilt.  Check if we should reboot now.
+#
+REBOOT=0
+echo "$N: You must reboot before patch takes effect.  Reboot now? \c"
+read RESP
+case ${RESP} in
+	[yY]*)
+		REBOOT=1
+		;;
+	*)
+		echo "$N: OK.  But remember to reboot later"
+		;;
+esac
+
+cd ${OWD}
+rm -fr ${BKUP}
+#
+# All done.  Reboot if necessary
+#
+if [ ${REBOOT} = "1" ]
+then
+	cd /
+	sync
+	/etc/shutdown -i6 -g15 -y &
+fi
+exit 0
+######################################################################
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

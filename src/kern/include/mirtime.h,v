@@ -1,0 +1,208 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2018.01.23.23.09.52;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005A67BF505608626D;
+
+1.4
+date	2016.03.25.23.19.16;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10056F5C75D722A2C8B;
+
+1.3
+date	2016.03.25.22.38.43;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10056F5BDA213C26D9A;
+
+1.2
+date	2011.11.20.23.40.11;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004EC98FF17AF0E4B3;
+
+1.1
+date	2011.11.20.04.57.10;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004EC8880406A80564;
+
+
+desc
+@@
+
+
+1.5
+log
+@align with POSuX (which doesn’t define tm_gmtoff, who’d have thought?
+
+• change order to align tm_year better (and/or figure out how to make
+  it so that we don’t have to extend it to time_t, should be possible,
+  I know we changed it because of buggy autoconf)
+• make tm_gmtoff not a long, it hurts LP64
+could be future improvements… also, why t f is mirtime_mjd.sec signed?!)
+@
+text
+@/* $MirOS: src/kern/include/mirtime.h,v 1.4 2016/03/25 23:19:16 tg Exp $ */
+
+/* Do not include this header, include <time.h> and/or <sys/time.h> */
+
+#ifndef SYSKERN_MIRTIME_H
+#define SYSKERN_MIRTIME_H 1
+
+
+/* Definition of basic types */
+
+
+/* pulled out from <time.h> and/or <sys/time.h> */
+
+/* seconds since the epoch */
+#ifdef _BSD_TIME_T_
+typedef _BSD_TIME_T_ time_t;
+#undef _BSD_TIME_T_
+#endif
+
+/* calendaric broken-down date */
+struct tm {
+	int tm_sec;		/* seconds [0-60] */
+	int tm_min;		/* minutes [0-59] */
+	int tm_hour;		/* hours [0-23] */
+	int tm_mday;		/* day of month [1-31] */
+	int tm_mon;		/* month of year - 1 [0-11] */
+	time_t tm_year;		/* years since 1900 */
+	int tm_wday;		/* day of week (0 = sunday) */
+	int tm_yday;		/* day of year [0-365] */
+	int tm_isdst;		/* summer time? [0 no, >0 yes, <0 unknown] */
+	long tm_gmtoff;		/* offset from UTC in seconds */
+	char *tm_zone;		/* abbreviation of timezone name */
+};
+
+/* new types */
+
+/* Modified Julian Date */
+typedef struct {
+	time_t mjd;		/* Julian Date minus 2'400'000.5, floor'd */
+	int32_t sec;		/* UTC (not TT) seconds into that [0-86400] */
+} mirtime_mjd;
+
+
+/* functions */
+__BEGIN_DECLS
+
+/* conversion between time-since-the-epoch with and without leap seconds */
+time_t timet2posix(time_t);
+time_t posix2timet(time_t);
+
+/* conversion between time-since-the-epoch with leap seconds and MJD */
+mirtime_mjd *timet2mjd(mirtime_mjd *, time_t);
+time_t mjd2timet(mirtime_mjd *);
+
+/* easy conversion between epoch and calendaric time */
+struct tm *timet2tm(struct tm *, time_t);
+time_t tm2timet(struct tm *);
+#ifdef __GNUC__
+#define timet2tm(dst, src) __extension__({				\
+	mirtime_mjd timet2tm_storage;					\
+	mjd_explode((dst), timet2mjd(&timet2tm_storage, (src)));	\
+})
+#define tm2timet(src) __extension__({					\
+	mirtime_mjd tm2timet_storage;					\
+	mjd2timet(mjd_implode(&tm2timet_storage, (src)));		\
+})
+#endif
+
+/* internal conversion between broken-down calendaric date and MJD */
+struct tm *mjd_explode(struct tm *, const mirtime_mjd *);
+mirtime_mjd *mjd_implode(mirtime_mjd *, const struct tm *);
+
+/* internal leap second management */
+const time_t *mirtime_getleaps(void);
+int mirtime_isleap(time_t);
+
+__END_DECLS
+
+#endif
+@
+
+
+1.4
+log
+@JD (and thus MJD) uses TT for the second part; clarify mirtime_mjd doesn’t
+but uses civil UTC seconds, including leap seconds, into the day defined
+by the (floor’d) MJD value (no time zone) same as SQLite’s %J does (except
+the current ports need to be fixed to omit leap seconds, their algorithm
+assumes they are not counted)
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/include/mirtime.h,v 1.2 2011/11/20 23:40:11 tg Exp $ */
+d30 1
+a30 1
+	int tm_isdst;		/* summer time effective? [0/1] */
+@
+
+
+1.3
+log
+@tm_year is actually “years since 1900”, meaning to use ISO 8601 proleptic
+gregorian calendar (which does have a year 0) instead of BC/AD proleptic!
+
+⇒ src/kern/c/mirtime.c is buggy, wrt. this and wrt. denormal mirtime_mjd,
+  and denormal struct tm, members both
+@
+text
+@d39 2
+a40 2
+	time_t mjd;
+	int32_t sec;
+@
+
+
+1.2
+log
+@continue MirTime work; allows libc and kernel to compile
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/include/mirtime.h,v 1.1 2011/11/20 04:57:10 tg Exp $ */
+d27 1
+a27 1
+	time_t tm_year;		/* year - 1900 */
+@
+
+
+1.1
+log
+@first steps toward a new time API
+• no DJB code (actual code) any more, only reimplementation of algorithms
+  whose code is placed in USA PD
+• no struct returns any more
+• skip the extra tai_t step
+• no _t suffix for types I define
+• try to be a bit more elegant – I learned a lot since then, after all
+
+the old ABI is still provided until we bump libc major
+‣ the new API might wander off libc into libmbfun then, _too_
+
+goal is functional equivalence (after all, it’s been proven correct)
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d70 2
+a71 2
+struct tm *mjd_explode(struct tm *, mirtime_mjd *);
+mirtime_mjd *mjd_implode(mirtime_mjd *, struct tm *);
+@
+

@@ -1,0 +1,332 @@
+head	1.6;
+access;
+symbols
+	MIRBSD_10:1.3.0.2
+	MIRBSD_10_BASE:1.3
+	MIRBSD_9_BASE:1.3
+	cvs-200605302000:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2014.02.09.22.35.55;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10052F802DB25EB293D;
+
+1.5
+date	2012.09.04.19.04.32;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100504650C636513FB7;
+
+1.4
+date	2010.01.07.22.34.52;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004B46615B7479BC1B;
+
+1.3
+date	2006.05.30.20.50.46;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100447CB03157289B83;
+
+1.2
+date	2006.05.30.20.49.41;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100447CAFF63893D04D;
+
+1.1
+date	2006.05.30.20.37.06;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+commitid	100447CAD011A1BDA1F;
+
+1.1.1.1
+date	2006.05.30.20.37.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	100447CAD011A1BDA1F;
+
+
+desc
+@@
+
+
+1.6
+log
+@nuke the restrict qualifiers; C99 says this makes no externally visible difference and is only a compiler hint and a limitation to the interface implementor
+@
+text
+@/*	$OpenBSD: wcstod.c,v 1.1 2005/07/01 08:59:27 espie Exp $	*/
+/* $NetBSD: wcstod.c,v 1.4 2001/10/28 12:08:43 yamt Exp $ */
+
+/*-
+ * Copyright (c) 2006, 2010, 2012 MirOS Project,
+ * Copyright (c)1999, 2000, 2001 Citrus Project,
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	$Citrus: xpg4dl/FreeBSD/lib/libc/locale/wcstod.c,v 1.2 2001/09/27 16:23:57 yamt Exp $
+ */
+
+#include <sys/cdefs.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <wchar.h>
+#include <wctype.h>
+
+__RCSID("$MirOS: src/lib/libc/locale/wcstod.c,v 1.5 2012/09/04 19:04:32 tg Exp $");
+
+const wchar_t mbsd_digits_Ldec[] = L"0123456789";
+
+double
+wcstod(const wchar_t *nptr, wchar_t **endptr)
+{
+	const wchar_t *src;
+	size_t size;
+	const wchar_t *start;
+
+	/*
+	 * check length of string and call strtod
+	 */
+	src = nptr;
+
+	/* skip space first */
+	while (iswspace(*src)) {
+		src++;
+	}
+
+	/* get length of string */
+	start = src;
+	if (wcschr(L"+-", *src))
+		src++;
+	size = wcsspn(src, mbsd_digits_Ldec);
+	src += size;
+	if (*src == L'.') {/* XXX use localeconv */
+		src++;
+		size = wcsspn(src, mbsd_digits_Ldec);
+		src += size;
+	}
+	if (wcschr(L"Ee", *src)) {
+		src++;
+		if (wcschr(L"+-", *src))
+			src++;
+		size = wcsspn(src, mbsd_digits_Ldec);
+		src += size;
+	}
+	size = src - start;
+
+	/*
+	 * convert to a char-string and pass it to strtod.
+	 *
+	 * since all mb chars used to represent a double-constant
+	 * are in the portable character set, we can assume
+	 * that they are 1-byte chars.
+	 */
+	if (size)
+	{
+		mbstate_t st;
+		char *buf;
+		char *end;
+		const wchar_t *s;
+		size_t size_converted;
+		double result;
+
+		buf = malloc(size + 1);
+		if (!buf) {
+			/* error */
+			errno = ENOMEM; /* XXX */
+			return 0;
+		}
+
+		s = start;
+		memset(&st, 0, sizeof(st));
+		size_converted = wcsrtombs(buf, &s, size, &st);
+		if (size != size_converted) {
+			/* XXX should not happen */
+			free(buf);
+			errno = EILSEQ;
+			return 0;
+		}
+
+		buf[size] = 0;
+		result = strtod(buf, &end);
+
+		free(buf);
+
+		if (endptr)
+			/* LINTED bad interface */
+			*endptr = (wchar_t*)start + (end - buf);
+
+		return result;
+	}
+
+	if (endptr)
+		/* LINTED bad interface */
+		*endptr = (wchar_t*)start;
+
+	return 0;
+}
+
+float
+wcstof(const wchar_t *nptr, wchar_t **endptr)
+{
+	return ((float)wcstod(nptr, endptr));
+}
+@
+
+
+1.5
+log
+@nuke machine-independent 'long double' stuff
+
+no shlib bump, if you were using it you were Doing It Wrong already anyway
+@
+text
+@d40 1
+a40 1
+__RCSID("$MirOS: src/lib/libc/locale/wcstod.c,v 1.4 2010/01/07 22:34:52 tg Exp $");
+d45 1
+a45 1
+wcstod(const wchar_t *__restrict__ nptr, wchar_t **__restrict__ endptr)
+d134 1
+a134 1
+wcstof(const wchar_t *__restrict__ nptr, wchar_t **__restrict__ endptr)
+@
+
+
+1.4
+log
+@facilitate code and data sharing: move some passwd(8) functions
+sources by other stuff into libc or libutil; make commons out of
+things like digits, base64 data or code, etc. (publish the data
+parts as well, justin case) plus do some const cleanup
+@
+text
+@a0 1
+/* $MirOS: src/lib/libc/locale/wcstod.c,v 1.3 2006/05/30 20:50:46 tg Exp $ */
+d5 1
+a5 1
+ * Copyright (c) 2006, 2010 MirOS Project,
+d40 1
+a40 1
+__RCSID("$MirOS$");
+d44 2
+a45 2
+long double
+wcstold(const wchar_t *__restrict__ nptr, wchar_t **__restrict__ endptr)
+d62 1
+a62 1
+	start = src;	
+d95 2
+a96 2
+		long double result;
+		
+d103 1
+a103 1
+			
+a132 6
+double
+wcstod(const wchar_t *__restrict__ nptr, wchar_t **__restrict__ endptr)
+{
+	return ((double)wcstold(nptr, endptr));
+}
+
+d136 1
+a136 1
+	return ((float)wcstold(nptr, endptr));
+@
+
+
+1.3
+log
+@solve the problem by casting - not too speedy, but hey, wchars aren't...
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/lib/libc/locale/wcstod.c,v 1.2 2006/05/30 20:49:41 tg Exp $ */
+d6 1
+a6 1
+ * Copyright (c) 2006 MirOS Project,
+d41 4
+d66 1
+a66 1
+	size = wcsspn(src, L"0123456789");
+d70 1
+a70 1
+		size = wcsspn(src, L"0123456789");
+d77 1
+a77 1
+		size = wcsspn(src, L"0123456789");
+@
+
+
+1.2
+log
+@convert to long double; fix proto
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d129 12
+a140 4
+#if 0
+double	wcstod(const wchar_t *__restrict__, wchar_t **__restrict__);
+float	wcstof(const wchar_t *__restrict__, wchar_t **__restrict__);
+#endif
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d6 1
+d41 2
+a42 2
+double
+wcstod(const wchar_t *nptr, wchar_t **endptr)
+d92 1
+a92 1
+		double result;
+d129 4
+@
+
+
+1.1.1.1
+log
+@import a few wcs*() functions from openbsd
+@
+text
+@@

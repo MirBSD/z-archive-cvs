@@ -1,0 +1,474 @@
+head	1.3;
+access;
+symbols
+	freetype-2_7_1:1.1.115.2
+	freetype-2_3_12:1.1.115.1
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.1.1.1
+	freetype-2_3_5:1.1.1.1
+	freetype:1.1.115;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2017.04.15.19.21.26;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10058F2723111C7BEE2;
+
+1.2
+date	2013.08.06.19.47.43;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100520152445E05B912;
+
+1.1
+date	2008.02.26.19.53.24;	author bsiegert;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.1
+date	2008.02.26.19.53.24;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.115.1
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.2
+date	2017.04.15.15.42.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.3
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftpatent.c                                                             */
+/*                                                                         */
+/*    FreeType API for checking patented TrueType bytecode instructions    */
+/*    (body).  Obsolete, retained for backwards compatibility.             */
+/*                                                                         */
+/*  Copyright 2007-2016 by                                                 */
+/*  David Turner.                                                          */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_TRUETYPE_TAGS_H
+#include FT_INTERNAL_OBJECTS_H
+#include FT_INTERNAL_STREAM_H
+#include FT_SERVICE_SFNT_H
+#include FT_SERVICE_TRUETYPE_GLYF_H
+
+
+  /* documentation is in freetype.h */
+
+  FT_EXPORT_DEF( FT_Bool )
+  FT_Face_CheckTrueTypePatents( FT_Face  face )
+  {
+    FT_UNUSED( face );
+
+    return FALSE;
+  }
+
+
+  /* documentation is in freetype.h */
+
+  FT_EXPORT_DEF( FT_Bool )
+  FT_Face_SetUnpatentedHinting( FT_Face  face,
+                                FT_Bool  value )
+  {
+    FT_UNUSED( face );
+    FT_UNUSED( value );
+
+    return FALSE;
+  }
+
+/* END */
+@
+
+
+1.2
+log
+@fastmerge
+@
+text
+@d6 1
+a6 1
+/*    (body).                                                              */
+d8 2
+a9 1
+/*  Copyright 2007, 2008, 2010 by David Turner.                            */
+a27 220
+  static FT_Bool
+  _tt_check_patents_in_range( FT_Stream  stream,
+                              FT_ULong   size )
+  {
+    FT_Bool   result = FALSE;
+    FT_Error  error;
+    FT_Bytes  p, end;
+
+
+    if ( FT_FRAME_ENTER( size ) )
+      return 0;
+
+    p   = stream->cursor;
+    end = p + size;
+
+    while ( p < end )
+    {
+      switch (p[0])
+      {
+      case 0x06:  /* SPvTL // */
+      case 0x07:  /* SPvTL +  */
+      case 0x08:  /* SFvTL // */
+      case 0x09:  /* SFvTL +  */
+      case 0x0A:  /* SPvFS    */
+      case 0x0B:  /* SFvFS    */
+        result = TRUE;
+        goto Exit;
+
+      case 0x40:
+        if ( p + 1 >= end )
+          goto Exit;
+
+        p += p[1] + 2;
+        break;
+
+      case 0x41:
+        if ( p + 1 >= end )
+          goto Exit;
+
+        p += p[1] * 2 + 2;
+        break;
+
+      case 0x71:  /* DELTAP2 */
+      case 0x72:  /* DELTAP3 */
+      case 0x73:  /* DELTAC0 */
+      case 0x74:  /* DELTAC1 */
+      case 0x75:  /* DELTAC2 */
+        result = TRUE;
+        goto Exit;
+
+      case 0xB0:
+      case 0xB1:
+      case 0xB2:
+      case 0xB3:
+      case 0xB4:
+      case 0xB5:
+      case 0xB6:
+      case 0xB7:
+        p += ( p[0] - 0xB0 ) + 2;
+        break;
+
+      case 0xB8:
+      case 0xB9:
+      case 0xBA:
+      case 0xBB:
+      case 0xBC:
+      case 0xBD:
+      case 0xBE:
+      case 0xBF:
+        p += ( p[0] - 0xB8 ) * 2 + 3;
+        break;
+
+      default:
+        p += 1;
+        break;
+      }
+    }
+
+  Exit:
+    FT_UNUSED( error );
+    FT_FRAME_EXIT();
+    return result;
+  }
+
+
+  static FT_Bool
+  _tt_check_patents_in_table( FT_Face   face,
+                              FT_ULong  tag )
+  {
+    FT_Stream              stream = face->stream;
+    FT_Error               error  = FT_Err_Ok;
+    FT_Service_SFNT_Table  service;
+    FT_Bool                result = FALSE;
+
+
+    FT_FACE_FIND_SERVICE( face, service, SFNT_TABLE );
+
+    if ( service )
+    {
+      FT_UInt   i = 0;
+      FT_ULong  tag_i = 0, offset_i = 0, length_i = 0;
+
+
+      for ( i = 0; !error && tag_i != tag ; i++ )
+        error = service->table_info( face, i,
+                                     &tag_i, &offset_i, &length_i );
+
+      if ( error                      ||
+           FT_STREAM_SEEK( offset_i ) )
+        goto Exit;
+
+      result = _tt_check_patents_in_range( stream, length_i );
+    }
+
+  Exit:
+    return result;
+  }
+
+
+  static FT_Bool
+  _tt_face_check_patents( FT_Face  face )
+  {
+    FT_Stream  stream = face->stream;
+    FT_UInt    gindex;
+    FT_Error   error;
+    FT_Bool    result;
+
+    FT_Service_TTGlyf  service;
+
+
+    result = _tt_check_patents_in_table( face, TTAG_fpgm );
+    if ( result )
+      goto Exit;
+
+    result = _tt_check_patents_in_table( face, TTAG_prep );
+    if ( result )
+      goto Exit;
+
+    FT_FACE_FIND_SERVICE( face, service, TT_GLYF );
+    if ( service == NULL )
+      goto Exit;
+
+    for ( gindex = 0; gindex < (FT_UInt)face->num_glyphs; gindex++ )
+    {
+      FT_ULong  offset, num_ins, size;
+      FT_Int    num_contours;
+
+
+      offset = service->get_location( face, gindex, &size );
+      if ( size == 0 )
+        continue;
+
+      if ( FT_STREAM_SEEK( offset )      ||
+           FT_READ_SHORT( num_contours ) )
+        continue;
+
+      if ( num_contours >= 0 )  /* simple glyph */
+      {
+        if ( FT_STREAM_SKIP( 8 + num_contours * 2 ) )
+          continue;
+      }
+      else  /* compound glyph */
+      {
+        FT_Bool  has_instr = 0;
+
+
+        if ( FT_STREAM_SKIP( 8 ) )
+          continue;
+
+        /* now read each component */
+        for (;;)
+        {
+          FT_UInt  flags, toskip;
+
+
+          if( FT_READ_USHORT( flags ) )
+            break;
+
+          toskip = 2 + 1 + 1;
+
+          if ( ( flags & ( 1 << 0 ) ) != 0 )       /* ARGS_ARE_WORDS */
+            toskip += 2;
+
+          if ( ( flags & ( 1 << 3 ) ) != 0 )       /* WE_HAVE_A_SCALE */
+            toskip += 2;
+          else if ( ( flags & ( 1 << 6 ) ) != 0 )  /* WE_HAVE_X_Y_SCALE */
+            toskip += 4;
+          else if ( ( flags & ( 1 << 7 ) ) != 0 )  /* WE_HAVE_A_2x2 */
+            toskip += 8;
+
+          if ( ( flags & ( 1 << 8 ) ) != 0 )       /* WE_HAVE_INSTRUCTIONS */
+            has_instr = 1;
+
+          if ( FT_STREAM_SKIP( toskip ) )
+            goto NextGlyph;
+
+          if ( ( flags & ( 1 << 5 ) ) == 0 )       /* MORE_COMPONENTS */
+            break;
+        }
+
+        if ( !has_instr )
+          goto NextGlyph;
+      }
+
+      if ( FT_READ_USHORT( num_ins ) )
+        continue;
+
+      result = _tt_check_patents_in_range( stream, num_ins );
+      if ( result )
+        goto Exit;
+
+    NextGlyph:
+      ;
+    }
+
+  Exit:
+    return result;
+  }
+
+
+d33 1
+a33 1
+    FT_Bool  result = FALSE;
+d35 1
+a35 5
+
+    if ( face && FT_IS_SFNT( face ) )
+      result = _tt_face_check_patents( face );
+
+    return result;
+a44 11
+    FT_Bool  result = FALSE;
+
+
+#if defined( TT_CONFIG_OPTION_UNPATENTED_HINTING ) && \
+    !defined( TT_CONFIG_OPTION_BYTECODE_INTEPRETER )
+    if ( face && FT_IS_SFNT( face ) )
+    {
+      result = !face->internal->ignore_unpatented_hinter;
+      face->internal->ignore_unpatented_hinter = !value;
+    }
+#else
+a46 1
+#endif
+d48 1
+a48 1
+    return result;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d8 1
+a8 1
+/*  Copyright 2007 by David Turner.                                        */
+d106 1
+d117 1
+a117 1
+    FT_Error               error;
+d126 2
+a127 1
+      FT_ULong  offset, size;
+d130 6
+a135 3
+      error = service->table_info( face, tag, &offset, &size );
+      if ( error                    ||
+           FT_STREAM_SEEK( offset ) )
+d138 1
+a138 1
+      result = _tt_check_patents_in_range( stream, size );
+d268 1
+a268 1
+    FT_Bool  result = 0;
+@
+
+
+1.1.115.1
+log
+@we need newer freetype for advance calculation
+@
+text
+@d8 1
+a8 1
+/*  Copyright 2007, 2008, 2010 by David Turner.                            */
+a105 1
+    FT_UNUSED( error );
+d116 1
+a116 1
+    FT_Error               error  = FT_Err_Ok;
+d125 1
+a125 2
+      FT_UInt   i = 0;
+      FT_ULong  tag_i = 0, offset_i = 0, length_i = 0;
+d128 3
+a130 6
+      for ( i = 0; !error && tag_i != tag ; i++ )
+        error = service->table_info( face, i,
+                                     &tag_i, &offset_i, &length_i );
+
+      if ( error                      ||
+           FT_STREAM_SEEK( offset_i ) )
+d133 1
+a133 1
+      result = _tt_check_patents_in_range( stream, length_i );
+d263 1
+a263 1
+    FT_Bool  result = FALSE;
+@
+
+
+1.1.115.2
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d6 1
+a6 1
+/*    (body).  Obsolete, retained for backwards compatibility.             */
+d8 1
+a8 2
+/*  Copyright 2007-2016 by                                                 */
+/*  David Turner.                                                          */
+d27 220
+d252 5
+a256 1
+    FT_UNUSED( face );
+d258 1
+a258 1
+    return FALSE;
+d268 11
+d281 1
+d283 1
+a283 1
+    return FALSE;
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@@

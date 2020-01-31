@@ -1,0 +1,138 @@
+head	1.2;
+access;
+symbols
+	cvs-200804031830:1.1.1.1
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	cvs-200706161500:1.1.1.1
+	cvs-200705171600:1.1.1.1
+	OPENBSD_4_0:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200512060130:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@// @;
+
+
+1.2
+date	2014.11.30.01.59.39;	author tg;	state dead;
+branches;
+next	1.1;
+commitid	100547A79D40E397510;
+
+1.1
+date	2005.02.05.17.25.47;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.25.47;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@… and CAST. That’s it. AES is not in libc, and DES scares me silly.
+
+Bad thing here: CAST has useless use of bswap award. We cannot fix
+this without adding API to libc. But I’d prefer to not have those
+huge S-boxen in two places, so it’s either do that or remove CAST
+from OpenSSL altogether (it’s not in TLS anyway, just in crypto,
+and GnuPG ships its own).
+@
+text
+@//
+// gettsc.inl
+//
+// gives access to the Pentium's (secret) cycle counter
+//
+// This software was written by Leonard Janke (janke@@unixg.ubc.ca)
+// in 1996-7 and is entered, by him, into the public domain.
+
+#if defined(__WATCOMC__)
+void GetTSC(unsigned long&);
+#pragma aux GetTSC = 0x0f 0x31 "mov [edi], eax" parm [edi] modify [edx eax];
+#elif defined(__GNUC__)
+inline
+void GetTSC(unsigned long& tsc)
+{
+  asm volatile(".byte 15, 49\n\t"
+	       : "=eax" (tsc)
+	       :
+	       : "%edx", "%eax");
+}
+#elif defined(_MSC_VER)
+inline
+void GetTSC(unsigned long& tsc)
+{
+  unsigned long a;
+  __asm _emit 0fh
+  __asm _emit 31h
+  __asm mov a, eax;
+  tsc=a;
+}
+#endif      
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <openssl/cast.h>
+
+void main(int argc,char *argv[])
+	{
+	CAST_KEY key;
+	unsigned long s1,s2,e1,e2;
+	unsigned long data[2];
+	int i,j;
+	static unsigned char d[16]={0x01,0x23,0x45,0x67,0x89,0xAB,0xCD,0xEF};
+
+	CAST_set_key(&key, 16,d);
+
+	for (j=0; j<6; j++)
+		{
+		for (i=0; i<1000; i++) /**/
+			{
+			CAST_encrypt(&data[0],&key);
+			GetTSC(s1);
+			CAST_encrypt(&data[0],&key);
+			CAST_encrypt(&data[0],&key);
+			CAST_encrypt(&data[0],&key);
+			GetTSC(e1);
+			GetTSC(s2);
+			CAST_encrypt(&data[0],&key);
+			CAST_encrypt(&data[0],&key);
+			CAST_encrypt(&data[0],&key);
+			CAST_encrypt(&data[0],&key);
+			GetTSC(e2);
+			CAST_encrypt(&data[0],&key);
+			}
+
+		printf("cast %d %d (%d)\n",
+			e1-s1,e2-s2,((e2-s2)-(e1-s1)));
+		}
+	}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

@@ -1,0 +1,531 @@
+head	1.2;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.2
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.1
+	cvs-20101220:1.1.1.1
+	mbsd-20101220:1.1.1.1.0.6
+	cvs-201012191730:1.1.1.1
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.1
+	cvs-200805071200:1.1.1.1
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	cvs-200803022030:1.1.1.1
+	cvs-200707152000:1.1.1.1
+	cvs-200704292000:1.1.1.1
+	cvs-200702051700:1.1.1.1
+	cvs-200609121900:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200606151800:1.1.1.1
+	cvs-200603231300:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2013.08.06.20.36.45;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10052015E562892E658;
+
+1.1
+date	2005.02.05.17.24.19;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.19;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.127.1
+date	2010.12.19.14.45.51;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2013.08.06.20.27.46;	author tg;	state Exp;
+branches;
+next	;
+commitid	10052015BDF0FDDCF84;
+
+
+desc
+@@
+
+
+1.2
+log
+@merge
+@
+text
+@#!/usr/perl5/bin/perl -w
+#
+# CDDL HEADER START
+#
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License (the "License").
+# You may not use this file except in compliance with the License.
+#
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or http://www.opensolaris.org/os/licensing.
+# See the License for the specific language governing permissions
+# and limitations under the License.
+#
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
+#
+# CDDL HEADER END
+#
+#
+# Copyright (c) 1996-2000 by John T. Beck <john@@beck.org>
+# All rights reserved.
+#
+# Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
+#
+
+require 5.8.4;				# minimal Perl version required
+use strict;
+use warnings;
+use English;
+
+use Socket;
+use Getopt::Std;
+our ($opt_v, $opt_b);
+
+# system requirements:
+# 	must have 'hostname' program.
+
+my $port = 'smtp';
+select(STDERR);
+
+chop(my $name = `hostname || uname -n`);
+
+my ($hostname) = (gethostbyname($name))[0];
+
+my $usage = "Usage: $PROGRAM_NAME [-bv] host [args]";
+getopts('bv');
+my $verbose = $opt_v;
+my $boot_check = $opt_b;
+my $server = shift(@@ARGV);
+my @@hosts = @@ARGV;
+die $usage unless $server;
+my @@cwfiles = ();
+my $alarm_action = "";
+
+if (!@@hosts) {
+	push(@@hosts, $hostname);
+
+	open(CF, "</etc/mail/sendmail.cf") ||
+	    die "open /etc/mail/sendmail.cf: $ERRNO";
+	while (<CF>){
+		# look for a line starting with "Fw"
+		if (/^Fw.*$/) {
+			my $cwfile = $ARG;
+			chop($cwfile);
+			my $optional = /^Fw-o/;
+			# extract the file name
+			$cwfile =~ s,^Fw[^/]*,,;
+
+			# strip the options after the filename
+			$cwfile =~ s/ [^ ]+$//;
+
+			if (-r $cwfile) {
+				push (@@cwfiles, $cwfile);
+			} else {
+				die "$cwfile is not readable" unless $optional;
+			}
+		}
+		# look for a line starting with "Cw"
+		if (/^Cw(.*)$/) {
+			my @@cws = split (' ', $1);
+			while (@@cws) {
+				my $thishost = shift(@@cws);
+				push(@@hosts, $thishost)
+				    unless $thishost =~ "$hostname|localhost";
+			}
+		}
+	}
+	close(CF);
+
+	for my $cwfile (@@cwfiles) {
+		if (open(CW, "<$cwfile")) {
+			while (<CW>) {
+			        next if /^\#/;
+				my $thishost = $ARG;
+				chop($thishost);
+				push(@@hosts, $thishost)
+				    unless $thishost =~ $hostname;
+			}
+			close(CW);
+		} else {
+			die "open $cwfile: $ERRNO";
+		}
+	}
+	# Do this automatically if no client hosts are specified.
+	$boot_check = "yes";
+}
+
+my ($proto) = (getprotobyname('tcp'))[2];
+($port) = (getservbyname($port, 'tcp'))[2]
+	unless $port =~ /^\d+/;
+
+if ($boot_check) {
+	# first connect to localhost to verify that we can accept connections
+	print "verifying that localhost is accepting SMTP connections\n"
+		if ($verbose);
+	my $localhost_ok = 0;
+	($name, my $laddr) = (gethostbyname('localhost'))[0, 4];
+	(!defined($name)) && die "gethostbyname failed, unknown host localhost";
+
+	# get a connection
+	my $sinl = sockaddr_in($port, $laddr);
+	my $save_errno = 0;
+	for (my $num_tries = 1; $num_tries < 5; $num_tries++) {
+		socket(S, &PF_INET, &SOCK_STREAM, $proto)
+			|| die "socket: $ERRNO";
+		if (connect(S, $sinl)) {
+			&alarm("sending 'quit' to $server");
+			print S "quit\n";
+			alarm(0);
+			$localhost_ok = 1;
+			close(S);
+			alarm(0);
+			last;
+		}
+		print STDERR "localhost connect failed ($num_tries)\n";
+		$save_errno = $ERRNO;
+		sleep(1 << $num_tries);
+		close(S);
+		alarm(0);
+	}
+	if (! $localhost_ok) {
+		die "could not connect to localhost: $save_errno\n";
+	}
+}
+
+# look it up
+
+($name, my $thataddr) = (gethostbyname($server))[0, 4];
+(!defined($name)) && die "gethostbyname failed, unknown host $server";
+
+# get a connection
+my $sinr = sockaddr_in($port, $thataddr);
+socket(S, &PF_INET, &SOCK_STREAM, $proto)
+	|| die "socket: $ERRNO";
+print "server = $server\n" if (defined($verbose));
+&alarm("connect to $server");
+if (! connect(S, $sinr)) {
+	die "cannot connect to $server: $ERRNO\n";
+}
+alarm(0);
+select((select(S), $OUTPUT_AUTOFLUSH = 1)[0]);	# don't buffer output to S
+
+# read the greeting
+&alarm("greeting with $server");
+while (<S>) {
+	alarm(0);
+	print if $verbose;
+	if (/^(\d+)([- ])/) {
+		# SMTP's initial greeting response code is 220.
+		if ($1 != 220) {
+			&alarm("giving up after bad response from $server");
+			&read_response($2, $verbose);
+			alarm(0);
+			print STDERR "$server: NOT 220 greeting: $ARG"
+				if ($verbose);
+		}
+		last if ($2 eq " ");
+	} else {
+		print STDERR "$server: NOT 220 greeting: $ARG"
+			if ($verbose);
+		close(S);
+	}
+	&alarm("greeting with $server");
+}
+alarm(0);
+	
+&alarm("sending ehlo to $server");
+&ps("ehlo $hostname");
+my $etrn_support = 0;
+while (<S>) {
+	if (/^250([- ])ETRN(.+)$/) {
+		$etrn_support = 1;
+	}
+	print if $verbose;
+	last if /^\d+ /;
+}
+alarm(0);
+
+if ($etrn_support) {
+	print "ETRN supported\n" if ($verbose);
+	&alarm("sending etrn to $server");
+	while (@@hosts) {
+		$server = shift(@@hosts);
+		&ps("etrn $server");
+		while (<S>) {
+			print if $verbose;
+			last if /^\d+ /;
+		}
+		sleep(1);
+	}
+} else {
+	print "\nETRN not supported\n\n"
+}
+
+&alarm("sending 'quit' to $server");
+&ps("quit");
+while (<S>) {
+	print if $verbose;
+	last if /^\d+ /;
+}
+close(S);
+alarm(0);
+
+select(STDOUT);
+exit(0);
+
+# print to the server (also to stdout, if -v)
+sub ps
+{
+	my ($p) = @@_;
+	print ">>> $p\n" if $verbose;
+	print S "$p\n";
+}
+
+sub alarm
+{
+	($alarm_action) = @@_;
+	alarm(10);
+	$SIG{ALRM} = 'handle_alarm';
+}
+
+sub handle_alarm
+{
+	&giveup($alarm_action);
+}
+
+sub giveup
+{
+	my $reason = @@_;
+	(my $pk, my $file, my $line);
+	($pk, $file, $line) = caller;
+
+	print "Timed out during $reason\n" if $verbose;
+	exit(1);
+}
+
+# read the rest of the current smtp daemon's response (and toss it away)
+sub read_response
+{
+	(my $done, $verbose) = @@_;
+	(my @@resp);
+	print my $s if $verbose;
+	while (($done eq "-") && ($s = <S>) && ($s =~ /^\d+([- ])/)) {
+		print $s if $verbose;
+		$done = $1;
+		push(@@resp, $s);
+	}
+	return @@resp;
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 21
+a21 1
+#!/usr/local/bin/perl -w
+d26 2
+a27 2
+# Copyright (c) 2000 by Sun Microsystems, Inc.
+# All rights reserved.
+a28 1
+#ident	"@@(#)etrn.pl	1.1	00/09/06 SMI"
+d30 1
+a30 1
+require 5.005;				# minimal Perl version required
+d32 1
+a34 1
+# hardcoded constants, should work fine for BSD-based systems
+d37 1
+a37 2
+use vars qw($opt_v);
+my $sockaddr = 'S n a4 x8';
+d47 1
+a47 1
+(my $hostname, my $aliases, my $type, my $len, undef) = gethostbyname($name);
+d49 2
+a50 2
+my $usage = "Usage: $PROGRAM_NAME [-v] host [args]";
+getopts('v');
+d52 1
+d108 2
+d112 2
+a113 2
+($name, $aliases, my $proto) = getprotobyname('tcp');
+($name, $aliases, $port) = getservbyname($port, 'tcp')
+d116 34
+d152 1
+a152 1
+($name, $aliases, $type, $len, my $thataddr) = gethostbyname($server);
+d154 1
+a154 1
+				
+d156 2
+a157 2
+my $that = pack($sockaddr, &AF_INET, $port, $thataddr);
+socket(S, &AF_INET, &SOCK_STREAM, $proto)
+d161 1
+a161 1
+if (! connect(S, $that)) {
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@@
+
+
+1.1.127.2
+log
+@Update
+@
+text
+@d1 1
+a1 21
+#!/usr/perl5/bin/perl -w
+#
+# CDDL HEADER START
+#
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License (the "License").
+# You may not use this file except in compliance with the License.
+#
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or http://www.opensolaris.org/os/licensing.
+# See the License for the specific language governing permissions
+# and limitations under the License.
+#
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
+#
+# CDDL HEADER END
+#
+d6 2
+a7 2
+# Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
+d9 1
+d11 1
+a11 1
+require 5.8.4;				# minimal Perl version required
+a12 1
+use warnings;
+d15 1
+d18 2
+a19 1
+our ($opt_v, $opt_b);
+d29 1
+a29 1
+my ($hostname) = (gethostbyname($name))[0];
+d31 2
+a32 2
+my $usage = "Usage: $PROGRAM_NAME [-bv] host [args]";
+getopts('bv');
+a33 1
+my $boot_check = $opt_b;
+a88 2
+	# Do this automatically if no client hosts are specified.
+	$boot_check = "yes";
+d91 2
+a92 2
+my ($proto) = (getprotobyname('tcp'))[2];
+($port) = (getservbyname($port, 'tcp'))[2]
+a94 34
+if ($boot_check) {
+	# first connect to localhost to verify that we can accept connections
+	print "verifying that localhost is accepting SMTP connections\n"
+		if ($verbose);
+	my $localhost_ok = 0;
+	($name, my $laddr) = (gethostbyname('localhost'))[0, 4];
+	(!defined($name)) && die "gethostbyname failed, unknown host localhost";
+
+	# get a connection
+	my $sinl = sockaddr_in($port, $laddr);
+	my $save_errno = 0;
+	for (my $num_tries = 1; $num_tries < 5; $num_tries++) {
+		socket(S, &PF_INET, &SOCK_STREAM, $proto)
+			|| die "socket: $ERRNO";
+		if (connect(S, $sinl)) {
+			&alarm("sending 'quit' to $server");
+			print S "quit\n";
+			alarm(0);
+			$localhost_ok = 1;
+			close(S);
+			alarm(0);
+			last;
+		}
+		print STDERR "localhost connect failed ($num_tries)\n";
+		$save_errno = $ERRNO;
+		sleep(1 << $num_tries);
+		close(S);
+		alarm(0);
+	}
+	if (! $localhost_ok) {
+		die "could not connect to localhost: $save_errno\n";
+	}
+}
+
+d97 1
+a97 1
+($name, my $thataddr) = (gethostbyname($server))[0, 4];
+d99 1
+a99 1
+
+d101 2
+a102 2
+my $sinr = sockaddr_in($port, $thataddr);
+socket(S, &PF_INET, &SOCK_STREAM, $proto)
+d106 1
+a106 1
+if (! connect(S, $sinr)) {
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

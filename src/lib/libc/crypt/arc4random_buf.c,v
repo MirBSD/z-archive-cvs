@@ -1,0 +1,229 @@
+head	1.6;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2016.08.23.13.48.01;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10057BC542A2B3595E2;
+
+1.5
+date	2014.03.29.10.35.46;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005336A20A417A5BCB;
+
+1.4
+date	2014.02.20.00.07.45;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100530547692D320BFE;
+
+1.3
+date	2014.02.19.21.16.27;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10053051F3D59CC4C5F;
+
+1.2
+date	2013.09.10.17.40.53;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100522F599D666956F0;
+
+1.1
+date	2010.09.12.17.10.53;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004C8D0939027D8BE7;
+
+
+desc
+@@
+
+
+1.6
+log
+@reduce max amount of bytes an arc4random_buf(3|9) caller can get even more
+@
+text
+@/*-
+ * Copyright (c) 2010, 2014, 2016
+ *	mirabilos <m@@mirbsd.org>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ *-
+ * Implement a useful arc4random(3) related API.
+ */
+
+#include <syskern/libckern.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include "arc4random.h"
+#include "thread_private.h"
+
+__RCSID("$MirOS: src/lib/libc/crypt/arc4random_buf.c,v 1.5 2014/03/29 10:35:46 tg Exp $");
+
+void
+arc4random_buf(void *buf_, size_t len)
+{
+	uint8_t *buf = (uint8_t *)buf_;
+	pid_t mypid = 0;
+	size_t n;
+
+	/* reinitialise if necessary */
+	_ARC4_LOCK();
+	if (!a4state.a4s_initialised ||
+	    (a4state.a4s_stir_pid != (mypid = getpid())))
+		arc4random_stir_locked(mypid);
+	_ARC4_UNLOCK();
+
+	while (len) {
+		_ARC4_LOCK();
+		/* randomly skip 1-4 bytes */
+		/*XXX this should be constant-time */
+		/* but this is userspace, so don't bother */
+		n = arcfour_byte(&a4state.cipher) & 3;
+		while (n--)
+			(void)arcfour_byte(&a4state.cipher);
+
+		/* fill the buffer in small increments */
+		n = len < 128 ? len : 128;
+		len -= n;
+		a4state.a4s_count -= n;
+		if (a4state.a4s_count < 0)
+			arc4random_stir_locked(mypid);
+		while (n--)
+			*buf++ = arcfour_byte(&a4state.cipher);
+		_ARC4_UNLOCK();
+	}
+}
+@
+
+
+1.5
+log
+@skip <stdbool.h> for the initialised value, uint8_t packs better
+@
+text
+@d2 2
+a3 2
+ * Copyright (c) 2010, 2014
+ *	Thorsten Glaser <tg@@mirbsd.org>
+d29 1
+a29 1
+__RCSID("$MirOS: src/lib/libc/crypt/arc4random_buf.c,v 1.4 2014/02/20 00:07:45 tg Exp $");
+d49 1
+d55 1
+a55 1
+		n = len < 256 ? len : 256;
+@
+
+
+1.4
+log
+@optimise; put a few deprecation warnings (no thanks to OpenBSD)
+@
+text
+@a23 1
+#include <stdbool.h>
+d29 1
+a29 1
+__RCSID("$MirOS: src/lib/libc/crypt/arc4random_buf.c,v 1.3 2014/02/19 21:16:27 tg Exp $");
+@
+
+
+1.3
+log
+@do not include header from other header
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2010
+d30 1
+a30 1
+__RCSID("$MirOS: src/lib/libc/crypt/arc4random_buf.c,v 1.2 2013/09/10 17:40:53 tg Exp $");
+d37 1
+d39 1
+a39 3
+	if (!len)
+		return;
+
+a40 2
+
+	/* reinitialise if necessary */
+d44 1
+d46 13
+a58 9
+	/* randomly skip 1-4 bytes */
+	/*XXX this should be constant-time */
+	buf[0] = arcfour_byte(&a4state.cipher) & 3;
+	while (buf[0]--)
+		(void)arcfour_byte(&a4state.cipher);
+
+	/* fill the buffer */
+	while (len--) {
+		if (--a4state.a4s_count <= 0)
+d60 3
+a62 1
+		buf[len] = arcfour_byte(&a4state.cipher);
+a63 2
+
+	_ARC4_UNLOCK();
+@
+
+
+1.2
+log
+@add a note (to one of the affected functions) that our random skips for
+making arc4random(3) more so need to be constant-time
+@
+text
+@d23 1
+d30 1
+a30 1
+__RCSID("$MirOS: src/lib/libc/crypt/arc4random_buf.c,v 1.1 2010/09/12 17:10:53 tg Exp $");
+@
+
+
+1.1
+log
+@new implementation of arc4random(3) API (except arc4random_uniform(3),
+which though has been split off earlier today)
+
+deprecate arc4random_push arc4random_pushb arc4random_pushk
+in favour of arc4random_pushb_fast as well
+
+hide internal symbols from user with a version script (only some,
+until the next major bump)
+
+make deprecated functions into macros already
+
+switch some kernel code to use the new shared code already; rewrite
+of kernel arc4random(9) will come next/later
+@
+text
+@d29 1
+a29 1
+__RCSID("$MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $");
+d48 1
+@
+

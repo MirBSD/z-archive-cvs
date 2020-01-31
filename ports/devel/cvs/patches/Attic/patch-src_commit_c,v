@@ -1,0 +1,274 @@
+head	1.5;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.5
+date	2012.02.11.19.29.56;	author tg;	state dead;
+branches;
+next	1.4;
+commitid	1004F36C11F02848ED5;
+
+1.4
+date	2010.09.15.20.56.59;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004C9132F41004B31C;
+
+1.3
+date	2007.03.10.23.53.49;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10045F344D65465EF23;
+
+1.2
+date	2007.02.01.23.29.35;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045C277DE68C59215;
+
+1.1
+date	2006.10.02.05.59.16;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004520AAAB453C7791;
+
+
+desc
+@@
+
+
+1.5
+log
+@update the CVS package in MirPorts (to match base and Debian)
+
+• since the Debian cvs source package was taken over by this one,
+  reverse things and use the Debian *.diff.gz to get our patches
+  from ;-) saves tracking things in CVS thrice
+• since the Debian cvs binary package contains PDF documentation
+  generated from something with our patches, ship it instead of
+  the one from the vanilla CVS distfile
+• ship cvs-switchroot(1) from Debian, which is just a fancy name
+  for mircvs://src/scripts/mnt-cvsroot and has a manpage
+• move stuff from PREFIX/share/cvs to PREFIX/share/doc/cvs as is proper
+• fix regression testsuite on MirBSD as much as possible (same as base)
+@
+text
+@$MirOS: ports/devel/cvs/patches/patch-src_commit_c,v 1.4 2010/09/15 20:56:59 tg Exp $
+--- src/commit.c.orig	Thu Sep 22 18:19:50 2005
++++ src/commit.c	Wed Sep 15 19:36:15 2010
+@@@@ -25,6 +25,8 @@@@
+ #include "fileattr.h"
+ #include "hardlink.h"
+ 
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_commit_c,v 1.4 2010/09/15 20:56:59 tg Exp $");
++
+ static Dtype check_direntproc (void *callerdat, const char *dir,
+                                const char *repos, const char *update_dir,
+                                List *entries);
+@@@@ -613,31 +615,7 @@@@ commit (int argc, char **argv)
+ 
+ 	send_to_server ("ci\012", 0);
+ 	err = get_responses_and_close ();
+-	if (err != 0 && use_editor && saved_message != NULL)
+-	{
+-	    /* If there was an error, don't nuke the user's carefully
+-	       constructed prose.  This is something of a kludge; a better
+-	       solution is probably more along the lines of #150 in TODO
+-	       (doing a second up-to-date check before accepting the
+-	       log message has also been suggested, but that seems kind of
+-	       iffy because the real up-to-date check could still fail,
+-	       another error could occur, &c.  Also, a second check would
+-	       slow things down).  */
+-
+-	    char *fname;
+-	    FILE *fp;
+-
+-	    fp = cvs_temp_file (&fname);
+-	    if (fp == NULL)
+-		error (1, 0, "cannot create temporary file %s", fname);
+-	    if (fwrite (saved_message, 1, strlen (saved_message), fp)
+-		!= strlen (saved_message))
+-		error (1, errno, "cannot write temporary file %s", fname);
+-	    if (fclose (fp) < 0)
+-		error (0, errno, "cannot close temporary file %s", fname);
+-	    error (0, 0, "saving log message in %s", fname);
+-	    free (fname);
+-	}
++	logmsg_cleanup(err);
+ 	return err;
+     }
+ #endif
+@@@@ -702,6 +680,7 @@@@ commit (int argc, char **argv)
+ 	sleep_past (last_register_time);
+     }
+ 
++    logmsg_cleanup(err);
+     return err;
+ }
+ 
+@@@@ -853,7 +832,7 @@@@ check_fileproc (void *callerdat, struct 
+ 	case T_ADDED:
+ 	case T_REMOVED:
+         {
+-            char *editor;
++            char *editor = NULL;
+ 
+ 	    /*
+ 	     * some quick sanity checks; if no numeric -r option specified:
+@@@@ -1250,6 +1229,7 @@@@ precommit_proc (const char *repository, 
+ #endif /* SUPPORT_OLD_INFO_FMT_STRINGS */
+ 			      filter,
+ 			      "c", "s", cvs_cmd_name,
++			      "I", "s", global_session_id,
+ #ifdef SERVER_SUPPORT
+ 			      "R", "s", referrer ? referrer->original : "NONE",
+ #endif /* SERVER_SUPPORT */
+@@@@ -2255,9 +2235,10 @@@@ checkaddfile (const char *file, const ch
+ 		   this was added into the log message. */
+ 		t = time (NULL);
+ 		ct = gmtime (&t);
+-		tmp = Xasprintf ("file %s was added on branch %s on %d-%02d-%02d %02d:%02d:%02d +0000",
++		tmp = Xasprintf ("file %s was added on branch %s on %ld-%02d-%02d %02d:%02d:%02d +0000",
+ 				 file, tag,
+-				 ct->tm_year + (ct->tm_year < 100 ? 0 : 1900),
++				 (long)ct->tm_year
++				  + (ct->tm_year < 100 ? 0 : 1900),
+ 				 ct->tm_mon + 1, ct->tm_mday,
+ 				 ct->tm_hour, ct->tm_min, ct->tm_sec);
+ 			 
+@
+
+
+1.4
+log
+@WIP port (will be worked on more, commit for safety)
+
+Some changes, in this order:
+• re-sync with MirOS base cvs
+• reduce diff against upstream
+• apply cvs-datetime.patch from Arkadiusz Miskiewicz <arekm>
+  via Concurrent Versions System - Bugs: bug #21523, can't parse date/time: =UTC when commiting file (workaround/fix attached)
+• apply (only those considered somewhat sane) patches from Debian cvs_1:1.12.13-12
+  – 11_check_method_crash
+  – 12_rcs2log_POSIX_sort
+  – 14_ext_expansion
+  – 15_PATH_MAX_check
+  – 20_readdir_errno
+  – 21_getcwd_chroot
+  – 25_import-n-X
+  – 51_newlines_in_commit_template (partially)
+  – 55_keyword_alphanumerics (modified)
+  – 62_cvsrc_whitespace
+  – 65_login_cvspass_message
+  – 69_ext_allowroot (modified)
+  – 71_cvsbug_tmpfix
+  – 81_fix_-l (modified)
+  – 85_normalize_correct_roots
+  – 86_server_wrapper (modified)
+  – 93_homedir (modified)
+  – 95_flag_conflicted_copies
+  – 96_manpage_fixes (partially)
+  – 97_cvs.info.typo (partially)
+  – 98_fix_sparc_sigbus.diff
+• document Debian’s changes in the Texinfo manual
+• modify mkman.pl to produce more correct looking output
+• point to texinfo HTML document from HTML manpage
+• fix fseeko configure.in test
+• correct bugs in Debian’s changes
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d8 1
+a8 1
++__RCSID("$MirOS: ports/devel/cvs/patches/patch-src_commit_c,v 1.3 2007/03/10 23:53:49 tg Exp $");
+@
+
+
+1.3
+log
+@sync the cvs port and the cvs in the base system;
+RCSID stuff like in commitid 10045F33CB2157CFEAE
+@
+text
+@d1 3
+a3 3
+$MirOS: ports/devel/cvs/patches/patch-src_commit_c,v 1.2 2007/02/01 23:29:35 tg Exp $
+--- src/commit.c.orig	Sat Mar 10 23:14:20 2007
++++ src/commit.c	Sat Mar 10 23:14:14 2007
+d8 1
+a8 1
++__RCSID("$MirOS: src/gnu/usr.bin/cvs/src/commit.c,v 1.7 2007/02/01 23:24:27 tg Exp $");
+d71 1
+a71 1
+@@@@ -2255,12 +2235,13 @@@@ checkaddfile (const char *file, const ch
+d83 1
+a83 5
+-			 
++
+ 		/* commit a dead revision. */
+ 		revnum = RCS_whatbranch (rcs, tag);
+ 		retcode = RCS_checkin (rcs, NULL, NULL, tmp, revnum, headtime,
+@
+
+
+1.2
+log
+@bring in bsiegert@@'s "wtf don't eat my fscking log messages!" patch
+@
+text
+@d1 13
+a13 4
+$MirOS: ports/devel/cvs/patches/patch-src_commit_c,v 1.1 2006/10/02 05:59:16 tg Exp $
+--- src/commit.c.orig	Thu Sep 22 18:19:50 2005
++++ src/commit.c	Thu Feb  1 23:27:09 2007
+@@@@ -613,31 +613,7 @@@@ commit (int argc, char **argv)
+d46 1
+a46 1
+@@@@ -702,6 +678,7 @@@@ commit (int argc, char **argv)
+d54 1
+a54 1
+@@@@ -853,7 +830,7 @@@@ check_fileproc (void *callerdat, struct 
+d63 1
+a63 1
+@@@@ -1250,6 +1227,7 @@@@ precommit_proc (const char *repository, 
+d71 3
+a73 1
+@@@@ -2257,7 +2235,8 @@@@ checkaddfile (const char *file, const ch
+d75 2
+a76 1
+ 		tmp = Xasprintf ("file %s was added on branch %s on %d-%02d-%02d %02d:%02d:%02d +0000",
+d79 1
+a79 1
++				 (int)ct->tm_year
+d83 5
+a87 1
+ 			 
+@
+
+
+1.1
+log
+@add cvs port, compiles fine and warning-free on MirOS-current;
+other OSes not tested, older MirOS may have issues (mktime, regex/wctype)
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 43
+a45 2
++++ src/commit.c	Mon Oct  2 04:40:37 2006
+@@@@ -853,7 +853,7 @@@@ check_fileproc (void *callerdat, struct 
+d54 1
+a54 1
+@@@@ -1250,6 +1250,7 @@@@ precommit_proc (const char *repository, 
+d62 1
+a62 1
+@@@@ -2257,7 +2258,8 @@@@ checkaddfile (const char *file, const ch
+@
+

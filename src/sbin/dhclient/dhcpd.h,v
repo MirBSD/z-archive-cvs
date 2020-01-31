@@ -1,0 +1,834 @@
+head	1.2;
+access;
+symbols
+	MIRBSD_10:1.1.1.4.0.2
+	MIRBSD_10_BASE:1.1.1.4
+	cvs-200702170300:1.1.1.4
+	OPENBSD_4_0:1.1.1.3
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	cvs-200504291700:1.1.1.1
+	cvs-200504170300:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2013.10.31.20.06.41;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1005272B7081B0E5655;
+
+1.1
+date	2005.02.05.17.26.30;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.26.30;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.56.53;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2006.09.20.19.06.47;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	10045119150397FC669;
+
+1.1.1.4
+date	2007.02.17.03.06.18;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045D67134732A8703;
+
+
+desc
+@@
+
+
+1.2
+log
+@adapt most __attribute__((…)) occurrences to new KNF style(9)
+@
+text
+@/*	$MirOS$ */
+/*	$OpenBSD: dhcpd.h,v 1.64 2007/01/27 22:05:24 krw Exp $	*/
+
+/*
+ * Copyright © 2013
+ *	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+ * Copyright (c) 2004 Henning Brauer <henning@@openbsd.org>
+ * Copyright (c) 1995, 1996, 1997, 1998, 1999
+ * The Internet Software Consortium.    All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of The Internet Software Consortium nor the names
+ *    of its contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE INTERNET SOFTWARE CONSORTIUM AND
+ * CONTRIBUTORS ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE INTERNET SOFTWARE CONSORTIUM OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+ * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * This software has been written for the Internet Software Consortium
+ * by Ted Lemon <mellon@@fugue.com> in cooperation with Vixie
+ * Enterprises.  To learn more about the Internet Software Consortium,
+ * see ``http://www.vix.com/isc''.  To learn more about Vixie
+ * Enterprises, see ``http://www.vix.com''.
+ */
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/sockio.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/wait.h>
+
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <net/route.h>
+
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <netdb.h>
+#include <paths.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <syslog.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "dhcp.h"
+
+#define	LOCAL_PORT	68
+#define	REMOTE_PORT	67
+
+struct option {
+	char *name;
+	char *format;
+};
+
+struct option_data {
+	unsigned int	 len;
+	u_int8_t	*data;
+};
+
+struct string_list {
+	struct string_list	*next;
+	char			string[1];	/* Actually bigger. */
+};
+
+struct iaddr {
+	int len;
+	unsigned char iabuf[16];
+};
+
+struct iaddrlist {
+	struct iaddrlist *next;
+	struct iaddr addr;
+};
+
+struct hardware {
+	u_int8_t htype;
+	u_int8_t hlen;
+	u_int8_t haddr[16];
+};
+
+struct client_lease {
+	struct client_lease	*next;
+	time_t			 expiry, renewal, rebind;
+	struct iaddr		 address;
+	char			*server_name;
+	char			*filename;
+	struct string_list	*medium;
+	unsigned int		 is_static : 1;
+	unsigned int		 is_bootp : 1;
+	struct option_data	 options[256];
+};
+
+/* Possible states in which the client can be. */
+enum dhcp_state {
+	S_REBOOTING,
+	S_INIT,
+	S_SELECTING,
+	S_REQUESTING,
+	S_BOUND,
+	S_RENEWING,
+	S_REBINDING
+};
+
+struct client_config {
+	struct option_data	defaults[256];
+	enum {
+		ACTION_DEFAULT,
+		ACTION_SUPERSEDE,
+		ACTION_PREPEND,
+		ACTION_APPEND
+	} default_actions[256];
+
+	struct option_data	 send_options[256];
+	u_int8_t		 required_options[256];
+	u_int8_t		 requested_options[256];
+	int			 requested_option_count;
+	time_t			 timeout;
+	time_t			 initial_interval;
+	time_t			 link_timeout;
+	time_t			 retry_interval;
+	time_t			 select_interval;
+	time_t			 reboot_timeout;
+	time_t			 backoff_cutoff;
+	struct string_list	*media;
+	char			*script_name;
+	enum { IGNORE, ACCEPT, PREFER }
+				 bootp_policy;
+	struct string_list	*medium;
+	struct iaddrlist	*reject_list;
+};
+
+struct client_state {
+	struct client_lease	 *active;
+	struct client_lease	 *new;
+	struct client_lease	 *offered_leases;
+	struct client_lease	 *leases;
+	struct client_lease	 *alias;
+	enum dhcp_state		  state;
+	struct iaddr		  destination;
+	u_int32_t		  xid;
+	u_int16_t		  secs;
+	time_t			  first_sending;
+	time_t			  interval;
+	struct string_list	 *medium;
+	struct dhcp_packet	  packet;
+	int			  packet_length;
+	struct iaddr		  requested_address;
+	char			**scriptEnv;
+	int			  scriptEnvsize;
+};
+
+struct interface_info {
+	struct hardware		 hw_address;
+	struct in_addr		 primary_address;
+	char			 name[IFNAMSIZ];
+	int			 rfdesc;
+	int			 wfdesc;
+	int			 ufdesc; /* unicast */
+	unsigned char		*rbuf;
+	size_t			 rbuf_max;
+	size_t			 rbuf_offset;
+	size_t			 rbuf_len;
+	struct ifreq		*ifp;
+	int			 noifmedia;
+	int			 errors;
+	u_int16_t		 index;
+};
+
+struct timeout {
+	struct timeout	*next;
+	time_t		 when;
+	void		 (*func)(void);
+};
+
+#define	_PATH_DHCLIENT_CONF	"/etc/dhclient.conf"
+#define	_PATH_DHCLIENT_DB	"/var/db/dhclient.leases"
+#define	_PATH_DHCLIENT_SCRIPT	"/sbin/dhclient-script"
+#define	DHCPD_LOG_FACILITY	LOG_DAEMON
+
+/* External definitions... */
+
+extern struct interface_info *ifi;
+extern struct client_state *client;
+extern struct client_config *config;
+
+/* options.c */
+int cons_options(unsigned char *, const int, struct option_data *);
+char *pretty_print_option(unsigned int, unsigned char *, int, int, int);
+void do_packet(int, unsigned int, struct iaddr, struct hardware *);
+
+/* errwarn.c */
+extern int warnings_occurred;
+void error(char *, ...) __attribute__((__format__(__printf__, 1, 2)));
+int warning(char *, ...) __attribute__((__format__(__printf__, 1, 2)));
+int note(char *, ...) __attribute__((__format__(__printf__, 1, 2)));
+int debug(char *, ...) __attribute__((__format__(__printf__, 1, 2)));
+int parse_warn(char *, ...) __attribute__((__format__(__printf__, 1, 2)));
+
+/* conflex.c */
+extern int lexline, lexchar;
+extern char *token_line, *tlname;
+void new_parse(char *);
+int next_token(char **, FILE *);
+int peek_token(char **, FILE *);
+
+/* parse.c */
+void skip_to_semi(FILE *);
+int parse_semi(FILE *);
+char *parse_string(FILE *);
+int parse_ip_addr(FILE *, struct iaddr *);
+void parse_hardware_param(FILE *, struct hardware *);
+void parse_lease_time(FILE *, time_t *);
+int parse_numeric_aggregate(FILE *, unsigned char *, int, int, int);
+void convert_num(unsigned char *, char *, int, int);
+time_t parse_date(FILE *);
+
+/* bpf.c */
+int if_register_bpf(void);
+void if_register_send(void);
+void if_register_receive(void);
+ssize_t send_packet(struct in_addr, struct sockaddr_in *, struct hardware *);
+ssize_t receive_packet(struct sockaddr_in *, struct hardware *);
+
+/* dispatch.c */
+void discover_interface(void);
+void reinitialize_interface(void);
+void dispatch(void);
+void got_one(void);
+void add_timeout(time_t, void (*)(void));
+void cancel_timeout(void (*)(void));
+int interface_link_status(char *);
+int interface_link_forceup(char *);
+void interface_link_forcedown(char *);
+
+/* tables.c */
+extern const struct option dhcp_options[256];
+
+/* convert.c */
+u_int32_t getULong(unsigned char *);
+int32_t getLong(unsigned char *);
+u_int16_t getUShort(unsigned char *);
+int16_t getShort(unsigned char *);
+void putULong(unsigned char *, u_int32_t);
+void putLong(unsigned char *, int32_t);
+void putUShort(unsigned char *, unsigned int);
+void putShort(unsigned char *, int);
+
+/* inet.c */
+struct iaddr subnet_number(struct iaddr, struct iaddr);
+struct iaddr broadcast_addr(struct iaddr, struct iaddr);
+int addr_eq(struct iaddr, struct iaddr);
+char *piaddr(struct iaddr);
+
+/* dhclient.c */
+extern char *path_dhclient_conf;
+extern char *path_dhclient_db;
+extern time_t cur_time;
+extern int log_perror;
+extern int routefd;
+
+void dhcpoffer(struct iaddr, struct option_data *);
+void dhcpack(struct iaddr, struct option_data *);
+void dhcpnak(struct iaddr, struct option_data *);
+
+void send_discover(void);
+void send_request(void);
+void send_decline(void);
+
+void state_reboot(void);
+void state_init(void);
+void state_selecting(void);
+void state_requesting(void);
+void state_bound(void);
+void state_panic(void);
+
+void bind_lease(void);
+
+void make_discover(struct client_lease *);
+void make_request(struct client_lease *);
+void make_decline(struct client_lease *);
+
+void free_client_lease(struct client_lease *);
+void rewrite_client_leases(void);
+void write_client_lease(struct client_lease *, int);
+
+void	 priv_script_init(char *, char *);
+void	 priv_script_write_params(char *, struct client_lease *);
+int	 priv_script_go(void);
+
+void script_init(char *, struct string_list *);
+void script_write_params(char *, struct client_lease *);
+int script_go(void);
+void client_envadd(const char *, const char *, const char *, ...);
+void script_set_env(const char *, const char *, const char *);
+void script_flush_env(void);
+int dhcp_option_ev_name(char *, size_t, const struct option *);
+
+struct client_lease *packet_to_lease(struct iaddr, struct option_data *);
+void go_daemon(void);
+void client_location_changed(void);
+
+void routehandler(void);
+
+/* packet.c */
+void assemble_hw_header(unsigned char *, int *, struct hardware *);
+void assemble_udp_ip_header(unsigned char *, int *, u_int32_t, u_int32_t,
+    unsigned int, unsigned char *, int);
+ssize_t decode_hw_header(unsigned char *, int, struct hardware *);
+ssize_t decode_udp_ip_header(unsigned char *, int, struct sockaddr_in *,
+    unsigned char *, int);
+
+/* clparse.c */
+int read_client_conf(void);
+void read_client_leases(void);
+void parse_client_statement(FILE *);
+int parse_X(FILE *, u_int8_t *, int);
+int parse_option_list(FILE *, u_int8_t *);
+void parse_interface_declaration(FILE *);
+void parse_client_lease_statement(FILE *, int);
+void parse_client_lease_declaration(FILE *, struct client_lease *);
+int parse_option_decl(FILE *, struct option_data *);
+void parse_string_list(FILE *, struct string_list **, int);
+void parse_reject_statement(FILE *);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+a2 1
+/*	$OpenBSD: dhcpd.h,v 1.33 2004/05/06 22:29:15 deraadt Exp $	*/
+d5 2
+a45 1
+
+a49 1
+#include <sys/un.h>
+a64 1
+#include <unistd.h>
+a73 1
+#include "tree.h"
+d78 5
+d84 1
+a84 1
+	int		 len;
+d90 1
+a90 1
+	char			*string;
+a102 12
+struct packet {
+	struct dhcp_packet	*raw;
+	int			 packet_length;
+	int			 packet_type;
+	int			 options_valid;
+	int			 client_port;
+	struct iaddr		 client_addr;
+	struct interface_info	*interface;
+	struct hardware		*haddr;
+	struct option_data	 options[256];
+};
+
+d147 1
+a175 1
+	struct client_config	 *config;
+a177 2
+	struct string_list	 *env;
+	int			  envc;
+a180 1
+	struct interface_info	*next;
+d186 1
+a191 1
+	struct client_state	*client;
+a193 1
+	int			 dead;
+d200 1
+a200 9
+	void		 (*func)(void *);
+	void		*what;
+};
+
+struct protocol {
+	struct protocol	*next;
+	int fd;
+	void (*handler)(struct protocol *);
+	void *local;
+a202 15
+#define DEFAULT_HASH_SIZE 97
+
+struct hash_bucket {
+	struct hash_bucket *next;
+	unsigned char *name;
+	int len;
+	unsigned char *value;
+};
+
+struct hash_table {
+	int hash_count;
+	struct hash_bucket *buckets[DEFAULT_HASH_SIZE];
+};
+
+/* Default path to dhcpd config file. */
+d205 1
+d208 1
+a208 2
+#define	MAX_TIME 0x7fffffff
+#define	MIN_TIME 0
+d210 3
+a212 1
+/* External definitions... */
+d215 3
+a217 6
+int cons_options(struct packet *, struct dhcp_packet *, int,
+    struct tree_cache **, int, int, int, u_int8_t *, int);
+char *pretty_print_option(unsigned int,
+    unsigned char *, int, int, int);
+void do_packet(struct interface_info *, struct dhcp_packet *,
+    int, unsigned int, struct iaddr, struct hardware *);
+d221 5
+a225 5
+void error(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+int warning(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+int note(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+int debug(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+int parse_warn(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+a229 3
+extern char comments[4096];
+extern int comment_index;
+extern int eol_token;
+d241 1
+a241 2
+unsigned char *parse_numeric_aggregate(FILE *, unsigned char *, int *,
+    int, int, int);
+a244 8
+/* tree.c */
+pair cons(caddr_t, pair);
+
+/* alloc.c */
+struct string_list	*new_string_list(size_t size);
+struct hash_table	*new_hash_table(int);
+struct hash_bucket	*new_hash_bucket(void);
+
+d246 5
+a250 7
+int if_register_bpf(struct interface_info *);
+void if_register_send(struct interface_info *);
+void if_register_receive(struct interface_info *);
+ssize_t send_packet(struct interface_info *, struct dhcp_packet *, size_t,
+    struct in_addr, struct sockaddr_in *, struct hardware *);
+ssize_t receive_packet(struct interface_info *, unsigned char *, size_t,
+    struct sockaddr_in *, struct hardware *);
+d253 2
+a254 4
+extern void (*bootp_packet_handler)(struct interface_info *,
+    struct dhcp_packet *, int, unsigned int, struct iaddr, struct hardware *);
+void discover_interfaces(struct interface_info *);
+void reinitialize_interfaces(void);
+d256 3
+a258 5
+void got_one(struct protocol *);
+void add_timeout(time_t, void (*)(void *), void *);
+void cancel_timeout(void (*)(void *), void *);
+void add_protocol(char *, int, void (*)(struct protocol *), void *);
+void remove_protocol(struct protocol *);
+d260 2
+a261 5
+
+/* hash.c */
+struct hash_table *new_hash(void);
+void add_hash(struct hash_table *, unsigned char *, int, unsigned char *);
+unsigned char *hash_lookup(struct hash_table *, unsigned char *, int);
+d264 1
+a264 6
+extern struct option dhcp_options[256];
+extern unsigned char dhcp_option_default_priority_list[];
+extern int sizeof_dhcp_option_default_priority_list;
+extern struct hash_table universe_hash;
+extern struct universe dhcp_universe;
+void initialize_universes(void);
+a285 1
+extern int log_priority;
+d287 1
+d289 20
+a308 22
+extern struct client_config top_level_config;
+
+void dhcpoffer(struct packet *);
+void dhcpack(struct packet *);
+void dhcpnak(struct packet *);
+
+void send_discover(void *);
+void send_request(void *);
+void send_decline(void *);
+
+void state_reboot(void *);
+void state_init(void *);
+void state_selecting(void *);
+void state_requesting(void *);
+void state_bound(void *);
+void state_panic(void *);
+
+void bind_lease(struct interface_info *);
+
+void make_discover(struct interface_info *, struct client_lease *);
+void make_request(struct interface_info *, struct client_lease *);
+void make_decline(struct interface_info *, struct client_lease *);
+d312 1
+a312 1
+void write_client_lease(struct interface_info *, struct client_lease *, int);
+d321 4
+a324 6
+void client_envadd(struct client_state *,
+    const char *, const char *, const char *, ...);
+void script_set_env(struct client_state *, const char *, const char *,
+    const char *);
+void script_flush_env(struct client_state *);
+int dhcp_option_ev_name(char *, size_t, struct option *);
+d326 1
+a326 1
+struct client_lease *packet_to_lease(struct packet *);
+d330 1
+a330 2
+void bootp(struct packet *);
+void dhcp(struct packet *);
+d333 1
+a333 2
+void assemble_hw_header(struct interface_info *, unsigned char *,
+    int *, struct hardware *);
+a339 6
+/* ethernet.c */
+void assemble_ethernet_header(struct interface_info *, unsigned char *,
+    int *, struct hardware *);
+ssize_t decode_ethernet_header(struct interface_info *, unsigned char *,
+    int, struct hardware *);
+
+d343 1
+a343 2
+void parse_client_statement(FILE *, struct interface_info *,
+    struct client_config *);
+d346 1
+a346 4
+void parse_interface_declaration(FILE *, struct client_config *);
+struct interface_info *interface_or_dummy(char *);
+void make_client_state(struct interface_info *);
+void make_client_config(struct interface_info *, struct client_config *);
+d348 2
+a349 3
+void parse_client_lease_declaration(FILE *, struct client_lease *,
+    struct interface_info **);
+struct option *parse_option_decl(FILE *, struct option_data *);
+d351 1
+a351 8
+void parse_reject_statement(FILE *, struct client_config *);
+
+/* privsep.c */
+struct buf	*buf_open(size_t);
+int		 buf_add(struct buf *, void *, size_t);
+int		 buf_close(int, struct buf *);
+ssize_t		 buf_read(int, void *, size_t);
+void		 dispatch_imsg(int);
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: dhcpd.h,v 1.45 2005/07/17 19:33:55 krw Exp $	*/
+d74 1
+a78 5
+struct option {
+	char *name;
+	char *format;
+};
+
+d80 1
+a80 1
+	unsigned int	 len;
+d86 1
+a86 1
+	char			string[1];	/* Actually bigger. */
+d186 2
+d223 14
+d248 4
+a251 2
+int cons_options(unsigned char *, const int, struct option_data *);
+char *pretty_print_option(unsigned int, unsigned char *, int, int, int);
+d266 3
+d280 2
+a281 1
+int parse_numeric_aggregate(FILE *, unsigned char *, int, int, int);
+d285 8
+d315 5
+d321 6
+a326 1
+extern const struct option dhcp_options[256];
+d348 1
+d390 1
+a390 1
+int dhcp_option_ev_name(char *, size_t, const struct option *);
+d428 1
+a428 1
+int parse_option_decl(FILE *, struct option_data *);
+@
+
+
+1.1.1.3
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: dhcpd.h,v 1.49 2006/08/29 03:55:09 deraadt Exp $	*/
+a158 1
+	time_t			 link_timeout;
+a287 2
+int interface_link_forceup(char *);
+void interface_link_forcedown(char *);
+d314 2
+d348 5
+a352 3
+void client_envadd(const char *, const char *, const char *, ...);
+void script_set_env(const char *, const char *, const char *);
+void script_flush_env(void);
+d380 2
+a381 1
+void parse_client_statement(FILE *);
+d384 4
+a387 1
+void parse_interface_declaration(FILE *);
+d393 8
+a400 1
+void parse_reject_statement(FILE *);
+@
+
+
+1.1.1.4
+log
+@Import spamd and dhclient from OpenBSD-current
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: dhcpd.h,v 1.64 2007/01/27 22:05:24 krw Exp $	*/
+d43 1
+d48 1
+d64 1
+d103 12
+d188 1
+d194 1
+a199 1
+	int			 ufdesc; /* unicast */
+d205 1
+d208 1
+d215 2
+a216 1
+	void		 (*func)(void);
+d219 8
+a228 1
+#define	_PATH_DHCLIENT_SCRIPT	"/sbin/dhclient-script"
+d231 3
+a235 4
+extern struct interface_info *ifi;
+extern struct client_state *client;
+extern struct client_config *config;
+
+d239 2
+a240 1
+void do_packet(int, unsigned int, struct iaddr, struct hardware *);
+d269 7
+a275 5
+int if_register_bpf(void);
+void if_register_send(void);
+void if_register_receive(void);
+ssize_t send_packet(struct in_addr, struct sockaddr_in *, struct hardware *);
+ssize_t receive_packet(struct sockaddr_in *, struct hardware *);
+d278 4
+a281 2
+void discover_interface(void);
+void reinitialize_interface(void);
+d283 5
+a287 3
+void got_one(void);
+void add_timeout(time_t, void (*)(void));
+void cancel_timeout(void (*)(void));
+a315 1
+extern int routefd;
+d317 20
+a336 20
+void dhcpoffer(struct iaddr, struct option_data *);
+void dhcpack(struct iaddr, struct option_data *);
+void dhcpnak(struct iaddr, struct option_data *);
+
+void send_discover(void);
+void send_request(void);
+void send_decline(void);
+
+void state_reboot(void);
+void state_init(void);
+void state_selecting(void);
+void state_requesting(void);
+void state_bound(void);
+void state_panic(void);
+
+void bind_lease(void);
+
+void make_discover(struct client_lease *);
+void make_request(struct client_lease *);
+void make_decline(struct client_lease *);
+d340 1
+a340 1
+void write_client_lease(struct client_lease *, int);
+d354 1
+a354 1
+struct client_lease *packet_to_lease(struct iaddr, struct option_data *);
+d358 2
+a359 1
+void routehandler(void);
+d362 2
+a363 1
+void assemble_hw_header(unsigned char *, int *, struct hardware *);
+d370 6
+d384 2
+a385 1
+void parse_client_lease_declaration(FILE *, struct client_lease *);
+@
+
+

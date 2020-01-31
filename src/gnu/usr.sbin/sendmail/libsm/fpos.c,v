@@ -1,0 +1,393 @@
+head	1.3;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.2.4.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.3
+	cvs-20101220:1.1.1.3
+	mbsd-20101220:1.1.1.2.0.4
+	cvs-201012191730:1.1.1.2
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.2
+	cvs-200805071200:1.1.1.2
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200803022030:1.1.1.2
+	cvs-200707152000:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200702051700:1.1.1.2
+	cvs-200609121900:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.2
+	cvs-200606151800:1.1.1.2
+	cvs-200603231300:1.1.1.2
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2014.06.09.15.17.25;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005395CFC65E5646F1;
+
+1.2
+date	2011.07.02.15.03.51;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E0F31C5496AB95F;
+
+1.1
+date	2005.02.05.17.24.23;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.23;	author tg;	state Exp;
+branches
+	1.1.1.1.2.1;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.03.23.13.09.32;	author tg;	state Exp;
+branches
+	1.1.1.2.4.1;
+next	1.1.1.3;
+commitid	10044229DEA33D36552;
+
+1.1.1.3
+date	2011.07.02.15.00.05;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.1.2.1
+date	2006.03.30.19.27.46;	author tg;	state Exp;
+branches;
+next	;
+commitid	100442C309C7183FA09;
+
+1.1.1.2.4.1
+date	2011.07.02.15.02.27;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.127.1
+date	2010.12.19.14.45.48;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2014.06.09.14.29.20;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@/*
+ * Copyright (c) 2000-2001, 2004 Proofpoint, Inc. and its suppliers.
+ *      All rights reserved.
+ * Copyright (c) 1990, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Chris Torek.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: fpos.c,v 1.40 2013-11-22 20:51:42 ca Exp $")
+#include <errno.h>
+#include <setjmp.h>
+#include <sm/time.h>
+#include <sm/heap.h>
+#include <sm/signal.h>
+#include <sm/clock.h>
+#include <sm/io.h>
+#include <sm/assert.h>
+#include "local.h"
+
+static void	tellalrm __P((int));
+static jmp_buf TellTimeOut;
+
+/*
+**  TELLALRM -- handler when timeout activated for sm_io_tell()
+**
+**  Returns flow of control to where setjmp(TellTimeOut) was set.
+**
+**	Parameters:
+**		sig -- unused
+**
+**	Returns:
+**		does not return
+**
+**	Side Effects:
+**		returns flow of control to setjmp(TellTimeOut).
+**
+**	NOTE:	THIS CAN BE CALLED FROM A SIGNAL HANDLER.  DO NOT ADD
+**		ANYTHING TO THIS ROUTINE UNLESS YOU KNOW WHAT YOU ARE
+**		DOING.
+*/
+
+/* ARGSUSED0 */
+static void
+tellalrm(sig)
+	int sig;
+{
+	longjmp(TellTimeOut, 1);
+}
+
+/*
+**  SM_IO_TELL -- position the file pointer
+**
+**	Paramters:
+**		fp -- the file pointer to get repositioned
+**		timeout -- time to complete the tell (milliseconds)
+**
+**	Returns:
+**		Success -- the repositioned location.
+**		Failure -- -1 (minus 1) and sets errno
+*/
+
+long
+sm_io_tell(fp, timeout)
+	register SM_FILE_T *fp;
+	int SM_NONVOLATILE timeout;
+{
+	register off_t pos;
+	SM_EVENT *evt = NULL;
+
+	SM_REQUIRE_ISA(fp, SmFileMagic);
+	if (fp->f_seek == NULL)
+	{
+		errno = ESPIPE;			/* historic practice */
+		return -1L;
+	}
+
+	if (timeout == SM_TIME_DEFAULT)
+		timeout = fp->f_timeout;
+	if (timeout == SM_TIME_IMMEDIATE)
+	{
+		/*
+		**  Filling the buffer will take time and we are wanted to
+		**  return immediately. So...
+		*/
+
+		errno = EAGAIN;
+		return -1L;
+	}
+
+	/*
+	**  Find offset of underlying I/O object, then adjust byte position
+	**  may adjust seek offset on append stream
+	*/
+
+	(void) sm_flush(fp, (int *) &timeout);
+
+	/* This is where we start the timeout */
+	if (timeout != SM_TIME_FOREVER)
+	{
+		if (setjmp(TellTimeOut) != 0)
+		{
+			errno = EAGAIN;
+			return -1L;
+		}
+
+		evt = sm_seteventm(timeout, tellalrm, 0);
+	}
+
+	if (fp->f_flags & SMOFF)
+		pos = fp->f_lseekoff;
+	else
+	{
+		/* XXX only set the timeout here? */
+		pos = (*fp->f_seek)(fp, (off_t) 0, SM_IO_SEEK_CUR);
+		if (pos == -1L)
+			goto clean;
+	}
+	if (fp->f_flags & SMRD)
+	{
+		/*
+		**  Reading.  Any unread characters (including
+		**  those from ungetc) cause the position to be
+		**  smaller than that in the underlying object.
+		*/
+
+		pos -= fp->f_r;
+		if (HASUB(fp))
+			pos -= fp->f_ur;
+	}
+	else if (fp->f_flags & SMWR && fp->f_p != NULL)
+	{
+		/*
+		**  Writing.  Any buffered characters cause the
+		**  position to be greater than that in the
+		**  underlying object.
+		*/
+
+		pos += fp->f_p - fp->f_bf.smb_base;
+	}
+
+clean:
+	/*  We're back. So undo our timeout and handler */
+	if (evt != NULL)
+		sm_clrevent(evt);
+	return pos;
+}
+@
+
+
+1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001, 2004 Sendmail, Inc. and its suppliers.
+d16 1
+a16 1
+SM_RCSID("@@(#)$Id: fpos.c,v 1.39 2005/06/14 23:07:20 ca Exp $")
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Sendmail: fpos.c,v 1.38 2004/08/03 20:17:38 ca Exp $")
+d19 1
+a19 1
+#include <sys/time.h>
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Id: fpos.c,v 1.39 2005/06/14 23:07:20 ca Exp $")
+d19 1
+a19 1
+#include <sm/time.h>
+@
+
+
+1.1.127.2
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001, 2004 Proofpoint, Inc. and its suppliers.
+d16 1
+a16 1
+SM_RCSID("@@(#)$Id: fpos.c,v 1.40 2013-11-22 20:51:42 ca Exp $")
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.1.2.1
+log
+@MFC most of the recent sendmail updates to MirOS #8-stable
+agreed bsiegert@@
+
+This also changes the LOCALBASE stuff, links libmilter not
+against LDAP, etc. but doesn't install the FreeBSD 6 confs
+nor a shared libmilter in order to pass a no-files-diff:
+
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo find / -ls | sort -k11 >~/x1
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo make install
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo make distribution
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo find / -ls | sort -k11 | diff -u ~/x1 - | less
+
+Note: files in /etc/mail/ are also changed, this affects the etc8.ngz set
+on fresh installs and cannot(!) be automatically upgraded!
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Sendmail: fpos.c,v 1.39 2005/06/14 23:07:20 ca Exp $")
+d19 1
+a19 1
+#include <sm/time.h>
+@
+
+
+1.1.1.2
+log
+@Update to Sendmail 8.13.6
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Sendmail: fpos.c,v 1.39 2005/06/14 23:07:20 ca Exp $")
+d19 1
+a19 1
+#include <sm/time.h>
+@
+
+
+1.1.1.2.4.1
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Id: fpos.c,v 1.39 2005/06/14 23:07:20 ca Exp $")
+@
+
+
+1.1.1.3
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Id: fpos.c,v 1.39 2005/06/14 23:07:20 ca Exp $")
+@
+
+

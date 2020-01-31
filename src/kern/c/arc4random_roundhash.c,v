@@ -1,0 +1,452 @@
+head	1.10;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.10
+date	2014.02.19.16.26.21;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1005304DB380BB534E4;
+
+1.9
+date	2014.01.11.18.12.14;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10052D1899715289045;
+
+1.8
+date	2014.01.08.19.05.02;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10052CDA167582E2B91;
+
+1.7
+date	2014.01.02.22.51.02;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10052C5ED114C2BC527;
+
+1.6
+date	2013.10.31.20.13.37;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1005272BA0A16AB8C9C;
+
+1.5
+date	2013.10.18.21.58.45;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1005261AEE3261F5825;
+
+1.4
+date	2012.05.18.21.07.58;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004FB6B9E14CFB6695;
+
+1.3
+date	2011.07.06.22.22.07;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004E14E010182825E7;
+
+1.2
+date	2011.04.27.21.45.52;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004DB88EA83163E2AE;
+
+1.1
+date	2010.09.12.17.10.49;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004C8D0939027D8BE7;
+
+
+desc
+@@
+
+
+1.10
+log
+@Theodore Ts'o reminded me to smear entropy across *all* of the pool; do it
+@
+text
+@/*-
+ * Copyright (c) 2010, 2011, 2012, 2013, 2014
+ *	Thorsten Glaser <tg@@mirbsd.org>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ */
+
+#include <libckern.h>
+#include <mirhash.h>
+
+__RCSID("$MirOS: src/kern/c/arc4random_roundhash.c,v 1.9 2014/01/11 18:12:14 tg Exp $");
+
+static void
+arc4random_roundhash_do(uint32_t pools[32], unsigned int pool,
+    const uint8_t *buf, size_t len)
+{
+	register uint32_t h;
+
+	--pool;
+	while (len--) {
+		pool = (pool + 1) & 31;
+		h = pools[pool];
+		BAFHUpdateOctet_reg(h, *buf++);
+		pools[pool] = h;
+	}
+}
+
+static void
+arc4random_roundhash_stir(uint32_t pools[32])
+{
+	register uint32_t h;
+	uint32_t irest, ilow3, ihigh, j;
+	union {
+		uint32_t dw[32];
+		uint8_t db[128];
+	} tmpa;
+	uint32_t tmpb[32];
+
+	for (irest = 0; irest < 32; ++irest) {
+		h = pools[irest];
+		BAFHFinish_reg(h);
+		tmpa.dw[irest] = h;
+	}
+
+	for (ihigh = 0; ihigh < 8; ihigh += 4)
+		for (irest = 0; irest < 4; ++irest)
+			for (ilow3 = 0; ilow3 < 4; ++ilow3) {
+				j = ((ihigh + irest) << 4) + ilow3;
+				h = tmpa.db[j] | (tmpa.db[j + 4] << 8) |
+				    (tmpa.db[j + 8] << 16) |
+				    (tmpa.db[j + 12] << 24);
+				BAFHFinish_reg(h);
+				pools[((ihigh + ilow3) << 2) + irest] = h;
+				tmpb[(irest << 3) + ilow3 + (ihigh ^ 4)] = h;
+			}
+
+	arc4random_roundhash_do(pools, 0, (void *)tmpb, 128);
+}
+
+void
+arc4random_roundhash(uint32_t pools[32], uint8_t *poolptr,
+    const void *buf_, size_t len)
+{
+	size_t n, pool;
+	const uint8_t *buf = (const uint8_t *)buf_;
+
+	pool = *poolptr;
+	goto chkpool;
+ loop:
+	n = 128 - pool;
+	if (len < n)
+		n = len;
+	arc4random_roundhash_do(pools, pool, buf, n);
+	buf += n;
+	len -= n;
+	pool += n;
+ chkpool:
+	if (pool > 127) {
+		arc4random_roundhash_stir(pools);
+		pool = 0;
+	}
+	if (len)
+		goto loop;
+	*poolptr = pool;
+}
+@
+
+
+1.9
+log
+@grml…
+@
+text
+@d22 1
+a22 1
+#include <nzat.h>
+d24 1
+a24 1
+__RCSID("$MirOS: src/kern/c/arc4random_roundhash.c,v 1.8 2014/01/08 19:05:02 tg Exp $");
+d26 3
+a28 3
+void
+arc4random_roundhash(uint32_t pools[32], uint8_t *poolptr,
+    const void *buf_, size_t len)
+a30 2
+	register unsigned int pool;
+	const uint8_t *buf = (const uint8_t *)buf_;
+d32 1
+a32 1
+	pool = *poolptr;
+d36 1
+a36 1
+		NZATUpdateByte(h, *buf++);
+a38 1
+	*poolptr = pool;
+d41 38
+a78 59
+#if 0
+ * TODO:
+ * mix the content after precisely 128 bytes have been roundhashed
+ * idea for an algorithm:
+ *
+ * register uint32_t h;
+ * uint32_t irest, ilow3, ihigh, j, i;
+ * union {
+ *	uint32_t dw[32];
+ *	uint8_t db[128];
+ * } tmpa;
+ * uint32_t tmpb[32];
+ * typeof(*poolptr) saved;
+ *
+ * saved = *poolptr;
+ * arc4random_roundhash(pools, poolptr, &saved, sizeof(saved)); //optional
+ * for (irest = 0; irest < 32; ++irest) { //using irest as counter coz register
+ *	h = pools[irest];
+ *	NZATMix(h);
+ *	tmpa.dw[irest] = h;
+ * }
+ * for (ihigh = 0; ihigh < 8; ihigh += 4)
+ *	for (irest = 0; irest < 4; ++irest)
+ *		for (ilow3 = 0; ilow3 < 4; ++ilow3) {
+ *			j = ((ihigh + irest) << 4) + ilow3;
+ *			h = make_dword(tmpa.db[j; j+4; j+8; j+12]);
+ * /* mix2 */		NZATMix(h);
+ *			pools[((ihigh + ilow3) << 2) + irest] = h;
+ *			tmpb[(irest << 3) + ilow3 + (ihigh ^ 4)] = h;
+ *		 }
+ * *poolptr = 0;
+ * arc4random_roundhash(pools, poolptr, tmpb, 128);
+ * *poolptr = saved;
+ *
+ * XXX check this against {{{
+
+			⎜               ⎜               ⎜               ⎜               ⎜               ⎜               ⎜               .
+	<--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><--><-->
+mix	 M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M
+yields	00000000000000001111111111111111222222222222222233333333333333334444444444444444555555555555555566666666666666667777777777777777
+(tmpa)	0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF
+swapb		\     /
+(inner loop)	/     \
+result	00000000000000001111111111111111222222222222222233333333333333334444444444444444555555555555555566666666666666667777777777777777
+(i.l.h)	048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF
+mix2	 M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M   M
+yields	00000000000000001111111111111111222222222222222233333333333333334444444444444444555555555555555566666666666666667777777777777777
+	0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF
++ copyto (tmpb?)
+	44444444444444440000000000000000555555555555555511111111111111116666666666666666222222222222222277777777777777773333333333333333
+	0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF01234567
++ also (pools?)			    \     /
+				    /     \
+	00001111222233330000111122223333000011112222333300001111222233334444555566667777444455556666777744445555666677774444555566667777
+	0123012301230123456745674567456789AB89AB89AB89ABCDEFCDEFCDEFCDEF0123012301230123456745674567456789AB89AB89AB89ABCDEFCDEFCDEFCDEF
+X roundhash with copy-from-above
+	45674567456745674567456745674567456745674567456745674567456745670123012301230123012301230123012301230123012301230123012301230123
+	0000111122223333444455556666777788889999AAAABBBBCCCCDDDDEEEEFFFF0000111122223333444455556666777788889999AAAABBBBCCCCDDDDEEEEFFFF
+⇒ directly usable hash states
+d80 19
+a98 2
+ * }}} XXX
+#endif
+@
+
+
+1.8
+log
+@unbreak compile, noticed by xenu.tk in IRC
+(for now)
+@
+text
+@d24 1
+a24 1
+__RCSID("$MirOS: src/kern/c/arc4random_roundhash.c,v 1.6 2013/10/31 20:13:37 tg Exp $");
+a44 1
+/*-
+a104 1
+ */
+@
+
+
+1.7
+log
+@• use Rĳndæl MixColumn for arc4random_roundhash avalanching;
+  suggested in http://crypto.stackexchange.com/questions/12145
+• add pure mksh™ implementation, too, while here (since it can
+  replace NZAATFinish even though NZATMix is slower, both are
+  bijective)
+@
+text
+@d44 1
+d107 1
+@
+
+
+1.6
+log
+@more notes; tbd *before* we can bump to 0AB5
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2010, 2011, 2012, 2013
+d24 1
+a24 1
+__RCSID("$MirOS: src/kern/c/arc4random_roundhash.c,v 1.5 2013/10/18 21:58:45 tg Exp $");
+d62 1
+a62 1
+ *	NZAATFinish(h);
+d70 1
+a70 1
+ *			NZAATFinish(h);
+d82 1
+a82 1
+finish	 F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F
+d84 3
+a86 4
+	0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF
+	12341234123412341234123412341234123412341234123412341234123412341234123412341234123412341234123412341234123412341234123412341234
+swab¹	    \     /
+	    /     \
+d88 2
+a89 2
+	048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF048C159D26AE37BF
+finish	 F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F   F
+d92 1
+a92 1
++ copyto
+d95 1
+a95 1
++ also				    \     /
+a103 5
+① although just swapping then running NZAATFinish() is very probably not
+  guaranteed to avalanche enough; just adding the four bytes will do, as
+  will adding three to the existing one (which gets a slightly different
+  outcome for the next mixing stage), or even four…
+
+@
+
+
+1.5
+log
+@add some notes on how to efficiently shuffle entropy in a roundhash pool
+(completely, and w/o pulling an external (cryptographic, and most likely
+expensive) hash algorithm, as we only need stirring w/ good avalanche)
+@
+text
+@d24 1
+a24 1
+__RCSID("$MirOS: src/kern/c/arc4random_roundhash.c,v 1.4 2012/05/18 21:07:58 tg Exp $");
+d86 1
+a86 1
+swab	    \     /
+d105 5
+@
+
+
+1.4
+log
+@optimisation: use int as “register-wide, fast” type (not register_t, as
+that’s a long on amd64 where int is faster) instead of the smallest one
+that matches the content (uint8_t) – tested on sparc and i386
+
+interestingly enough, it doesn’t change sparc but confuses the register
+allocator on i386 when you use
+	pool &= 31;
+	[…]
+	pools[pool++] = h;
+instead, so I didn’t do that, even if it looks more natural and was the
+reason I did those measurements in the first place…
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2010, 2011, 2012
+d24 1
+a24 1
+__RCSID("$MirOS: src/kern/c/arc4random_roundhash.c,v 1.3 2011/07/06 22:22:07 tg Exp $");
+d43 64
+@
+
+
+1.3
+log
+@replace uses of OAAT hash in all its variants by NZAT (mksh internal) or NZAAT (all others)
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2010, 2011
+d24 1
+a24 1
+__RCSID("$MirOS: src/kern/c/arc4random_roundhash.c,v 1.2 2011/04/27 21:45:52 tg Exp $");
+d31 1
+a31 1
+	register uint8_t pool;
+@
+
+
+1.2
+log
+@make arc4random_roundhash safe for _all_ values of poolptr
+@
+text
+@d22 1
+d24 1
+a24 1
+__RCSID("$MirOS: src/kern/c/arc4random_roundhash.c,v 1.1 2010/09/12 17:10:49 tg Exp $");
+d38 1
+a38 3
+		h += *buf++;
+		h += h << 10;
+		h ^= h >> 6;
+@
+
+
+1.1
+log
+@new implementation of arc4random(3) API (except arc4random_uniform(3),
+which though has been split off earlier today)
+
+deprecate arc4random_push arc4random_pushb arc4random_pushk
+in favour of arc4random_pushb_fast as well
+
+hide internal symbols from user with a version script (only some,
+until the next major bump)
+
+make deprecated functions into macros already
+
+switch some kernel code to use the new shared code already; rewrite
+of kernel arc4random(9) will come next/later
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2010
+d23 1
+a23 1
+__RCSID("$MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $");
+d35 1
+a40 1
+		pool = (pool + 1) & 31;
+@
+

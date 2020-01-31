@@ -1,0 +1,382 @@
+head	1.12;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.12
+date	2014.01.07.13.05.39;	author tg;	state dead;
+branches;
+next	1.11;
+commitid	10052CBFBBB38A00412;
+
+1.11
+date	2009.12.12.23.55.06;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1004B242D6D68BF7DEC;
+
+1.10
+date	2009.12.05.16.09.45;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004B1A85DB0D5CDD1C;
+
+1.9
+date	2009.12.05.00.36.43;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004B19AB1E12F619C7;
+
+1.8
+date	2008.11.10.02.11.03;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004917983F66211CDA;
+
+1.7
+date	2008.11.10.01.01.32;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100491788006A95FC65;
+
+1.6
+date	2008.11.10.00.36.00;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100491781E510F43EFA;
+
+1.5
+date	2008.11.09.23.16.27;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10049176F59103E57C3;
+
+1.4
+date	2008.11.09.19.40.03;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10049173CA12BD0EAC2;
+
+1.3
+date	2008.11.02.17.05.38;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100490DDDBF34EF580F;
+
+1.2
+date	2008.11.02.03.51.17;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100490D23B764094434;
+
+1.1
+date	2008.11.02.03.07.47;	author tg;	state Exp;
+branches;
+next	;
+commitid	100490D194917AD9139;
+
+
+desc
+@@
+
+
+1.12
+log
+@kill LLVM+Clang and llvm-gcc ports; see transcript of #MirBSD on Freenode of today for details
+if any, these may be resurrected build-depending on gcc… probably 4.8+, at least 4.7
+
+note: gcc 4.4 “bootstrap-only” port is almost finished, as preliminary stage
+(though we could choose 4.7 for that, too…)
+@
+text
+@# $MirOS: ports/lang/llvm/Makefile,v 1.11 2009/12/12 23:55:06 tg Exp $
+
+# may not be too hard to add more (Interix and OpenBSD gcc may be too old tho)
+ONLY_FOR_PLATFORM+=	MirBSD:10.163:*
+# untested
+ONLY_FOR_PLATFORM+=	Darwin:*:*
+ONLY_FOR_PLATFORM+=	MidnightBSD:*:*
+
+COMMENT=		Low Level Virtual Machine compiler infrastructure
+SVN_DISTREV=		90573
+CATEGORIES=		lang devel
+HOMEPAGE=		http://clang.llvm.org/
+
+# 3-clause BSD
+PERMIT_DISTFILES_CDROM=	Yes
+PERMIT_DISTFILES_FTP=	Yes
+PERMIT_PACKAGE_CDROM=	Yes
+PERMIT_PACKAGE_FTP=	Yes
+
+.include <mirports.sys.mk>
+
+SVN_DISTDIR=		llvm
+SVN_DISTPATH=		http://llvm.org/svn/llvm-project/llvm/trunk
+SVN_DISTDIR0=		llvm/tools/clang
+SVN_DISTREV0=		${SVN_DISTREV}
+SVN_DISTPATH0=		http://llvm.org/svn/llvm-project/cfe/trunk
+MCZ_FETCH=		lzma
+
+USE_CXX=		Yes
+USE_GMAKE=		Yes
+BUILD_DEPENDS+=		:bison-*:devel/bison
+BUILD_DEPENDS+=		:groff-*-!no_x11:textproc/groff
+LIB_DEPENDS+=		ffi::devel/libffi
+LIB_DEPENDS+=		ltdl::devel/libtool
+
+MODGNU_RECURSE_DIRS=	${WRKSRC}/autoconf
+AUTOGEN=		${SHELL} ${FILESDIR}/autogen.sh
+CONFIGURE_STYLE=	autogen
+AUTOCONF_NEW=		Yes
+AUTOMAKE_VERSION=	1.9
+MODSIMPLE_USE_INSTALL=	${INSTALL} -c
+CONFIGURE_ENV+=		ac_cv_path_GRAPHVIZ="echo Graphviz" \
+			ac_cv_path_DOT="echo dot" \
+			ac_cv_path_GV="echo gv" \
+			ac_cv_path_DOTTY="echo dotty" \
+			ac_cv_path_BZIP2= \
+			ac_cv_path_DOXYGEN= \
+			ac_cv_path_GROFF= \
+			ac_cv_path_ZIP= \
+			YACC="bison -y"
+CONFIGURE_ARGS+=	--enable-optimized \
+			--disable-assertions \
+			--disable-expensive-checks \
+			--enable-jit \
+			--disable-doxygen \
+			--enable-targets=all \
+			--disable-cbe-printf-a \
+			--enable-bindings=none \
+			--disable-ltdl-install \
+			${CONFIGURE_SHARED} \
+			--enable-static
+EXTRA_XAKE_FLAGS+=	VERBOSE=1 \
+			_CCLD=${_CCLD:Q} \
+			DISABLE_AUTO_DEPENDENCIES=1
+CPPFLAGS+=		-DLLVM_VERSION_INFO_SVN=\"r${SVN_DISTREV}-MirPorts-${DASH_VER}\"
+
+post-extract:
+	-rm -rf ${WRKSRC}/projects/sample
+
+pre-build:
+	# What the fuck?!
+	cd ${WRKBUILD} && rm -f mklib && ln -s libtool mklib
+
+post-install:
+	${INSTALL_DATA_DIR} ${PREFIX}/share/llvm/clang
+	cd ${WRKSRC}/tools/clang/tools && \
+	    pax -rw scan-{build,view} ${PREFIX}/share/llvm/clang/
+	cd ${WRKSRC}/tools/clang && \
+	    pax -rw utils ${PREFIX}/share/llvm/clang/
+	${INSTALL_DATA_DIR} ${PREFIX}/share/doc/llvm/clang-www
+	cd ${WRKSRC}/tools/clang/www && \
+	    pax -rw . ${PREFIX}/share/doc/llvm/clang-www/
+	# their pathfinding does not work, d'oh…
+	mv ${PREFIX}/libexec/clang-cc ${PREFIX}/bin/
+
+.include <bsd.port.mk>
+@
+
+
+1.11
+log
+@new ONLY_FOR_PLATFORM versioning
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/llvm/Makefile,v 1.10 2009/12/05 16:09:45 tg Exp $
+@
+
+
+1.10
+log
+@their pathfinding does not work, really
+@
+text
+@d1 7
+a7 1
+# $MirOS: ports/lang/llvm/Makefile,v 1.9 2009/12/05 00:36:43 tg Exp $
+a21 10
+.if ${OStype} == "MirBSD"
+.  if ${OSver:R} < 10
+IGNORE+=		"cannot be built: Operating System too old and unsupported"
+.  elif ${OSver:R} == 10
+.    if ${OSver:E} < 163
+IGNORE+=		"is not for you: You're not fit enough for that much disgusting C++ junk. Go away"
+.    endif
+.  endif
+.endif
+
+@
+
+
+1.9
+log
+@big scary llvm+clang update
+mksh 0 testsuite failures, but objfw still won't do…
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/llvm/Makefile,v 1.8 2008/11/10 02:11:03 tg Exp $
+a81 1
+	mv ${PREFIX}/share/llvm/clang/scan-build/scan-build ${PREFIX}/bin/
+@
+
+
+1.8
+log
+@these compilers are huge… let's provide LZMA distfiles, it's worth it here
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/llvm/Makefile,v 1.7 2008/11/10 01:01:32 tg Exp $
+d4 1
+a4 1
+SVN_DISTREV=		58935
+d37 1
+d67 1
+d80 5
+a84 8
+	cd ${WRKSRC}/tools/clang/utils && ${INSTALL_SCRIPT} scan-build \
+	    CheckBuiltinMacros.sh FindSpecRefs ccc ccc-analyzer ubiviz \
+	    ${PREFIX}/share/llvm/clang/
+	cd ${WRKSRC}/tools/clang/utils && ${INSTALL_DATA} scanview.css \
+	    sorttable.js ${PREFIX}/share/llvm/clang/
+	cd ${PREFIX}/bin && \
+	    ln -s ../share/llvm/clang/ccc . && \
+	    ln -s ../share/llvm/clang/scan-build .
+d88 2
+a89 5
+	chmod 0600 ${PREFIX}/bin/gcc{as,ld}
+	for file in ${PREFIX}/bin/gcc{as,ld}; do \
+		print ',g'${WRKINST:Q}'s///\nwq' | ed -s $$file; \
+	done
+	chmod ${BINMODE} ${PREFIX}/bin/gcc{as,ld}
+@
+
+
+1.7
+log
+@we need branding
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/llvm/Makefile,v 1.6 2008/11/10 00:36:00 tg Exp $
+d31 1
+@
+
+
+1.6
+log
+@MirBSD #10-stable and older #10-current are not up to the task, deny build
+via marking as IGNORE (for bulk builds)
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/llvm/Makefile,v 1.5 2008/11/09 23:16:27 tg Exp $
+d66 1
+@
+
+
+1.5
+log
+@prune some build paths (more to follow *sigh*)
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/llvm/Makefile,v 1.4 2008/11/09 19:40:03 tg Exp $
+d14 12
+@
+
+
+1.4
+log
+@experimental LLVM port
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/llvm/Makefile,v 1.3 2008/11/02 17:05:38 tg Exp $
+d75 5
+@
+
+
+1.3
+log
+@this, llvm port would look like when both are taken from svn
+⇒ still doesn’t work…
+
+Message-ID: <Pine.BSM.4.64L.0811021642240.31401@@herc.mirbsd.org>
+reported this upstream:
+
+llvm[4]: Compiling BasicConstraintManager.cpp for Release-Asserts build
+mpcxx -I/usr/ports/lang/llvm/w-llvm-58565-0/llvm/include -I/usr/ports/lang/llvm/w-llvm-58565-0/llvm/tools/clang/lib/Analysis  -DNDEBUG -I/usr/ports/lang/llvm/w-llvm-58565-0/llvm/tools/clang/lib/Analysis/../../include -D_GNU_SOURCE -D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS -O3  -fno-exceptions -fno-rtti -Woverloaded-virtual -pedantic -Wall -W -Wwrite-strings -Wno-long-long -Wunused -Wno-unused-parameter  -c BasicConstraintManager.cpp -o /usr/ports/lang/llvm/w-llvm-58565-0/llvm/tools/clang/lib/Analysis/Release-Asserts/BasicConstraintManager.o
+In file included from /usr/ports/lang/llvm/w-llvm-58565-0/llvm/tools/clang/lib/Analysis/../../include/clang/Analysis/PathSensitive/Store.h:18,
+                 from /usr/ports/lang/llvm/w-llvm-58565-0/llvm/tools/clang/lib/Analysis/../../include/clang/Analysis/PathSensitive/ConstraintManager.h:18,
+                 from BasicConstraintManager.cpp:15:
+/usr/ports/lang/llvm/w-llvm-58565-0/llvm/tools/clang/lib/Analysis/../../include/clang/Analysis/PathSensitive/MemRegion.h:246: error: base `clang::AnonTypedRegion' with only non-default constructor in class without a constructor
+gmake[4]: *** [/usr/ports/lang/llvm/w-llvm-58565-0/llvm/tools/clang/lib/Analysis/Release-Asserts/BasicConstraintManager.o] Error 1
+gmake[4]: Leaving directory `/usr/ports/lang/llvm/w-llvm-58565-0/llvm/tools/clang/lib/Analysis'
+@
+text
+@d1 1
+a1 3
+# $MirOS: ports/lang/llvm/Makefile,v 1.2 2008/11/02 03:51:17 tg Exp $
+
+BROKEN=			porting in progress
+d4 1
+a4 1
+SVN_DISTREV=		58565
+d23 1
+@
+
+
+1.2
+log
+@ha, or so I thought. fix this, ?= not =
+also, the variable name is just too freaking long
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/lang/llvm/Makefile,v 1.1 2008/11/02 03:07:47 tg Exp $
+d6 1
+a6 4
+DISTNAME=		llvm-2.4
+SVN_DISTDIR0=		llvm-clang
+SVN_DISTREV0=		58548
+PKGNAME=		llvm-2.4rc2-${DASH_VER}
+d16 4
+a19 1
+MASTER_SITES=		http://llvm.org/prereleases/2.4/
+a57 1
+	mv ${WRKDIR}/llvm-clang ${WRKSRC}/tools/clang
+@
+
+
+1.1
+log
+@this is as far as I, bugged by nosy ciruZ who wants me to do some ObjC,
+get for tonight. it is no fun, we need to find a clang version which fits
+better to llvm 2.4 than the one I picked up… or switch to llvm-current…
+
+… then too, this is a PITA to get compiled… I’m not any more too sure
+about all of this… C++--
+@
+text
+@d1 1
+a1 1
+# $MirOS$
+d32 1
+a32 1
+MODSIMPLE_given_INSTALL=${INSTALL} -c
+@
+

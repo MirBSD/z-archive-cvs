@@ -1,0 +1,246 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200910041320:1.1.1.4
+	cvs-200903221200:1.1.1.4
+	cvs-200812162015:1.1.1.4
+	cvs-200804031830:1.1.1.4
+	MIRBSD_10:1.1.1.4.0.2
+	MIRBSD_10_BASE:1.1.1.4
+	cvs-200803022030:1.1.1.4
+	cvs-200709131337:1.1.1.4
+	cvs-200709021830:1.1.1.4
+	cvs-200708201200:1.1.1.4
+	cvs-200706161500:1.1.1.4
+	cvs-200705192215:1.1.1.4
+	cvs-200704292000:1.1.1.4
+	cvs-200703080900:1.1.1.4
+	cvs-200701251600:1.1.1.4
+	cvs-200612111600:1.1.1.4
+	cvs-200611090230:1.1.1.4
+	OPENBSD_4_0:1.1.1.4
+	MIRBSD_9_BASE:1.1.1.3
+	cvs-200606162342:1.1.1.3
+	cvs-200606022000:1.1.1.3
+	cvs-200604191000:1.1.1.3
+	cvs-200602220045:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200512201942:1.1.1.2
+	cvs-200511231930:1.1.1.2
+	cvs-200507211800:1.1.1.1
+	cvs-200506221550:1.1.1.1
+	cvs-200505050030:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	cvs-200504261445:1.1.1.1
+	cvs-200504141900:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.02.05.17.29.52;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.52;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.11.23.19.34.14;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	116a4384c4467ffc;
+
+1.1.1.3
+date	2006.04.19.10.15.03;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	10044460DB21E1F715C;
+
+1.1.1.4
+date	2006.09.20.19.06.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045119150397FC669;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Copyright (c) 2000 Niels Provos.  All rights reserved.
+ * Copyright (c) 2001 Markus Friedl.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include "includes.h"
+RCSID("$OpenBSD: kexgex.c,v 1.23 2003/02/16 17:09:57 markus Exp $");
+
+#include <openssl/evp.h>
+
+#include "buffer.h"
+#include "bufaux.h"
+#include "kex.h"
+#include "ssh2.h"
+
+u_char *
+kexgex_hash(
+    char *client_version_string,
+    char *server_version_string,
+    char *ckexinit, int ckexinitlen,
+    char *skexinit, int skexinitlen,
+    u_char *serverhostkeyblob, int sbloblen,
+    int min, int wantbits, int max, BIGNUM *prime, BIGNUM *gen,
+    BIGNUM *client_dh_pub,
+    BIGNUM *server_dh_pub,
+    BIGNUM *shared_secret)
+{
+	Buffer b;
+	static u_char digest[EVP_MAX_MD_SIZE];
+	const EVP_MD *evp_md = EVP_sha1();
+	EVP_MD_CTX md;
+
+	buffer_init(&b);
+	buffer_put_cstring(&b, client_version_string);
+	buffer_put_cstring(&b, server_version_string);
+
+	/* kexinit messages: fake header: len+SSH2_MSG_KEXINIT */
+	buffer_put_int(&b, ckexinitlen+1);
+	buffer_put_char(&b, SSH2_MSG_KEXINIT);
+	buffer_append(&b, ckexinit, ckexinitlen);
+	buffer_put_int(&b, skexinitlen+1);
+	buffer_put_char(&b, SSH2_MSG_KEXINIT);
+	buffer_append(&b, skexinit, skexinitlen);
+
+	buffer_put_string(&b, serverhostkeyblob, sbloblen);
+	if (min == -1 || max == -1)
+		buffer_put_int(&b, wantbits);
+	else {
+		buffer_put_int(&b, min);
+		buffer_put_int(&b, wantbits);
+		buffer_put_int(&b, max);
+	}
+	buffer_put_bignum2(&b, prime);
+	buffer_put_bignum2(&b, gen);
+	buffer_put_bignum2(&b, client_dh_pub);
+	buffer_put_bignum2(&b, server_dh_pub);
+	buffer_put_bignum2(&b, shared_secret);
+
+#ifdef DEBUG_KEXDH
+	buffer_dump(&b);
+#endif
+	EVP_DigestInit(&md, evp_md);
+	EVP_DigestUpdate(&md, buffer_ptr(&b), buffer_len(&b));
+	EVP_DigestFinal(&md, digest, NULL);
+
+	buffer_free(&b);
+
+#ifdef DEBUG_KEXDH
+	dump_digest("hash", digest, EVP_MD_size(evp_md));
+#endif
+	return digest;
+}
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import current OpenSSH
+@
+text
+@d27 1
+a27 1
+RCSID("$OpenBSD: kexgex.c,v 1.24 2005/11/04 05:15:59 djm Exp $");
+d36 1
+a36 1
+void
+a37 1
+    const EVP_MD *evp_md,
+d46 1
+a46 2
+    BIGNUM *shared_secret,
+    u_char **hash, u_int *hashlen)
+d50 1
+a81 1
+
+d87 1
+a87 2
+	*hash = digest;
+	*hashlen = EVP_MD_size(evp_md);
+d89 1
+a89 1
+	dump_digest("hash", digest, *hashlen);
+d91 1
+@
+
+
+1.1.1.3
+log
+@I decided we'd better upgrade OpenSSH before releasing to the general public
+@
+text
+@a0 1
+/* $OpenBSD: kexgex.c,v 1.26 2006/03/25 13:17:02 djm Exp $ */
+d27 1
+@
+
+
+1.1.1.4
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: kexgex.c,v 1.27 2006/08/03 03:34:42 deraadt Exp $ */
+d27 1
+a27 1
+#include <sys/types.h>
+a29 1
+#include <signal.h>
+d32 1
+a32 2
+#include "key.h"
+#include "cipher.h"
+@
+
+

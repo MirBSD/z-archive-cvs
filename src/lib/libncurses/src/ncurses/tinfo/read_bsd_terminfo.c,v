@@ -1,0 +1,538 @@
+head	1.6;
+access;
+symbols
+	MIRBSD_10:1.5.0.2
+	MIRBSD_10_BASE:1.5
+	ncurses-devel:1.2.0.2;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2009.09.06.12.46.46;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004AA3AF394030A9CC;
+
+1.5
+date	2006.10.31.02.52.39;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004546B982741EB680;
+
+1.4
+date	2006.10.27.16.13.46;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10045423016752CB2FA;
+
+1.3
+date	2006.06.08.23.48.25;	author tg;	state dead;
+branches;
+next	1.2;
+commitid	1004488B5EE329FB78D;
+
+1.2
+date	2006.06.05.03.50.16;	author tg;	state Exp;
+branches
+	1.2.2.1;
+next	1.1;
+commitid	1004483A9F55F0789AE;
+
+1.1
+date	2006.06.05.03.27.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004483A4B55E576574;
+
+1.2.2.1
+date	2006.10.27.15.53.22;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045422B525E7FB757;
+
+
+desc
+@@
+
+
+1.6
+log
+@• let ncurses compile with __CRAZY=Yes
+• ensure RCS IDs are there ☺
+@
+text
+@/*	$OpenBSD: read_bsd_terminfo.c,v 1.14 2003/06/17 21:56:24 millert Exp $	*/
+
+/*
+ * Copyright (c) 2006, 2009 Thorsten Glaser <tg@@mirbsd.org>
+ * Copyright (c) 1998, 1999, 2000 Todd C. Miller <Todd.Miller@@courtesan.com>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * The following disclaimer must also be retained in all copies:
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ */
+
+#include <curses.priv.h>
+#include <tic.h>
+#include <term.h>	/* lines, columns, cur_term */
+#include <term_entry.h>
+
+__RCSID("$MirOS: src/lib/libncurses/src/ncurses/tinfo/read_bsd_terminfo.c,v 1.5 2006/10/31 02:52:39 tg Exp $");
+
+#ifndef _PATH_TERMINFO
+#define _PATH_TERMINFO	"/usr/share/misc/terminfo"
+#endif /* ! _PATH_TERMINFO */
+
+static char _path_terminfo[] = _PATH_TERMINFO;
+
+/* Function prototypes for private functions, */
+static int _nc_lookup_bsd_terminfo_entry(char *, char *, TERMTYPE * const);
+
+/*
+ * Look up ``tn'' in the BSD terminfo.db file and fill in ``tp''
+ * with the info we find there.
+ * Returns 1 on success, 0 on failure.
+ */
+int
+_nc_read_bsd_terminfo_entry(const char * const tn_, char * const filename,
+    TERMTYPE * const tp)
+{
+    char **fname, *p;
+    char   envterm[PATH_MAX];		/* local copy of $TERMINFO */
+    char   hometerm[PATH_MAX];		/* local copy of $HOME/.terminfo */
+    char  *pathvec[4];			/* list of possible terminfo files */
+    char  *tn;
+    size_t len;
+
+    if ((tn = strdup(tn_)) == NULL)
+	return (0);
+
+    fname = pathvec;
+    /* $TERMINFO may hold a path to a terminfo file */
+    if (use_terminfo_vars() && (p = getenv("TERMINFO")) != NULL) {
+	len = strlcpy(envterm, p, sizeof(envterm));
+	if (len < sizeof(envterm))
+	    *fname++ = envterm;
+    }
+
+    /* Also check $HOME/.terminfo if it exists */
+    if (use_terminfo_vars() && (p = getenv("HOME")) != NULL && *p != '\0') {
+	len = snprintf(hometerm, sizeof(hometerm), "%s/.terminfo", p);
+	if (len > 0 && len < sizeof(hometerm))
+	    *fname++ = hometerm;
+    }
+
+    /* Finally we check the system terminfo file */
+    *fname++ = _path_terminfo;
+    *fname = NULL;
+
+    /*
+     * Lookup ``tn'' in each possible terminfo file until
+     * we find it or reach the end.
+     */
+    for (fname = pathvec; *fname; fname++) {
+	if (_nc_lookup_bsd_terminfo_entry(tn, *fname, tp) == 1) {
+	    /* Set copyout parameter and return */
+	    (void)strlcpy(filename, *fname, PATH_MAX);
+	    free(tn);
+	    return (1);
+	}
+    }
+    free(tn);
+    return (0);
+}
+
+/*
+ * Given a path /path/to/terminfo/X/termname, look up termname
+ * /path/to/terminfo.db and fill in ``tp'' with the info we find there.
+ * Returns 1 on success, 0 on failure.
+ */
+int
+_nc_read_bsd_terminfo_file(const char * const filename, TERMTYPE * const tp)
+{
+    char path[PATH_MAX];		/* path to terminfo.db */
+    char *tname;			/* name of terminal to look up */
+    char *p;
+
+    (void)strlcpy(path, filename, sizeof(path));
+
+    /* Split filename into path and term name components. */
+    if ((tname = strrchr(path, '/')) == NULL)
+	return (0);
+    *tname++ = '\0';
+    if ((p = strrchr(path, '/')) == NULL)
+	return (0);
+    *p = '\0';
+
+    return (_nc_lookup_bsd_terminfo_entry(tname, path, tp));
+}
+
+/*
+ * Look up ``tn'' in the BSD terminfo file ``filename'' and fill in
+ * ``tp'' with the info we find there.
+ * Returns 1 on success, 0 on failure.
+ */
+static int
+_nc_lookup_bsd_terminfo_entry(char *tn, char *filename, TERMTYPE * const tp)
+{
+    char  *pathvec[2], *sfn;
+    char  *capbuf, *cptr, *infobuf, *iptr;
+    int    error;
+    size_t len;
+    ENTRY  thisentry;
+
+    if (asprintf(&sfn, "getcap(%s)", filename) == -1)
+	sfn = filename;
+
+    pathvec[0] = filename;
+    pathvec[1] = NULL;
+    capbuf = NULL;
+    infobuf = NULL;
+
+    _nc_set_source(sfn);		/* For useful error messages */
+
+    /* Don't prepend any hardcoded entries. */
+    (void) cgetset(NULL);
+
+    /* Lookup tn in 'filename' */
+    error = cgetent(&capbuf, pathvec, tn);
+    if (error == 0) {
+	/*
+	 * To make the terminfo parser happy we need to, as a minimum,
+	 * 1) convert ':' separators to ','
+	 * 2) add a newline after the name field
+	 * 3) add a newline at the end of the entry
+	 */
+
+	/* Add space for 2 extra newlines and the final NUL */
+	infobuf = malloc(strlen(capbuf) + 3);
+	if (infobuf == NULL) {
+	    error = TRUE;
+	    goto done;
+	}
+
+	/* Copy name and aliases, adding a newline. */
+	cptr = strchr(capbuf, ':');
+	if (cptr == NULL) {
+	    error = TRUE;
+	    goto done;
+	}
+	len = cptr - capbuf;
+	memcpy(infobuf, capbuf, len);
+	iptr = infobuf + len;
+	*iptr++ = ',';
+	*iptr++ = '\n';
+
+	/* Copy the rest of capbuf, converting ':' -> ',' */
+	for (++cptr; *cptr; ++cptr)
+		if ((*cptr == '\\') || (*cptr == '^')) {
+			*iptr++ = *cptr++;
+			if (!*cptr)
+				break;
+			*iptr++ = *cptr;
+		} else if (*cptr == ':')
+			*iptr++ = ',';
+		else
+			*iptr++ = *cptr;
+	*iptr++ = '\n';
+	*iptr = '\0';
+
+	_nc_reset_input(NULL, infobuf);
+	memset(&thisentry, 0, sizeof (thisentry));
+	if (_nc_parse_entry(&thisentry, FALSE, FALSE) == ERR) {
+		error = TRUE;
+		goto done;
+	}
+	*tp = thisentry.tterm;
+    }
+
+done:
+    if (capbuf)
+	free(capbuf);
+    if (infobuf)
+	free(infobuf);
+    cgetclose();
+
+    _nc_set_source("");
+    if (sfn != filename)
+	free(sfn);
+
+    return ((error == 0));
+}
+@
+
+
+1.5
+log
+@* cap_mkdb: if a comma is preceded by a backslash, we didn't covert it to a
+  colon with the last commit; however, while "\," is not a delimiter, "\\,"
+  is, and so is "^\," so re-write the conversion code
+* read_bsd_terminfo.c: handle escaped characters here too (the new cap_mkdb
+  ensures every other {,un}escapation not handled here is already done)
+* read_bsd_terminfo.c: while here, make path to terminfo configurable (hiya
+  Tom, this is for you), and add a sensible disclaimer
+* cap_mkdb: simplify the code and add more comments; compress terminfo recs
+  as well (like termcap ones); convert colons to \072 as per termcap(5) for
+  terminfo-format source files
+
+this fixes a total of 321 out of 1320 terminal descriptions we have
+
+(and I originally only wanted to check if our screen terminfo
+ description matches upstream's during an update… here I come)
+@
+text
+@a0 1
+/**	$MirOS: src/lib/libncurses/src/ncurses/tinfo/read_bsd_terminfo.c,v 1.4 2006/10/27 16:13:46 tg Exp $ */
+d4 1
+a4 1
+ * Copyright (c) 2006 Thorsten Glaser <tg@@mirbsd.de>
+d21 8
+a28 8
+ * Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+ * express, or implied, to the maximum extent permitted by applicable
+ * law, without malicious intent or gross negligence; in no event may
+ * licensor, an author or contributor be held liable for any indirect
+ * or other damage, or direct damage except proven a consequence of a
+ * direct error of said person and intended use of this work, loss or
+ * other issues arising in any way out of its use, even if advised of
+ * the possibility of such damage or existence of a defect.
+d36 1
+a36 1
+__RCSID("$MirOS: src/lib/libncurses/src/ncurses/tinfo/read_bsd_terminfo.c,v 1.4 2006/10/27 16:13:46 tg Exp $");
+d42 2
+d45 1
+a45 1
+static int _nc_lookup_bsd_terminfo_entry(const char *const, const char *const, TERMTYPE *);
+d53 2
+a54 4
+_nc_read_bsd_terminfo_entry(tn, filename, tp)
+    const char *const tn;
+    char *const filename;
+    TERMTYPE *const tp;
+d60 1
+d63 3
+d82 1
+a82 1
+    *fname++ = _PATH_TERMINFO;
+d93 1
+d97 1
+d107 1
+a107 3
+_nc_read_bsd_terminfo_file(filename, tp)
+    const char *const filename;
+    TERMTYPE *const tp;
+d132 1
+a132 4
+_nc_lookup_bsd_terminfo_entry(tn, filename, tp)
+    const char *const tn;
+    const char *const filename;
+    TERMTYPE *const tp;
+d141 1
+a141 1
+	sfn = (char *)filename;
+d143 1
+a143 1
+    pathvec[0] = (char *)filename;
+d154 1
+a154 1
+    error = cgetent(&capbuf, pathvec, (char *)tn);      
+@
+
+
+1.4
+log
+@resurrect branch
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libncurses/src/ncurses/tinfo/read_bsd_terminfo.c,v 1.2.2.1 2006/10/27 15:53:22 tg Exp $ */
+d19 11
+d37 1
+a37 1
+__RCSID("$MirOS: src/lib/libncurses/src/ncurses/tinfo/read_bsd_terminfo.c,v 1.2.2.1 2006/10/27 15:53:22 tg Exp $");
+d39 3
+a41 1
+#define	_PATH_TERMINFO	"/usr/share/misc/terminfo"
+d135 1
+a135 1
+    char  *capbuf, *cptr, *infobuf, *iptr, lastc;
+d183 10
+a192 8
+	for (++cptr, lastc = '\0'; *cptr; cptr++) {
+	    /* XXX - somewhat simplistic */
+	    if (*cptr == ':' && lastc != '\\')
+		*iptr++ = ',';
+	    else
+		*iptr++ = *cptr;
+	    lastc = *cptr;
+	}
+@
+
+
+1.3
+log
+@remove "new" libncurses:
+* libncurses can do about the same things as our current libcurses,
+  with about the same bugs regarding japanese character positions
+  and cursor positioning in an uxterm (and lynx width bugs)
+* libncurses cannot, however, make use of terminfo.db and neither
+  do I want to restrict it to termcap nor do we want the zillions
+  of files under /usr/share/terminfo like the clueless leenocksers
+  (except if we had reiserfs)
+* libncursesw suffers from the same limitations as libncurses
+* libncursesw does not correctly display any text in an uxterm
+  except for some links in lynx (but not ordinary text) - this
+  might have something to do with "fancy curses" though
+* libmenu has not yet been ported, is easy though
+* libpanel neither
+
+thus the developers decided it's not worth to continue
+investing work into it until these flaws are found and
+fixed
+
+furthermore, upgrading our curses is not easily possible,
+nor is it possible at all to get hands on a distfile of
+ncurses-5.2-20010224 so we can't diff against the vendor;
+thus millert@@openbsd.org is the only person who can solve
+this dilemma, I think
+@
+text
+@d1 1
+d5 1
+a20 6
+#if 0
+#ifndef lint
+static const char rcsid[] = "$OpenBSD: read_bsd_terminfo.c,v 1.14 2003/06/17 21:56:24 millert Exp $";
+#endif
+#endif
+
+d26 1
+a26 1
+__RCSID("$MirOS: src/lib/libncurses/src/ncurses/tinfo/read_bsd_terminfo.c,v 1.2 2006/06/05 03:50:16 tg Exp $");
+a27 1
+#ifdef WANT_BSD_TERMCAP_DB
+d121 1
+a121 1
+    char  *pathvec[2];
+d125 4
+d135 1
+a135 1
+    _nc_set_source(filename);		/* For useful error messages */
+d181 5
+a185 9
+	/*
+	 * Parse the terminfo entry; sets _nc_head as a side effect.
+	 * (_nc_head is actually a linked list but since we only parse
+	 *  a single entry we know there is only one entry in the list).
+	 */
+	_nc_read_entry_source(NULL, infobuf, FALSE, FALSE, NULLHOOK);
+	if (_nc_head == 0) {
+	    error = TRUE;
+	    goto done;
+d187 1
+a187 8
+
+	/*
+	 * Save term entry and prevent _nc_free_entries() from freeing
+	 * up the string table (since we use it in tp).
+	 */
+	*tp = _nc_head->tterm;
+	_nc_head->tterm.str_table = NULL;
+	_nc_free_entries(_nc_head);
+d197 4
+a202 1
+#endif
+@
+
+
+1.2
+log
+@disable terminfo.db code for now, it breaks something (sigsegv),
+and this code can work with termcap quite good
+@
+text
+@d30 1
+a30 1
+__RCSID("$MirOS: src/lib/libncurses/src/ncurses/tinfo/read_bsd_terminfo.c,v 1.1 2006/06/05 03:27:48 tg Exp $");
+@
+
+
+1.2.2.1
+log
+@resurrect; make build; unbreak; use only libncursesw (link it to libcurses, libncurses, libtermcap, libtermlib); sync with mirport; fix BSD terminfo.db code
+@
+text
+@a0 1
+/**	$MirOS$ */
+a3 1
+ * Copyright (c) 2006 Thorsten Glaser <tg@@mirbsd.de>
+d19 6
+d30 1
+a30 1
+__RCSID("$MirOS: src/lib/libncurses/src/ncurses/tinfo/read_bsd_terminfo.c,v 1.2 2006/06/05 03:50:16 tg Exp $");
+d32 1
+d126 1
+a126 1
+    char  *pathvec[2], *sfn;
+a129 4
+    ENTRY  thisentry;
+
+    if (asprintf(&sfn, "getcap(%s)", filename) == -1)
+	sfn = (char *)filename;
+d136 1
+a136 1
+    _nc_set_source(sfn);		/* For useful error messages */
+d182 9
+a190 5
+	_nc_reset_input(NULL, infobuf);
+	memset(&thisentry, 0, sizeof (thisentry));
+	if (_nc_parse_entry(&thisentry, FALSE, FALSE) == ERR) {
+		error = TRUE;
+		goto done;
+d192 8
+a199 1
+	*tp = thisentry.tterm;
+a208 4
+    _nc_set_source("");
+    if (sfn != filename)
+	free(sfn);
+
+d211 1
+@
+
+
+1.1
+log
+@* fix RCS IDs to use MirOS standard mechanism
+* add BSD terminfo.db reading code
+* fix includes, etc.
+@
+text
+@d30 1
+a30 1
+__RCSID("$MirOS$");
+d32 1
+d211 1
+@
+

@@ -1,0 +1,436 @@
+head	1.1;
+branch	1.1.107;
+access;
+symbols
+	png-1_2_57:1.1.107.7
+	png-1_2_50:1.1.107.6
+	png-1_2_35:1.1.107.5
+	png-1_2_32:1.1.107.4
+	png-1_2_26:1.1.107.3
+	png-1_2_25:1.1.107.3
+	MIRBSD_10:1.1.107.3.0.2
+	MIRBSD_10_BASE:1.1.107.3
+	png-1_2_18:1.1.107.3
+	png-1_2_12:1.1.107.2
+	MIRBSD_9_BASE:1.1.107.2
+	png-1_2_10:1.1.107.2
+	MIRBSD_8:1.1.107.1.0.2
+	MIRBSD_8_BASE:1.1.107.1
+	png-1_2_8:1.1.107.1
+	libpng:1.1.107;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.03.06.15.16.20;	author tg;	state Exp;
+branches
+	1.1.107.1;
+next	;
+
+1.1.107.1
+date	2005.03.06.15.16.20;	author tg;	state Exp;
+branches;
+next	1.1.107.2;
+
+1.1.107.2
+date	2006.06.09.00.13.07;	author tg;	state Exp;
+branches;
+next	1.1.107.3;
+commitid	1004488BD054F510AF1;
+
+1.1.107.3
+date	2007.05.22.20.25.37;	author tg;	state Exp;
+branches;
+next	1.1.107.4;
+commitid	100465351CF4103214A;
+
+1.1.107.4
+date	2008.10.22.18.55.39;	author tg;	state Exp;
+branches;
+next	1.1.107.5;
+commitid	10048FF773834003AB5;
+
+1.1.107.5
+date	2009.03.15.19.57.25;	author tg;	state Exp;
+branches;
+next	1.1.107.6;
+commitid	10049BD5DB90DBE42DE;
+
+1.1.107.6
+date	2013.08.06.17.35.02;	author tg;	state Exp;
+branches;
+next	1.1.107.7;
+commitid	100520133D730551D16;
+
+1.1.107.7
+date	2017.04.15.15.00.12;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F2359276DB0E16;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@
+/* pngrio.c - functions for data input
+ *
+ * libpng 1.2.8 - December 3, 2004
+ * For conditions of distribution and use, see copyright notice in png.h
+ * Copyright (c) 1998-2004 Glenn Randers-Pehrson
+ * (Version 0.96 Copyright (c) 1996, 1997 Andreas Dilger)
+ * (Version 0.88 Copyright (c) 1995, 1996 Guy Eric Schalnat, Group 42, Inc.)
+ *
+ * This file provides a location for all input.  Users who need
+ * special handling are expected to write a function that has the same
+ * arguments as this and performs a similar function, but that possibly
+ * has a different input method.  Note that you shouldn't change this
+ * function, but rather write a replacement function and then make
+ * libpng use it at run time with png_set_read_fn(...).
+ */
+
+#define PNG_INTERNAL
+#include "png.h"
+
+/* Read the data from whatever input you are using.  The default routine
+   reads from a file pointer.  Note that this routine sometimes gets called
+   with very small lengths, so you should implement some kind of simple
+   buffering if you are using unbuffered reads.  This should never be asked
+   to read more then 64K on a 16 bit machine. */
+void /* PRIVATE */
+png_read_data(png_structp png_ptr, png_bytep data, png_size_t length)
+{
+   png_debug1(4,"reading %d bytes\n", (int)length);
+   if (png_ptr->read_data_fn != NULL)
+      (*(png_ptr->read_data_fn))(png_ptr, data, length);
+   else
+      png_error(png_ptr, "Call to NULL read function");
+}
+
+#if !defined(PNG_NO_STDIO)
+/* This is the function that does the actual reading of data.  If you are
+   not reading from a standard C stream, you should create a replacement
+   read_data function and use it at run time with png_set_read_fn(), rather
+   than changing the library. */
+#ifndef USE_FAR_KEYWORD
+void PNGAPI
+png_default_read_data(png_structp png_ptr, png_bytep data, png_size_t length)
+{
+   png_size_t check;
+
+   /* fread() returns 0 on error, so it is OK to store this in a png_size_t
+    * instead of an int, which is what fread() actually returns.
+    */
+#if defined(_WIN32_WCE)
+   if ( !ReadFile((HANDLE)(png_ptr->io_ptr), data, length, &check, NULL) )
+      check = 0;
+#else
+   check = (png_size_t)fread(data, (png_size_t)1, length,
+      (png_FILE_p)png_ptr->io_ptr);
+#endif
+
+   if (check != length)
+      png_error(png_ptr, "Read Error");
+}
+#else
+/* this is the model-independent version. Since the standard I/O library
+   can't handle far buffers in the medium and small models, we have to copy
+   the data.
+*/
+
+#define NEAR_BUF_SIZE 1024
+#define MIN(a,b) (a <= b ? a : b)
+
+static void /* PRIVATE */
+png_default_read_data(png_structp png_ptr, png_bytep data, png_size_t length)
+{
+   int check;
+   png_byte *n_data;
+   png_FILE_p io_ptr;
+
+   /* Check if data really is near. If so, use usual code. */
+   n_data = (png_byte *)CVT_PTR_NOCHECK(data);
+   io_ptr = (png_FILE_p)CVT_PTR(png_ptr->io_ptr);
+   if ((png_bytep)n_data == data)
+   {
+#if defined(_WIN32_WCE)
+      if ( !ReadFile((HANDLE)(png_ptr->io_ptr), data, length, &check, NULL) )
+         check = 0;
+#else
+      check = fread(n_data, 1, length, io_ptr);
+#endif
+   }
+   else
+   {
+      png_byte buf[NEAR_BUF_SIZE];
+      png_size_t read, remaining, err;
+      check = 0;
+      remaining = length;
+      do
+      {
+         read = MIN(NEAR_BUF_SIZE, remaining);
+#if defined(_WIN32_WCE)
+         if ( !ReadFile((HANDLE)(io_ptr), buf, read, &err, NULL) )
+            err = 0;
+#else
+         err = fread(buf, (png_size_t)1, read, io_ptr);
+#endif
+         png_memcpy(data, buf, read); /* copy far buffer to near buffer */
+         if(err != read)
+            break;
+         else
+            check += err;
+         data += read;
+         remaining -= read;
+      }
+      while (remaining != 0);
+   }
+   if ((png_uint_32)check != (png_uint_32)length)
+      png_error(png_ptr, "read Error");
+}
+#endif
+#endif
+
+/* This function allows the application to supply a new input function
+   for libpng if standard C streams aren't being used.
+
+   This function takes as its arguments:
+   png_ptr      - pointer to a png input data structure
+   io_ptr       - pointer to user supplied structure containing info about
+                  the input functions.  May be NULL.
+   read_data_fn - pointer to a new input function that takes as its
+                  arguments a pointer to a png_struct, a pointer to
+                  a location where input data can be stored, and a 32-bit
+                  unsigned int that is the number of bytes to be read.
+                  To exit and output any fatal error messages the new write
+                  function should call png_error(png_ptr, "Error msg"). */
+void PNGAPI
+png_set_read_fn(png_structp png_ptr, png_voidp io_ptr,
+   png_rw_ptr read_data_fn)
+{
+   png_ptr->io_ptr = io_ptr;
+
+#if !defined(PNG_NO_STDIO)
+   if (read_data_fn != NULL)
+      png_ptr->read_data_fn = read_data_fn;
+   else
+      png_ptr->read_data_fn = png_default_read_data;
+#else
+   png_ptr->read_data_fn = read_data_fn;
+#endif
+
+   /* It is an error to write to a read device */
+   if (png_ptr->write_data_fn != NULL)
+   {
+      png_ptr->write_data_fn = NULL;
+      png_warning(png_ptr,
+         "It's an error to set both read_data_fn and write_data_fn in the ");
+      png_warning(png_ptr,
+         "same structure.  Resetting write_data_fn to NULL.");
+   }
+
+#if defined(PNG_WRITE_FLUSH_SUPPORTED)
+   png_ptr->output_flush_fn = NULL;
+#endif
+}
+@
+
+
+1.1.107.1
+log
+@libpng-1_2_8 with the following directories removed:
+- contrib
+- projects
+- scripts
+@
+text
+@@
+
+
+1.1.107.2
+log
+@there's a newer libpng out there
+@
+text
+@d4 1
+a4 1
+ * Last changed in libpng 1.2.9 April 14, 2006
+d6 1
+a6 1
+ * Copyright (c) 1998-2006 Glenn Randers-Pehrson
+a20 2
+#if defined(PNG_READ_SUPPORTED)
+
+d70 1
+a70 1
+static void PNGAPI
+a161 1
+#endif /* PNG_READ_SUPPORTED */
+@
+
+
+1.1.107.3
+log
+@Upgrade libpng (fixes some holes)
+@
+text
+@d4 1
+a4 1
+ * Last changed in libpng 1.2.13 November 13, 2006
+a48 1
+   if(png_ptr == NULL) return;
+a78 1
+   if(png_ptr == NULL) return;
+a138 1
+   if(png_ptr == NULL) return;
+@
+
+
+1.1.107.4
+log
+@SECURITY update of libpng to 1.2.32
+@
+text
+@d4 1
+a4 1
+ * Last changed in libpng 1.2.30 [August 15, 2008]
+d6 1
+a6 1
+ * Copyright (c) 1998-2008 Glenn Randers-Pehrson
+d20 1
+d31 1
+a31 1
+   png_debug1(4, "reading %d bytes\n", (int)length);
+d49 1
+a49 1
+   if (png_ptr == NULL) return;
+d80 1
+a80 1
+   if (png_ptr == NULL) return;
+d109 1
+a109 1
+         if (err != read)
+d141 1
+a141 1
+   if (png_ptr == NULL) return;
+@
+
+
+1.1.107.5
+log
+@libpng 1.2.35
+@
+text
+@d30 1
+a30 1
+   png_debug1(4, "reading %d bytes", (int)length);
+@
+
+
+1.1.107.6
+log
+@Update libpng in the base system, too
+@
+text
+@d4 3
+a6 2
+ * Last changed in libpng 1.2.43 [February 25, 2010]
+ * Copyright (c) 1998-2010 Glenn Randers-Pehrson
+a9 4
+ * This code is released under the libpng license.
+ * For conditions of distribution and use, see the disclaimer
+ * and license in png.h
+ *
+a18 1
+#define PNG_NO_PEDANTIC_WARNINGS
+d20 1
+a20 1
+#ifdef PNG_READ_SUPPORTED
+d23 4
+a26 5
+ * reads from a file pointer.  Note that this routine sometimes gets called
+ * with very small lengths, so you should implement some kind of simple
+ * buffering if you are using unbuffered reads.  This should never be asked
+ * to read more then 64K on a 16 bit machine.
+ */
+a30 1
+ 
+d37 1
+a37 1
+#ifdef PNG_STDIO_SUPPORTED
+d39 3
+a41 4
+ * not reading from a standard C stream, you should create a replacement
+ * read_data function and use it at run time with png_set_read_fn(), rather
+ * than changing the library.
+ */
+d48 1
+a48 2
+   if (png_ptr == NULL)
+      return;
+d52 1
+a52 1
+#ifdef _WIN32_WCE
+d64 1
+a64 1
+/* This is the model-independent version. Since the standard I/O library
+d79 1
+a79 2
+   if (png_ptr == NULL)
+      return;
+d85 2
+a86 3
+#ifdef _WIN32_WCE
+      if ( !ReadFile((HANDLE)(png_ptr->io_ptr), data, length, &check,
+          NULL) )
+d101 1
+a101 1
+#ifdef _WIN32_WCE
+d124 12
+a135 15
+ * for libpng if standard C streams aren't being used.
+ *
+ * This function takes as its arguments:
+ * png_ptr      - pointer to a png input data structure
+ * io_ptr       - pointer to user supplied structure containing info about
+ *                the input functions.  May be NULL.
+ * read_data_fn - pointer to a new input function that takes as its
+ *                arguments a pointer to a png_struct, a pointer to
+ *                a location where input data can be stored, and a 32-bit
+ *                unsigned int that is the number of bytes to be read.
+ *                To exit and output any fatal error messages the new write
+ *                function should call png_error(png_ptr, "Error msg").
+ *                May be NULL, in which case libpng's default function will
+ *                be used.
+ */
+d140 1
+a140 2
+   if (png_ptr == NULL)
+      return;
+d143 1
+a143 1
+#ifdef PNG_STDIO_SUPPORTED
+d162 1
+a162 1
+#ifdef PNG_WRITE_FLUSH_SUPPORTED
+@
+
+
+1.1.107.7
+log
+@update libpng
+@
+text
+@d4 1
+a4 1
+ * Copyright (c) 1998-2002,2004,2006-2010 Glenn Randers-Pehrson
+@
+
+

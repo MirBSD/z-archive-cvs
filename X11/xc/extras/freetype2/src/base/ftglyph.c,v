@@ -1,0 +1,1811 @@
+head	1.6;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.04.15.19.21.23;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.19.47.40;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520152445E05B912;
+
+1.4
+date	2008.06.12.20.54.30;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.04.52;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.24.42;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.07;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.27;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.39.02;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.43.07;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.03;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.36.57;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.23;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.06;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftglyph.c                                                              */
+/*                                                                         */
+/*    FreeType convenience functions to handle glyphs (body).              */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+  /*************************************************************************/
+  /*                                                                       */
+  /*  This file contains the definition of several convenience functions   */
+  /*  that can be used by client applications to easily retrieve glyph     */
+  /*  bitmaps and outlines from a given face.                              */
+  /*                                                                       */
+  /*  These functions should be optional if you are writing a font server  */
+  /*  or text layout engine on top of FreeType.  However, they are pretty  */
+  /*  handy for many other simple uses of the library.                     */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+
+#include FT_GLYPH_H
+#include FT_OUTLINE_H
+#include FT_BITMAP_H
+#include FT_INTERNAL_OBJECTS_H
+
+#include "basepic.h"
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_glyph
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /****                                                                 ****/
+  /****   FT_BitmapGlyph support                                        ****/
+  /****                                                                 ****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  FT_CALLBACK_DEF( FT_Error )
+  ft_bitmap_glyph_init( FT_Glyph      bitmap_glyph,
+                        FT_GlyphSlot  slot )
+  {
+    FT_BitmapGlyph  glyph   = (FT_BitmapGlyph)bitmap_glyph;
+    FT_Error        error   = FT_Err_Ok;
+    FT_Library      library = FT_GLYPH( glyph )->library;
+
+
+    if ( slot->format != FT_GLYPH_FORMAT_BITMAP )
+    {
+      error = FT_THROW( Invalid_Glyph_Format );
+      goto Exit;
+    }
+
+    glyph->left = slot->bitmap_left;
+    glyph->top  = slot->bitmap_top;
+
+    /* do lazy copying whenever possible */
+    if ( slot->internal->flags & FT_GLYPH_OWN_BITMAP )
+    {
+      glyph->bitmap = slot->bitmap;
+      slot->internal->flags &= ~FT_GLYPH_OWN_BITMAP;
+    }
+    else
+    {
+      FT_Bitmap_Init( &glyph->bitmap );
+      error = FT_Bitmap_Copy( library, &slot->bitmap, &glyph->bitmap );
+    }
+
+  Exit:
+    return error;
+  }
+
+
+  FT_CALLBACK_DEF( FT_Error )
+  ft_bitmap_glyph_copy( FT_Glyph  bitmap_source,
+                        FT_Glyph  bitmap_target )
+  {
+    FT_Library      library = bitmap_source->library;
+    FT_BitmapGlyph  source  = (FT_BitmapGlyph)bitmap_source;
+    FT_BitmapGlyph  target  = (FT_BitmapGlyph)bitmap_target;
+
+
+    target->left = source->left;
+    target->top  = source->top;
+
+    return FT_Bitmap_Copy( library, &source->bitmap, &target->bitmap );
+  }
+
+
+  FT_CALLBACK_DEF( void )
+  ft_bitmap_glyph_done( FT_Glyph  bitmap_glyph )
+  {
+    FT_BitmapGlyph  glyph   = (FT_BitmapGlyph)bitmap_glyph;
+    FT_Library      library = FT_GLYPH( glyph )->library;
+
+
+    FT_Bitmap_Done( library, &glyph->bitmap );
+  }
+
+
+  FT_CALLBACK_DEF( void )
+  ft_bitmap_glyph_bbox( FT_Glyph  bitmap_glyph,
+                        FT_BBox*  cbox )
+  {
+    FT_BitmapGlyph  glyph = (FT_BitmapGlyph)bitmap_glyph;
+
+
+    cbox->xMin = glyph->left * 64;
+    cbox->xMax = cbox->xMin + (FT_Pos)( glyph->bitmap.width * 64 );
+    cbox->yMax = glyph->top * 64;
+    cbox->yMin = cbox->yMax - (FT_Pos)( glyph->bitmap.rows * 64 );
+  }
+
+
+  FT_DEFINE_GLYPH(
+    ft_bitmap_glyph_class,
+
+    sizeof ( FT_BitmapGlyphRec ),
+    FT_GLYPH_FORMAT_BITMAP,
+
+    ft_bitmap_glyph_init,    /* FT_Glyph_InitFunc       glyph_init      */
+    ft_bitmap_glyph_done,    /* FT_Glyph_DoneFunc       glyph_done      */
+    ft_bitmap_glyph_copy,    /* FT_Glyph_CopyFunc       glyph_copy      */
+    NULL,                    /* FT_Glyph_TransformFunc  glyph_transform */
+    ft_bitmap_glyph_bbox,    /* FT_Glyph_GetBBoxFunc    glyph_bbox      */
+    NULL                     /* FT_Glyph_PrepareFunc    glyph_prepare   */
+  )
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /****                                                                 ****/
+  /****   FT_OutlineGlyph support                                       ****/
+  /****                                                                 ****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  FT_CALLBACK_DEF( FT_Error )
+  ft_outline_glyph_init( FT_Glyph      outline_glyph,
+                         FT_GlyphSlot  slot )
+  {
+    FT_OutlineGlyph  glyph   = (FT_OutlineGlyph)outline_glyph;
+    FT_Error         error   = FT_Err_Ok;
+    FT_Library       library = FT_GLYPH( glyph )->library;
+    FT_Outline*      source  = &slot->outline;
+    FT_Outline*      target  = &glyph->outline;
+
+
+    /* check format in glyph slot */
+    if ( slot->format != FT_GLYPH_FORMAT_OUTLINE )
+    {
+      error = FT_THROW( Invalid_Glyph_Format );
+      goto Exit;
+    }
+
+    /* allocate new outline */
+    error = FT_Outline_New( library,
+                            (FT_UInt)source->n_points,
+                            source->n_contours,
+                            &glyph->outline );
+    if ( error )
+      goto Exit;
+
+    FT_Outline_Copy( source, target );
+
+  Exit:
+    return error;
+  }
+
+
+  FT_CALLBACK_DEF( void )
+  ft_outline_glyph_done( FT_Glyph  outline_glyph )
+  {
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+    FT_Outline_Done( FT_GLYPH( glyph )->library, &glyph->outline );
+  }
+
+
+  FT_CALLBACK_DEF( FT_Error )
+  ft_outline_glyph_copy( FT_Glyph  outline_source,
+                         FT_Glyph  outline_target )
+  {
+    FT_OutlineGlyph  source  = (FT_OutlineGlyph)outline_source;
+    FT_OutlineGlyph  target  = (FT_OutlineGlyph)outline_target;
+    FT_Error         error;
+    FT_Library       library = FT_GLYPH( source )->library;
+
+
+    error = FT_Outline_New( library,
+                            (FT_UInt)source->outline.n_points,
+                            source->outline.n_contours,
+                            &target->outline );
+    if ( !error )
+      FT_Outline_Copy( &source->outline, &target->outline );
+
+    return error;
+  }
+
+
+  FT_CALLBACK_DEF( void )
+  ft_outline_glyph_transform( FT_Glyph          outline_glyph,
+                              const FT_Matrix*  matrix,
+                              const FT_Vector*  delta )
+  {
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+    if ( matrix )
+      FT_Outline_Transform( &glyph->outline, matrix );
+
+    if ( delta )
+      FT_Outline_Translate( &glyph->outline, delta->x, delta->y );
+  }
+
+
+  FT_CALLBACK_DEF( void )
+  ft_outline_glyph_bbox( FT_Glyph  outline_glyph,
+                         FT_BBox*  bbox )
+  {
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+    FT_Outline_Get_CBox( &glyph->outline, bbox );
+  }
+
+
+  FT_CALLBACK_DEF( FT_Error )
+  ft_outline_glyph_prepare( FT_Glyph      outline_glyph,
+                            FT_GlyphSlot  slot )
+  {
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+    slot->format         = FT_GLYPH_FORMAT_OUTLINE;
+    slot->outline        = glyph->outline;
+    slot->outline.flags &= ~FT_OUTLINE_OWNER;
+
+    return FT_Err_Ok;
+  }
+
+
+  FT_DEFINE_GLYPH(
+    ft_outline_glyph_class,
+
+    sizeof ( FT_OutlineGlyphRec ),
+    FT_GLYPH_FORMAT_OUTLINE,
+
+    ft_outline_glyph_init,      /* FT_Glyph_InitFunc       glyph_init      */
+    ft_outline_glyph_done,      /* FT_Glyph_DoneFunc       glyph_done      */
+    ft_outline_glyph_copy,      /* FT_Glyph_CopyFunc       glyph_copy      */
+    ft_outline_glyph_transform, /* FT_Glyph_TransformFunc  glyph_transform */
+    ft_outline_glyph_bbox,      /* FT_Glyph_GetBBoxFunc    glyph_bbox      */
+    ft_outline_glyph_prepare    /* FT_Glyph_PrepareFunc    glyph_prepare   */
+  )
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /****                                                                 ****/
+  /****   FT_Glyph class and API                                        ****/
+  /****                                                                 ****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+   static FT_Error
+   ft_new_glyph( FT_Library             library,
+                 const FT_Glyph_Class*  clazz,
+                 FT_Glyph*              aglyph )
+   {
+     FT_Memory  memory = library->memory;
+     FT_Error   error;
+     FT_Glyph   glyph  = NULL;
+
+
+     *aglyph = NULL;
+
+     if ( !FT_ALLOC( glyph, clazz->glyph_size ) )
+     {
+       glyph->library = library;
+       glyph->clazz   = clazz;
+       glyph->format  = clazz->glyph_format;
+
+       *aglyph = glyph;
+     }
+
+     return error;
+   }
+
+
+  /* documentation is in ftglyph.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_Glyph_Copy( FT_Glyph   source,
+                 FT_Glyph  *target )
+  {
+    FT_Glyph               copy;
+    FT_Error               error;
+    const FT_Glyph_Class*  clazz;
+
+
+    /* check arguments */
+    if ( !target || !source || !source->clazz )
+    {
+      error = FT_THROW( Invalid_Argument );
+      goto Exit;
+    }
+
+    *target = NULL;
+
+    if ( !source || !source->clazz )
+    {
+      error = FT_THROW( Invalid_Argument );
+      goto Exit;
+    }
+
+    clazz = source->clazz;
+    error = ft_new_glyph( source->library, clazz, &copy );
+    if ( error )
+      goto Exit;
+
+    copy->advance = source->advance;
+    copy->format  = source->format;
+
+    if ( clazz->glyph_copy )
+      error = clazz->glyph_copy( source, copy );
+
+    if ( error )
+      FT_Done_Glyph( copy );
+    else
+      *target = copy;
+
+  Exit:
+    return error;
+  }
+
+
+  /* documentation is in ftglyph.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_Get_Glyph( FT_GlyphSlot  slot,
+                FT_Glyph     *aglyph )
+  {
+    FT_Library  library;
+    FT_Error    error;
+    FT_Glyph    glyph;
+
+    const FT_Glyph_Class*  clazz = NULL;
+
+
+    if ( !slot )
+      return FT_THROW( Invalid_Slot_Handle );
+
+    library = slot->library;
+
+    if ( !aglyph )
+      return FT_THROW( Invalid_Argument );
+
+    /* if it is a bitmap, that's easy :-) */
+    if ( slot->format == FT_GLYPH_FORMAT_BITMAP )
+      clazz = FT_BITMAP_GLYPH_CLASS_GET;
+
+    /* if it is an outline */
+    else if ( slot->format == FT_GLYPH_FORMAT_OUTLINE )
+      clazz = FT_OUTLINE_GLYPH_CLASS_GET;
+
+    else
+    {
+      /* try to find a renderer that supports the glyph image format */
+      FT_Renderer  render = FT_Lookup_Renderer( library, slot->format, 0 );
+
+
+      if ( render )
+        clazz = &render->glyph_class;
+    }
+
+    if ( !clazz )
+    {
+      error = FT_THROW( Invalid_Glyph_Format );
+      goto Exit;
+    }
+
+    /* create FT_Glyph object */
+    error = ft_new_glyph( library, clazz, &glyph );
+    if ( error )
+      goto Exit;
+
+    /* copy advance while converting 26.6 to 16.16 format */
+    glyph->advance.x = slot->advance.x * 1024;
+    glyph->advance.y = slot->advance.y * 1024;
+
+    /* now import the image from the glyph slot */
+    error = clazz->glyph_init( glyph, slot );
+
+    /* if an error occurred, destroy the glyph */
+    if ( error )
+      FT_Done_Glyph( glyph );
+    else
+      *aglyph = glyph;
+
+  Exit:
+    return error;
+  }
+
+
+  /* documentation is in ftglyph.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_Glyph_Transform( FT_Glyph    glyph,
+                      FT_Matrix*  matrix,
+                      FT_Vector*  delta )
+  {
+    FT_Error  error = FT_Err_Ok;
+
+
+    if ( !glyph || !glyph->clazz )
+      error = FT_THROW( Invalid_Argument );
+    else
+    {
+      const FT_Glyph_Class*  clazz = glyph->clazz;
+
+
+      if ( clazz->glyph_transform )
+      {
+        /* transform glyph image */
+        clazz->glyph_transform( glyph, matrix, delta );
+
+        /* transform advance vector */
+        if ( matrix )
+          FT_Vector_Transform( &glyph->advance, matrix );
+      }
+      else
+        error = FT_THROW( Invalid_Glyph_Format );
+    }
+    return error;
+  }
+
+
+  /* documentation is in ftglyph.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Glyph_Get_CBox( FT_Glyph  glyph,
+                     FT_UInt   bbox_mode,
+                     FT_BBox  *acbox )
+  {
+    const FT_Glyph_Class*  clazz;
+
+
+    if ( !acbox )
+      return;
+
+    acbox->xMin = acbox->yMin = acbox->xMax = acbox->yMax = 0;
+
+    if ( !glyph || !glyph->clazz )
+      return;
+
+    clazz = glyph->clazz;
+    if ( !clazz->glyph_bbox )
+      return;
+
+    /* retrieve bbox in 26.6 coordinates */
+    clazz->glyph_bbox( glyph, acbox );
+
+    /* perform grid fitting if needed */
+    if ( bbox_mode == FT_GLYPH_BBOX_GRIDFIT ||
+         bbox_mode == FT_GLYPH_BBOX_PIXELS  )
+    {
+      acbox->xMin = FT_PIX_FLOOR( acbox->xMin );
+      acbox->yMin = FT_PIX_FLOOR( acbox->yMin );
+      acbox->xMax = FT_PIX_CEIL( acbox->xMax );
+      acbox->yMax = FT_PIX_CEIL( acbox->yMax );
+    }
+
+    /* convert to integer pixels if needed */
+    if ( bbox_mode == FT_GLYPH_BBOX_TRUNCATE ||
+         bbox_mode == FT_GLYPH_BBOX_PIXELS   )
+    {
+      acbox->xMin >>= 6;
+      acbox->yMin >>= 6;
+      acbox->xMax >>= 6;
+      acbox->yMax >>= 6;
+    }
+  }
+
+
+  /* documentation is in ftglyph.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_Glyph_To_Bitmap( FT_Glyph*       the_glyph,
+                      FT_Render_Mode  render_mode,
+                      FT_Vector*      origin,
+                      FT_Bool         destroy )
+  {
+    FT_GlyphSlotRec           dummy;
+    FT_GlyphSlot_InternalRec  dummy_internal;
+    FT_Error                  error = FT_Err_Ok;
+    FT_Glyph                  b, glyph;
+    FT_BitmapGlyph            bitmap = NULL;
+    const FT_Glyph_Class*     clazz;
+
+    /* FT_BITMAP_GLYPH_CLASS_GET dereferences `library' in PIC mode */
+    FT_Library                library;
+
+
+    /* check argument */
+    if ( !the_glyph )
+      goto Bad;
+    glyph = *the_glyph;
+    if ( !glyph )
+      goto Bad;
+
+    clazz   = glyph->clazz;
+    library = glyph->library;
+    if ( !library || !clazz )
+      goto Bad;
+
+    /* when called with a bitmap glyph, do nothing and return successfully */
+    if ( clazz == FT_BITMAP_GLYPH_CLASS_GET )
+      goto Exit;
+
+    if ( !clazz->glyph_prepare )
+      goto Bad;
+
+    /* we render the glyph into a glyph bitmap using a `dummy' glyph slot */
+    /* then calling FT_Render_Glyph_Internal()                            */
+
+    FT_ZERO( &dummy );
+    FT_ZERO( &dummy_internal );
+    dummy.internal = &dummy_internal;
+    dummy.library  = library;
+    dummy.format   = clazz->glyph_format;
+
+    /* create result bitmap glyph */
+    error = ft_new_glyph( library, FT_BITMAP_GLYPH_CLASS_GET, &b );
+    if ( error )
+      goto Exit;
+    bitmap = (FT_BitmapGlyph)b;
+
+#if 1
+    /* if `origin' is set, translate the glyph image */
+    if ( origin )
+      FT_Glyph_Transform( glyph, 0, origin );
+#else
+    FT_UNUSED( origin );
+#endif
+
+    /* prepare dummy slot for rendering */
+    error = clazz->glyph_prepare( glyph, &dummy );
+    if ( !error )
+      error = FT_Render_Glyph_Internal( glyph->library, &dummy, render_mode );
+
+#if 1
+    if ( !destroy && origin )
+    {
+      FT_Vector  v;
+
+
+      v.x = -origin->x;
+      v.y = -origin->y;
+      FT_Glyph_Transform( glyph, 0, &v );
+    }
+#endif
+
+    if ( error )
+      goto Exit;
+
+    /* in case of success, copy the bitmap to the glyph bitmap */
+    error = ft_bitmap_glyph_init( (FT_Glyph)bitmap, &dummy );
+    if ( error )
+      goto Exit;
+
+    /* copy advance */
+    bitmap->root.advance = glyph->advance;
+
+    if ( destroy )
+      FT_Done_Glyph( glyph );
+
+    *the_glyph = FT_GLYPH( bitmap );
+
+  Exit:
+    if ( error && bitmap )
+      FT_Done_Glyph( FT_GLYPH( bitmap ) );
+
+    return error;
+
+  Bad:
+    error = FT_THROW( Invalid_Argument );
+    goto Exit;
+  }
+
+
+  /* documentation is in ftglyph.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Done_Glyph( FT_Glyph  glyph )
+  {
+    if ( glyph )
+    {
+      FT_Memory              memory = glyph->library->memory;
+      const FT_Glyph_Class*  clazz  = glyph->clazz;
+
+
+      if ( clazz->glyph_done )
+        clazz->glyph_done( glyph );
+
+      FT_FREE( glyph );
+    }
+  }
+
+
+/* END */
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2007, 2008 by             */
+d32 2
+d70 1
+a70 1
+      error = FT_Err_Invalid_Glyph_Format;
+d85 1
+a85 1
+      FT_Bitmap_New( &glyph->bitmap );
+d128 4
+a131 4
+    cbox->xMin = glyph->left << 6;
+    cbox->xMax = cbox->xMin + ( glyph->bitmap.width << 6 );
+    cbox->yMax = glyph->top << 6;
+    cbox->yMin = cbox->yMax - ( glyph->bitmap.rows << 6 );
+d135 3
+a137 1
+  FT_DEFINE_GLYPH(ft_bitmap_glyph_class,
+d141 6
+a146 6
+    ft_bitmap_glyph_init,
+    ft_bitmap_glyph_done,
+    ft_bitmap_glyph_copy,
+    0,                          /* FT_Glyph_TransformFunc */
+    ft_bitmap_glyph_bbox,
+    0                           /* FT_Glyph_PrepareFunc   */
+d173 1
+a173 1
+      error = FT_Err_Invalid_Glyph_Format;
+d178 3
+a180 1
+    error = FT_Outline_New( library, source->n_points, source->n_contours,
+d212 4
+a215 2
+    error = FT_Outline_New( library, source->outline.n_points,
+                            source->outline.n_contours, &target->outline );
+d265 3
+a267 1
+  FT_DEFINE_GLYPH( ft_outline_glyph_class, 
+d271 6
+a276 6
+    ft_outline_glyph_init,
+    ft_outline_glyph_done,
+    ft_outline_glyph_copy,
+    ft_outline_glyph_transform,
+    ft_outline_glyph_bbox,
+    ft_outline_glyph_prepare
+d295 1
+a295 1
+     FT_Glyph   glyph;
+d298 1
+a298 1
+     *aglyph = 0;
+d325 1
+a325 1
+    if ( !target )
+d327 1
+a327 1
+      error = FT_Err_Invalid_Argument;
+d331 1
+a331 1
+    *target = 0;
+d335 1
+a335 1
+      error = FT_Err_Invalid_Argument;
+d370 1
+a370 1
+    const FT_Glyph_Class*  clazz = 0;
+d374 1
+a374 1
+      return FT_Err_Invalid_Slot_Handle;
+d379 1
+a379 1
+      return FT_Err_Invalid_Argument;
+d401 1
+a401 1
+      error = FT_Err_Invalid_Glyph_Format;
+d410 3
+a412 3
+    /* copy advance while converting it to 16.16 format */
+    glyph->advance.x = slot->advance.x << 10;
+    glyph->advance.y = slot->advance.y << 10;
+d435 1
+a435 2
+    const FT_Glyph_Class*  clazz;
+    FT_Error               error = FT_Err_Ok;
+d439 1
+a439 1
+      error = FT_Err_Invalid_Argument;
+d442 3
+a444 1
+      clazz = glyph->clazz;
+d455 1
+a455 1
+        error = FT_Err_Invalid_Glyph_Format;
+a477 9
+    else
+    {
+      clazz = glyph->clazz;
+      if ( !clazz->glyph_bbox )
+        return;
+      else
+      {
+        /* retrieve bbox in 26.6 coordinates */
+        clazz->glyph_bbox( glyph, acbox );
+d479 25
+a503 20
+        /* perform grid fitting if needed */
+        if ( bbox_mode == FT_GLYPH_BBOX_GRIDFIT ||
+             bbox_mode == FT_GLYPH_BBOX_PIXELS  )
+        {
+          acbox->xMin = FT_PIX_FLOOR( acbox->xMin );
+          acbox->yMin = FT_PIX_FLOOR( acbox->yMin );
+          acbox->xMax = FT_PIX_CEIL( acbox->xMax );
+          acbox->yMax = FT_PIX_CEIL( acbox->yMax );
+        }
+
+        /* convert to integer pixels if needed */
+        if ( bbox_mode == FT_GLYPH_BBOX_TRUNCATE ||
+             bbox_mode == FT_GLYPH_BBOX_PIXELS   )
+        {
+          acbox->xMin >>= 6;
+          acbox->yMin >>= 6;
+          acbox->xMax >>= 6;
+          acbox->yMax >>= 6;
+        }
+      }
+a504 1
+    return;
+d519 1
+a519 1
+    FT_Glyph                  glyph;
+a520 1
+
+d523 2
+a524 3
+#ifdef FT_CONFIG_OPTION_PIC
+    FT_Library                library = FT_GLYPH( glyph )->library;
+#endif
+a529 4
+
+    /* we render the glyph into a glyph bitmap using a `dummy' glyph slot */
+    /* then calling FT_Render_Glyph_Internal()                            */
+
+d534 4
+a537 1
+    clazz = glyph->clazz;
+d543 1
+a543 1
+    if ( !clazz || !clazz->glyph_prepare )
+d546 5
+a550 2
+    FT_MEM_ZERO( &dummy, sizeof ( dummy ) );
+    FT_MEM_ZERO( &dummy_internal, sizeof ( dummy_internal ) );
+d552 1
+a552 1
+    dummy.library  = glyph->library;
+d556 1
+a556 2
+    error = ft_new_glyph( glyph->library, FT_BITMAP_GLYPH_CLASS_GET,
+                          (FT_Glyph*)(void*)&bitmap );
+d559 1
+d609 1
+a609 1
+    error = FT_Err_Invalid_Argument;
+@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2007 by                   */
+d37 1
+a51 62
+  /****   Convenience functions                                         ****/
+  /****                                                                 ****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  /* documentation is in ftglyph.h */
+
+  FT_EXPORT_DEF( void )
+  FT_Matrix_Multiply( const FT_Matrix*  a,
+                      FT_Matrix        *b )
+  {
+    FT_Fixed  xx, xy, yx, yy;
+
+
+    if ( !a || !b )
+      return;
+
+    xx = FT_MulFix( a->xx, b->xx ) + FT_MulFix( a->xy, b->yx );
+    xy = FT_MulFix( a->xx, b->xy ) + FT_MulFix( a->xy, b->yy );
+    yx = FT_MulFix( a->yx, b->xx ) + FT_MulFix( a->yy, b->yx );
+    yy = FT_MulFix( a->yx, b->xy ) + FT_MulFix( a->yy, b->yy );
+
+    b->xx = xx;  b->xy = xy;
+    b->yx = yx;  b->yy = yy;
+  }
+
+
+  /* documentation is in ftglyph.h */
+
+  FT_EXPORT_DEF( FT_Error )
+  FT_Matrix_Invert( FT_Matrix*  matrix )
+  {
+    FT_Pos  delta, xx, yy;
+
+
+    if ( !matrix )
+      return FT_Err_Invalid_Argument;
+
+    /* compute discriminant */
+    delta = FT_MulFix( matrix->xx, matrix->yy ) -
+            FT_MulFix( matrix->xy, matrix->yx );
+
+    if ( !delta )
+      return FT_Err_Invalid_Argument;  /* matrix can't be inverted */
+
+    matrix->xy = - FT_DivFix( matrix->xy, delta );
+    matrix->yx = - FT_DivFix( matrix->yx, delta );
+
+    xx = matrix->xx;
+    yy = matrix->yy;
+
+    matrix->xx = FT_DivFix( yy, delta );
+    matrix->yy = FT_DivFix( xx, delta );
+
+    return FT_Err_Ok;
+  }
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /****                                                                 ****/
+d133 1
+a133 3
+  FT_CALLBACK_TABLE_DEF
+  const FT_Glyph_Class  ft_bitmap_glyph_class =
+  {
+d143 1
+a143 1
+  };
+d257 1
+a257 3
+  FT_CALLBACK_TABLE_DEF
+  const FT_Glyph_Class  ft_outline_glyph_class =
+  {
+d267 1
+a267 1
+  };
+d373 1
+a373 1
+      clazz = &ft_bitmap_glyph_class;
+d375 1
+a375 1
+    /* it it is an outline too */
+d377 1
+a377 1
+      clazz = &ft_outline_glyph_class;
+d518 4
+d537 1
+a537 1
+    if ( clazz == &ft_bitmap_glyph_class )
+d550 1
+a550 1
+    error = ft_new_glyph( glyph->library, &ft_bitmap_glyph_class,
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d379 7
+d388 1
+a388 2
+    /* check arguments */
+    if ( !target || !source || !source->clazz )
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005 by                         */
+d379 2
+a387 2
+    *target = 0;
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004 by                               */
+d34 1
+d118 7
+a124 31
+  static FT_Error
+  ft_bitmap_copy( FT_Memory   memory,
+                  FT_Bitmap*  source,
+                  FT_Bitmap*  target )
+  {
+    FT_Error  error;
+    FT_Int    pitch = source->pitch;
+    FT_ULong  size;
+
+
+    *target = *source;
+
+    if ( pitch < 0 )
+      pitch = -pitch;
+
+    size = (FT_ULong)( pitch * source->rows );
+
+    if ( !FT_ALLOC( target->buffer, size ) )
+      FT_MEM_COPY( target->buffer, source->buffer, size );
+
+    return error;
+  }
+
+
+  static FT_Error
+  ft_bitmap_glyph_init( FT_BitmapGlyph  glyph,
+                        FT_GlyphSlot    slot )
+  {
+    FT_Error    error   = FT_Err_Ok;
+    FT_Library  library = FT_GLYPH(glyph)->library;
+    FT_Memory   memory  = library->memory;
+d133 2
+a134 4
+    /* grab the bitmap in the slot - do lazy copying whenever possible */
+    glyph->bitmap = slot->bitmap;
+    glyph->left   = slot->bitmap_left;
+    glyph->top    = slot->bitmap_top;
+d136 1
+d138 2
+d141 1
+d144 2
+a145 2
+      /* copy the bitmap into a new buffer */
+      error = ft_bitmap_copy( memory, &slot->bitmap, &glyph->bitmap );
+d153 7
+a159 5
+  static FT_Error
+  ft_bitmap_glyph_copy( FT_BitmapGlyph  source,
+                        FT_BitmapGlyph  target )
+  {
+    FT_Memory  memory = source->root.library->memory;
+d165 1
+a165 1
+    return ft_bitmap_copy( memory, &source->bitmap, &target->bitmap );
+d169 2
+a170 2
+  static void
+  ft_bitmap_glyph_done( FT_BitmapGlyph  glyph )
+d172 2
+a173 1
+    FT_Memory  memory = FT_GLYPH(glyph)->library->memory;
+d176 1
+a176 1
+    FT_FREE( glyph->bitmap.buffer );
+d180 3
+a182 3
+  static void
+  ft_bitmap_glyph_bbox( FT_BitmapGlyph  glyph,
+                        FT_BBox*        cbox )
+d184 3
+d197 1
+a197 1
+    sizeof( FT_BitmapGlyphRec ),
+d200 6
+a205 6
+    (FT_Glyph_InitFunc)     ft_bitmap_glyph_init,
+    (FT_Glyph_DoneFunc)     ft_bitmap_glyph_done,
+    (FT_Glyph_CopyFunc)     ft_bitmap_glyph_copy,
+    (FT_Glyph_TransformFunc)0,
+    (FT_Glyph_GetBBoxFunc)  ft_bitmap_glyph_bbox,
+    (FT_Glyph_PrepareFunc)  0
+d218 9
+a226 8
+  static FT_Error
+  ft_outline_glyph_init( FT_OutlineGlyph  glyph,
+                         FT_GlyphSlot     slot )
+  {
+    FT_Error     error   = FT_Err_Ok;
+    FT_Library   library = FT_GLYPH(glyph)->library;
+    FT_Outline*  source  = &slot->outline;
+    FT_Outline*  target  = &glyph->outline;
+d242 1
+a242 9
+    /* copy it */
+    FT_ARRAY_COPY( target->points, source->points, source->n_points );
+
+    FT_ARRAY_COPY( target->tags, source->tags, source->n_points );
+
+    FT_ARRAY_COPY( target->contours, source->contours, source->n_contours );
+
+    /* copy all flags, except the `FT_OUTLINE_OWNER' one */
+    target->flags = source->flags | FT_OUTLINE_OWNER;
+d249 2
+a250 2
+  static void
+  ft_outline_glyph_done( FT_OutlineGlyph  glyph )
+d252 3
+d259 8
+a266 6
+  static FT_Error
+  ft_outline_glyph_copy( FT_OutlineGlyph  source,
+                         FT_OutlineGlyph  target )
+  {
+    FT_Error    error;
+    FT_Library  library = FT_GLYPH( source )->library;
+d278 4
+a281 4
+  static void
+  ft_outline_glyph_transform( FT_OutlineGlyph  glyph,
+                              FT_Matrix*       matrix,
+                              FT_Vector*       delta )
+d283 3
+d294 3
+a296 3
+  static void
+  ft_outline_glyph_bbox( FT_OutlineGlyph  glyph,
+                         FT_BBox*         bbox )
+d298 3
+d305 3
+a307 3
+  static FT_Error
+  ft_outline_glyph_prepare( FT_OutlineGlyph  glyph,
+                            FT_GlyphSlot     slot )
+d309 3
+d323 1
+a323 1
+    sizeof( FT_OutlineGlyphRec ),
+d326 6
+a331 6
+    (FT_Glyph_InitFunc)     ft_outline_glyph_init,
+    (FT_Glyph_DoneFunc)     ft_outline_glyph_done,
+    (FT_Glyph_CopyFunc)     ft_outline_glyph_copy,
+    (FT_Glyph_TransformFunc)ft_outline_glyph_transform,
+    (FT_Glyph_GetBBoxFunc)  ft_outline_glyph_bbox,
+    (FT_Glyph_PrepareFunc)  ft_outline_glyph_prepare
+d606 1
+a606 1
+                          (FT_Glyph*)&bitmap );
+d639 1
+a639 1
+    error = ft_bitmap_glyph_init( bitmap, &dummy );
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2007 by                   */
+a33 1
+#include FT_BITMAP_H
+d117 31
+a147 7
+  FT_CALLBACK_DEF( FT_Error )
+  ft_bitmap_glyph_init( FT_Glyph      bitmap_glyph,
+                        FT_GlyphSlot  slot )
+  {
+    FT_BitmapGlyph  glyph   = (FT_BitmapGlyph)bitmap_glyph;
+    FT_Error        error   = FT_Err_Ok;
+    FT_Library      library = FT_GLYPH( glyph )->library;
+d156 4
+a159 2
+    glyph->left = slot->bitmap_left;
+    glyph->top  = slot->bitmap_top;
+a160 1
+    /* do lazy copying whenever possible */
+a161 2
+    {
+      glyph->bitmap = slot->bitmap;
+a162 1
+    }
+d165 2
+a166 2
+      FT_Bitmap_New( &glyph->bitmap );
+      error = FT_Bitmap_Copy( library, &slot->bitmap, &glyph->bitmap );
+d174 5
+a178 7
+  FT_CALLBACK_DEF( FT_Error )
+  ft_bitmap_glyph_copy( FT_Glyph  bitmap_source,
+                        FT_Glyph  bitmap_target )
+  {
+    FT_Library      library = bitmap_source->library;
+    FT_BitmapGlyph  source  = (FT_BitmapGlyph)bitmap_source;
+    FT_BitmapGlyph  target  = (FT_BitmapGlyph)bitmap_target;
+d184 1
+a184 1
+    return FT_Bitmap_Copy( library, &source->bitmap, &target->bitmap );
+d188 2
+a189 2
+  FT_CALLBACK_DEF( void )
+  ft_bitmap_glyph_done( FT_Glyph  bitmap_glyph )
+d191 1
+a191 2
+    FT_BitmapGlyph  glyph   = (FT_BitmapGlyph)bitmap_glyph;
+    FT_Library      library = FT_GLYPH( glyph )->library;
+d194 1
+a194 1
+    FT_Bitmap_Done( library, &glyph->bitmap );
+d198 3
+a200 3
+  FT_CALLBACK_DEF( void )
+  ft_bitmap_glyph_bbox( FT_Glyph  bitmap_glyph,
+                        FT_BBox*  cbox )
+a201 3
+    FT_BitmapGlyph  glyph = (FT_BitmapGlyph)bitmap_glyph;
+
+
+d212 1
+a212 1
+    sizeof ( FT_BitmapGlyphRec ),
+d215 6
+a220 6
+    ft_bitmap_glyph_init,
+    ft_bitmap_glyph_done,
+    ft_bitmap_glyph_copy,
+    0,                          /* FT_Glyph_TransformFunc */
+    ft_bitmap_glyph_bbox,
+    0                           /* FT_Glyph_PrepareFunc   */
+d233 8
+a240 9
+  FT_CALLBACK_DEF( FT_Error )
+  ft_outline_glyph_init( FT_Glyph      outline_glyph,
+                         FT_GlyphSlot  slot )
+  {
+    FT_OutlineGlyph  glyph   = (FT_OutlineGlyph)outline_glyph;
+    FT_Error         error   = FT_Err_Ok;
+    FT_Library       library = FT_GLYPH( glyph )->library;
+    FT_Outline*      source  = &slot->outline;
+    FT_Outline*      target  = &glyph->outline;
+d256 9
+a264 1
+    FT_Outline_Copy( source, target );
+d271 2
+a272 2
+  FT_CALLBACK_DEF( void )
+  ft_outline_glyph_done( FT_Glyph  outline_glyph )
+a273 3
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+d278 6
+a283 8
+  FT_CALLBACK_DEF( FT_Error )
+  ft_outline_glyph_copy( FT_Glyph  outline_source,
+                         FT_Glyph  outline_target )
+  {
+    FT_OutlineGlyph  source  = (FT_OutlineGlyph)outline_source;
+    FT_OutlineGlyph  target  = (FT_OutlineGlyph)outline_target;
+    FT_Error         error;
+    FT_Library       library = FT_GLYPH( source )->library;
+d295 4
+a298 4
+  FT_CALLBACK_DEF( void )
+  ft_outline_glyph_transform( FT_Glyph          outline_glyph,
+                              const FT_Matrix*  matrix,
+                              const FT_Vector*  delta )
+a299 3
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+d308 3
+a310 3
+  FT_CALLBACK_DEF( void )
+  ft_outline_glyph_bbox( FT_Glyph  outline_glyph,
+                         FT_BBox*  bbox )
+a311 3
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+d316 3
+a318 3
+  FT_CALLBACK_DEF( FT_Error )
+  ft_outline_glyph_prepare( FT_Glyph      outline_glyph,
+                            FT_GlyphSlot  slot )
+a319 3
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+d331 1
+a331 1
+    sizeof ( FT_OutlineGlyphRec ),
+d334 6
+a339 6
+    ft_outline_glyph_init,
+    ft_outline_glyph_done,
+    ft_outline_glyph_copy,
+    ft_outline_glyph_transform,
+    ft_outline_glyph_bbox,
+    ft_outline_glyph_prepare
+a386 2
+    *target = 0;
+
+d394 2
+d614 1
+a614 1
+                          (FT_Glyph*)(void*)&bitmap );
+d647 1
+a647 1
+    error = ft_bitmap_glyph_init( (FT_Glyph)bitmap, &dummy );
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@a378 7
+    /* check arguments */
+    if ( !target )
+    {
+      error = FT_Err_Invalid_Argument;
+      goto Exit;
+    }
+
+d381 2
+a382 1
+    if ( !source || !source->clazz )
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005 by                         */
+a33 1
+#include FT_BITMAP_H
+d117 31
+a147 7
+  FT_CALLBACK_DEF( FT_Error )
+  ft_bitmap_glyph_init( FT_Glyph      bitmap_glyph,
+                        FT_GlyphSlot  slot )
+  {
+    FT_BitmapGlyph  glyph   = (FT_BitmapGlyph)bitmap_glyph;
+    FT_Error        error   = FT_Err_Ok;
+    FT_Library      library = FT_GLYPH( glyph )->library;
+d156 4
+a159 2
+    glyph->left = slot->bitmap_left;
+    glyph->top  = slot->bitmap_top;
+a160 1
+    /* do lazy copying whenever possible */
+a161 2
+    {
+      glyph->bitmap = slot->bitmap;
+a162 1
+    }
+d165 2
+a166 2
+      FT_Bitmap_New( &glyph->bitmap );
+      error = FT_Bitmap_Copy( library, &slot->bitmap, &glyph->bitmap );
+d174 5
+a178 7
+  FT_CALLBACK_DEF( FT_Error )
+  ft_bitmap_glyph_copy( FT_Glyph  bitmap_source,
+                        FT_Glyph  bitmap_target )
+  {
+    FT_Library      library = bitmap_source->library;
+    FT_BitmapGlyph  source  = (FT_BitmapGlyph)bitmap_source;
+    FT_BitmapGlyph  target  = (FT_BitmapGlyph)bitmap_target;
+d184 1
+a184 1
+    return FT_Bitmap_Copy( library, &source->bitmap, &target->bitmap );
+d188 2
+a189 2
+  FT_CALLBACK_DEF( void )
+  ft_bitmap_glyph_done( FT_Glyph  bitmap_glyph )
+d191 1
+a191 2
+    FT_BitmapGlyph  glyph   = (FT_BitmapGlyph)bitmap_glyph;
+    FT_Library      library = FT_GLYPH( glyph )->library;
+d194 1
+a194 1
+    FT_Bitmap_Done( library, &glyph->bitmap );
+d198 3
+a200 3
+  FT_CALLBACK_DEF( void )
+  ft_bitmap_glyph_bbox( FT_Glyph  bitmap_glyph,
+                        FT_BBox*  cbox )
+a201 3
+    FT_BitmapGlyph  glyph = (FT_BitmapGlyph)bitmap_glyph;
+
+
+d212 1
+a212 1
+    sizeof ( FT_BitmapGlyphRec ),
+d215 6
+a220 6
+    ft_bitmap_glyph_init,
+    ft_bitmap_glyph_done,
+    ft_bitmap_glyph_copy,
+    0,                          /* FT_Glyph_TransformFunc */
+    ft_bitmap_glyph_bbox,
+    0                           /* FT_Glyph_PrepareFunc   */
+d233 8
+a240 9
+  FT_CALLBACK_DEF( FT_Error )
+  ft_outline_glyph_init( FT_Glyph      outline_glyph,
+                         FT_GlyphSlot  slot )
+  {
+    FT_OutlineGlyph  glyph   = (FT_OutlineGlyph)outline_glyph;
+    FT_Error         error   = FT_Err_Ok;
+    FT_Library       library = FT_GLYPH( glyph )->library;
+    FT_Outline*      source  = &slot->outline;
+    FT_Outline*      target  = &glyph->outline;
+d256 9
+a264 1
+    FT_Outline_Copy( source, target );
+d271 2
+a272 2
+  FT_CALLBACK_DEF( void )
+  ft_outline_glyph_done( FT_Glyph  outline_glyph )
+a273 3
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+d278 6
+a283 8
+  FT_CALLBACK_DEF( FT_Error )
+  ft_outline_glyph_copy( FT_Glyph  outline_source,
+                         FT_Glyph  outline_target )
+  {
+    FT_OutlineGlyph  source  = (FT_OutlineGlyph)outline_source;
+    FT_OutlineGlyph  target  = (FT_OutlineGlyph)outline_target;
+    FT_Error         error;
+    FT_Library       library = FT_GLYPH( source )->library;
+d295 4
+a298 4
+  FT_CALLBACK_DEF( void )
+  ft_outline_glyph_transform( FT_Glyph          outline_glyph,
+                              const FT_Matrix*  matrix,
+                              const FT_Vector*  delta )
+a299 3
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+d308 3
+a310 3
+  FT_CALLBACK_DEF( void )
+  ft_outline_glyph_bbox( FT_Glyph  outline_glyph,
+                         FT_BBox*  bbox )
+a311 3
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+d316 3
+a318 3
+  FT_CALLBACK_DEF( FT_Error )
+  ft_outline_glyph_prepare( FT_Glyph      outline_glyph,
+                            FT_GlyphSlot  slot )
+a319 3
+    FT_OutlineGlyph  glyph = (FT_OutlineGlyph)outline_glyph;
+
+
+d331 1
+a331 1
+    sizeof ( FT_OutlineGlyphRec ),
+d334 6
+a339 6
+    ft_outline_glyph_init,
+    ft_outline_glyph_done,
+    ft_outline_glyph_copy,
+    ft_outline_glyph_transform,
+    ft_outline_glyph_bbox,
+    ft_outline_glyph_prepare
+d614 1
+a614 1
+                          (FT_Glyph*)(void*)&bitmap );
+d647 1
+a647 1
+    error = ft_bitmap_glyph_init( (FT_Glyph)bitmap, &dummy );
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2003, 2004, 2005, 2007, 2008 by             */
+a36 1
+#include "basepic.h"
+d51 62
+d194 3
+a196 1
+  FT_DEFINE_GLYPH(ft_bitmap_glyph_class,
+d206 1
+a206 1
+  )
+d320 3
+a322 1
+  FT_DEFINE_GLYPH( ft_outline_glyph_class, 
+d332 1
+a332 1
+  )
+d380 1
+a380 1
+    if ( !target )
+a387 6
+    if ( !source || !source->clazz )
+    {
+      error = FT_Err_Invalid_Argument;
+      goto Exit;
+    }
+
+d432 1
+a432 1
+      clazz = FT_BITMAP_GLYPH_CLASS_GET;
+d434 1
+a434 1
+    /* if it is an outline */
+d436 1
+a436 1
+      clazz = FT_OUTLINE_GLYPH_CLASS_GET;
+a576 4
+#ifdef FT_CONFIG_OPTION_PIC
+    FT_Library                library = FT_GLYPH( glyph )->library;
+#endif
+
+d592 1
+a592 1
+    if ( clazz == FT_BITMAP_GLYPH_CLASS_GET )
+d605 1
+a605 1
+    error = ft_new_glyph( glyph->library, FT_BITMAP_GLYPH_CLASS_GET,
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+a31 2
+#include FT_INTERNAL_DEBUG_H
+
+d68 1
+a68 1
+      error = FT_THROW( Invalid_Glyph_Format );
+d83 1
+a83 1
+      FT_Bitmap_Init( &glyph->bitmap );
+d126 4
+a129 4
+    cbox->xMin = glyph->left * 64;
+    cbox->xMax = cbox->xMin + (FT_Pos)( glyph->bitmap.width * 64 );
+    cbox->yMax = glyph->top * 64;
+    cbox->yMin = cbox->yMax - (FT_Pos)( glyph->bitmap.rows * 64 );
+d133 1
+a133 3
+  FT_DEFINE_GLYPH(
+    ft_bitmap_glyph_class,
+
+d137 6
+a142 6
+    ft_bitmap_glyph_init,    /* FT_Glyph_InitFunc       glyph_init      */
+    ft_bitmap_glyph_done,    /* FT_Glyph_DoneFunc       glyph_done      */
+    ft_bitmap_glyph_copy,    /* FT_Glyph_CopyFunc       glyph_copy      */
+    NULL,                    /* FT_Glyph_TransformFunc  glyph_transform */
+    ft_bitmap_glyph_bbox,    /* FT_Glyph_GetBBoxFunc    glyph_bbox      */
+    NULL                     /* FT_Glyph_PrepareFunc    glyph_prepare   */
+d169 1
+a169 1
+      error = FT_THROW( Invalid_Glyph_Format );
+d174 1
+a174 3
+    error = FT_Outline_New( library,
+                            (FT_UInt)source->n_points,
+                            source->n_contours,
+d206 2
+a207 4
+    error = FT_Outline_New( library,
+                            (FT_UInt)source->outline.n_points,
+                            source->outline.n_contours,
+                            &target->outline );
+d257 1
+a257 3
+  FT_DEFINE_GLYPH(
+    ft_outline_glyph_class,
+
+d261 6
+a266 6
+    ft_outline_glyph_init,      /* FT_Glyph_InitFunc       glyph_init      */
+    ft_outline_glyph_done,      /* FT_Glyph_DoneFunc       glyph_done      */
+    ft_outline_glyph_copy,      /* FT_Glyph_CopyFunc       glyph_copy      */
+    ft_outline_glyph_transform, /* FT_Glyph_TransformFunc  glyph_transform */
+    ft_outline_glyph_bbox,      /* FT_Glyph_GetBBoxFunc    glyph_bbox      */
+    ft_outline_glyph_prepare    /* FT_Glyph_PrepareFunc    glyph_prepare   */
+d285 1
+a285 1
+     FT_Glyph   glyph  = NULL;
+d288 1
+a288 1
+     *aglyph = NULL;
+d315 1
+a315 1
+    if ( !target || !source || !source->clazz )
+d317 1
+a317 1
+      error = FT_THROW( Invalid_Argument );
+d321 1
+a321 1
+    *target = NULL;
+d325 1
+a325 1
+      error = FT_THROW( Invalid_Argument );
+d360 1
+a360 1
+    const FT_Glyph_Class*  clazz = NULL;
+d364 1
+a364 1
+      return FT_THROW( Invalid_Slot_Handle );
+d369 1
+a369 1
+      return FT_THROW( Invalid_Argument );
+d391 1
+a391 1
+      error = FT_THROW( Invalid_Glyph_Format );
+d400 3
+a402 3
+    /* copy advance while converting 26.6 to 16.16 format */
+    glyph->advance.x = slot->advance.x * 1024;
+    glyph->advance.y = slot->advance.y * 1024;
+d425 2
+a426 1
+    FT_Error  error = FT_Err_Ok;
+d430 1
+a430 1
+      error = FT_THROW( Invalid_Argument );
+d433 1
+a433 3
+      const FT_Glyph_Class*  clazz = glyph->clazz;
+
+
+d444 1
+a444 1
+        error = FT_THROW( Invalid_Glyph_Format );
+d467 9
+d477 20
+a496 25
+    clazz = glyph->clazz;
+    if ( !clazz->glyph_bbox )
+      return;
+
+    /* retrieve bbox in 26.6 coordinates */
+    clazz->glyph_bbox( glyph, acbox );
+
+    /* perform grid fitting if needed */
+    if ( bbox_mode == FT_GLYPH_BBOX_GRIDFIT ||
+         bbox_mode == FT_GLYPH_BBOX_PIXELS  )
+    {
+      acbox->xMin = FT_PIX_FLOOR( acbox->xMin );
+      acbox->yMin = FT_PIX_FLOOR( acbox->yMin );
+      acbox->xMax = FT_PIX_CEIL( acbox->xMax );
+      acbox->yMax = FT_PIX_CEIL( acbox->yMax );
+    }
+
+    /* convert to integer pixels if needed */
+    if ( bbox_mode == FT_GLYPH_BBOX_TRUNCATE ||
+         bbox_mode == FT_GLYPH_BBOX_PIXELS   )
+    {
+      acbox->xMin >>= 6;
+      acbox->yMin >>= 6;
+      acbox->xMax >>= 6;
+      acbox->yMax >>= 6;
+d498 1
+d513 1
+a513 1
+    FT_Glyph                  b, glyph;
+d515 1
+d518 3
+a520 2
+    /* FT_BITMAP_GLYPH_CLASS_GET dereferences `library' in PIC mode */
+    FT_Library                library;
+d526 4
+d534 1
+a534 4
+    clazz   = glyph->clazz;
+    library = glyph->library;
+    if ( !library || !clazz )
+      goto Bad;
+d540 1
+a540 1
+    if ( !clazz->glyph_prepare )
+d543 2
+a544 5
+    /* we render the glyph into a glyph bitmap using a `dummy' glyph slot */
+    /* then calling FT_Render_Glyph_Internal()                            */
+
+    FT_ZERO( &dummy );
+    FT_ZERO( &dummy_internal );
+d546 1
+a546 1
+    dummy.library  = library;
+d550 2
+a551 1
+    error = ft_new_glyph( library, FT_BITMAP_GLYPH_CLASS_GET, &b );
+a553 1
+    bitmap = (FT_BitmapGlyph)b;
+d603 1
+a603 1
+    error = FT_THROW( Invalid_Argument );
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

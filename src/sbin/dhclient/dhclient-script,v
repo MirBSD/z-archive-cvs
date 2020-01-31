@@ -1,0 +1,661 @@
+head	1.10;
+access;
+symbols
+	MIRBSD_10:1.7.0.2
+	MIRBSD_10_BASE:1.7
+	cvs-200702170300:1.1.1.4
+	OPENBSD_4_0:1.1.1.4
+	MIRBSD_9_BASE:1.5
+	MIRBSD_8:1.5.0.2
+	MIRBSD_8_BASE:1.5
+	cvs-200507211800:1.1.1.3
+	cvs-200504291700:1.1.1.2
+	cvs-200504170300:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.10
+date	2008.12.27.00.27.01;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004955765B63334424;
+
+1.9
+date	2008.12.26.22.43.42;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10049555DE404FB865C;
+
+1.8
+date	2008.11.08.23.03.58;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10049161AB22DF5DFC5;
+
+1.7
+date	2007.02.17.03.23.43;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10045D675555105AC23;
+
+1.6
+date	2006.09.20.20.03.31;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10045119E9F677AC322;
+
+1.5
+date	2005.11.23.16.43.51;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	560c43849c55498d;
+
+1.4
+date	2005.07.07.13.39.35;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	331742cd306446f9;
+
+1.3
+date	2005.04.17.04.24.10;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.03.06.19.49.50;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.26.29;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.26.29;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.17.03.33.14;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2005.07.21.20.56.51;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	560042e0092f571e;
+
+1.1.1.4
+date	2006.09.20.19.06.46;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045119150397FC669;
+
+
+desc
+@@
+
+
+1.10
+log
+@use a common bunch of functions too
+
+XXX throw ask* and initterm there as well some day
+@
+text
+@#!/bin/mksh
+# $MirOS: src/sbin/dhclient/dhclient-script,v 1.8 2008/11/08 23:03:58 tg Exp $
+# $OpenBSD: dhclient-script,v 1.10 2006/06/03 19:30:06 mpf Exp $
+#
+# Copyright (c) 2004, 2005, 2008
+#	Thorsten “mirabilos” Glaser <tg@@mirbsd.org>
+# Copyright (c) 2003 Kenneth R Westerback <krw@@openbsd.org>
+#
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+#
+# Helper functions that implement common actions.
+#
+
+delete_old_address() {
+	if [ -n "$old_ip_address" ]; then
+		ifconfig $interface inet $old_ip_address delete $medium
+		route -n delete -inet "$old_ip_address" 127.0.0.1 >/dev/null 2>&1
+	fi
+}
+
+add_new_address() {
+	ifconfig $interface \
+		inet $new_ip_address \
+		netmask $new_subnet_mask \
+		broadcast $new_broadcast_address \
+		$medium
+
+	# XXX Original TIMEOUT code did not do this unless $new_routers was set?
+	route -n add -inet $new_ip_address 127.0.0.1 >/dev/null 2>&1
+}
+
+delete_old_alias() {
+	if [ -n "$alias_ip_address" ]; then
+		ifconfig $interface inet $alias_ip_address delete > /dev/null 2>&1
+		route -n delete -inet $alias_ip_address 127.0.0.1 > /dev/null 2>&1
+	fi
+}
+
+add_new_alias() {
+	if [ -n "$alias_ip_address" ]; then
+		ifconfig $interface inet $alias_ip_address alias netmask \
+		    $alias_subnet_mask
+		route -n add -inet $alias_ip_address 127.0.0.1
+	fi
+}
+
+delete_old_routes() {
+	# Delete existing default route. We only allow one, so no need to
+	# process $old_routers list.
+	route -n delete -inet default >/dev/null 2>&1
+
+	if [ -n "$old_static_routes" ]; then
+		set $old_static_routes
+		while [ $# -gt 1 ]; do
+			route -n delete -inet "$1" "$2"
+			shift; shift
+		done
+	fi
+
+	arp -dan
+}
+
+add_new_routes() {
+	route delete default >/dev/null 2>&1
+	for router in $new_routers; do
+		if [ "$new_ip_address" = "$router" ]; then
+			route -n add -inet default -iface $router >/dev/null 2>&1
+		else
+			route -n add -inet default $router >/dev/null 2>&1
+		fi
+		# 2nd and subsequent default routers error out, so explicitly
+		# stop processing the list after the first one.
+		break
+	done
+
+	if [ -n "$new_static_routes" ]; then
+		set $new_static_routes
+		while [ $# -gt 1 ]; do
+			route -n add -inet $1 $2
+			shift; shift
+		done
+	fi
+}
+
+add_new_resolv_conf() {
+	# XXX Old code did not create/update resolv.conf unless both
+	# $new_domain_name and $new_domain_name_servers were provided.  PR
+	# #3135 reported some ISPs only provide $new_domain_name_servers and
+	# thus broke the script. This code creates the resolv.conf if either
+	# are provided.
+
+	rm -f /etc/resolv.conf.std
+
+	if [ -n "$new_domain_name" ]; then
+		echo "search $new_domain_name" >>/etc/resolv.conf.std
+	fi
+
+	if [ -n "$new_domain_name_servers" ]; then
+		for nameserver in $new_domain_name_servers; do
+			echo "nameserver $nameserver" >>/etc/resolv.conf.std
+		done
+	fi
+
+	if [ -f /etc/resolv.conf.std ]; then
+		if [ -f /etc/resolv.conf.tail ]; then
+			cat /etc/resolv.conf.tail >>/etc/resolv.conf.std
+		fi
+
+		# Some people set up their own local cacheing DNS, even
+		# if they use DHCP. So fix them up.
+		if [ -f /etc/resolv.conf.lock ]; then
+			rm -f /etc/resolv.conf.save
+			return 0
+		fi
+
+		# In case (e.g. during OpenBSD installs) /etc/resolv.conf
+		# is a symbolic link, take care to preserve the link and write
+		# the new data in the correct location.
+
+		if [ -f /etc/resolv.conf ]; then
+			cat /etc/resolv.conf >/etc/resolv.conf.save
+		fi
+		cat /etc/resolv.conf.std >/etc/resolv.conf
+		rm -f /etc/resolv.conf.std
+
+		# Try to ensure correct ownership and permissions.
+		chown -RL root:wheel /etc/resolv.conf
+		chmod -RL 644 /etc/resolv.conf
+
+		return 0
+	fi
+
+	return 1
+}
+
+#
+# Start of active code.
+#
+
+if [ -n "$new_network_number" ]; then
+	echo "New Network Number: $new_network_number"
+fi
+
+if [ -n "$new_broadcast_address" ]; then
+	echo "New Broadcast Address: $new_broadcast_address"
+fi
+
+case $reason in
+MEDIUM)
+	ifconfig $interface $medium
+	sleep 1
+	;;
+
+PREINIT)
+	delete_old_alias
+	ifconfig $interface up
+	;;
+
+ARPCHECK|ARPSEND)
+	;;
+
+BOUND|RENEW|REBIND|REBOOT)
+	if [ -n "$old_ip_address" ]; then
+		if [ "$old_ip_address" != "$alias_ip_address" ]; then
+			delete_old_alias
+		fi
+		if [ "$old_ip_address" != "$new_ip_address" ]; then
+			delete_old_address
+			delete_old_routes
+		fi
+	fi
+	if [ "$reason" = BOUND ] || \
+	   [ "$reason" = REBOOT ] || \
+	   [ -z "$old_ip_address" ] || \
+	   [ "$old_ip_address" != "$new_ip_address" ]; then
+		add_new_address
+		add_new_routes
+	fi
+	if [ "$new_ip_address" != "$alias_ip_address" ]; then
+		add_new_alias
+	fi
+	add_new_resolv_conf
+	[[ -s /etc/functions ]] && (. /etc/functions; _getrnd dhcp http &)
+	;;
+
+EXPIRE|FAIL)
+	delete_old_alias
+	if [ -n "$old_ip_address" ]; then
+		delete_old_address
+		delete_old_routes
+	fi
+	# XXX Why add alias we just deleted above?
+	add_new_alias
+	if [ -f /etc/resolv.conf.save ]; then
+		[ -f /etc/resolv.conf.lock ] || \
+			cat /etc/resolv.conf.save >/etc/resolv.conf
+		rm -f /etc/resolv.conf.{std,save}
+	fi
+	;;
+
+TIMEOUT)
+	delete_old_alias
+	add_new_address
+	sleep 1
+	if [ -n "$new_routers" ]; then
+		set "$new_routers"
+		if ping -q -c 1 -w 1 "$1"; then
+			if [ "$new_ip_address" != "$alias_ip_address" ]; then
+				add_new_alias
+			fi
+			add_new_routes
+			if add_new_resolv_conf; then
+				exit 0
+			fi
+		fi
+	fi
+	ifconfig $interface inet $new_ip_address delete $medium
+	# XXX Why not a delete_old_address as before all other invocations of
+	#     delete_old_routes?
+	delete_old_routes
+	exit 1
+	;;
+esac
+
+exit 0
+@
+
+
+1.9
+log
+@throw entropy on dhclient finishing on bsd.rd too
+@
+text
+@a24 41
+function uri_escape {
+	print -nr -- "$*" | sed -e '
+	    s.%.%25.g
+	    s.;.%3B.g
+	    s./.%2F.g
+	    s.?.%3F.g
+	    s.:.%3A.g
+	    s.@@@@.%40.g
+	    s.&.%26.g
+	    s.=.%3D.g
+	    s.+.%2B.g
+	    s.\$.%24.g
+	    s.,.%2C.g
+	    s.	.%09.g
+	    s. .%20.g
+	    s.<.%3C.g
+	    s.>.%3E.g
+	    s.#.%23.g
+	    s.".%22.g
+	    s.{.%7B.g
+	    s.}.%7D.g
+	    s.|.%7C.g
+	    s.\\.%5C.g
+	    s.\^.%5E.g
+	    s.\[.%5B.g
+	    s.\].%5D.g
+	    s.`.%60.g
+	    s.'\''.%27.g
+	'
+}
+
+_getrnd() {
+	typeset url=${2:-https}://call.mirbsd.org/rn.cgi
+
+	url=${url}?bsdrd${1:-manuell}
+	url=$url,os=$(uri_escape "$(uname -a)")
+	url=$url,seed=$(dd if=/dev/arandom bs=57 count=1 2>&- | \
+	    b64encode -r - | tr '+=/' '._-')
+	(ulimit -T 60; exec ftp -mvo /dev/arandom "$url") >/dev/wrandom 2>&1
+}
+
+d194 1
+a194 1
+	fgrep bsdrd /.profile >/dev/null 2>&1 && _getrnd dhcp http &
+@
+
+
+1.8
+log
+@more mass conversions, including ancient eMail addresses
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/sbin/dhclient/dhclient-script,v 1.7 2007/02/17 03:23:43 tg Exp $
+d5 2
+a6 2
+# Copyright (c) 2004, 2005
+#	Thorsten "mirabilos" Glaser <tg@@mirbsd.org>
+d25 41
+d235 1
+@
+
+
+1.7
+log
+@merge dhclient upgrade
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/sbin/dhclient/dhclient-script,v 1.6 2006/09/20 20:03:31 tg Exp $
+d6 1
+a6 1
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+@
+
+
+1.6
+log
+@merge fdisk, dhcp stuff
+fix fdisk units
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/sbin/dhclient/dhclient-script,v 1.5 2005/11/23 16:43:51 tg Exp $
+d45 2
+a46 2
+		ifconfig $interface inet $alias_ip_address delete >/dev/null 2>&1
+		route -n delete -inet $alias_ip_address 127.0.0.1 >/dev/null 2>&1
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d2 2
+a3 2
+# $MirOS: src/sbin/dhclient/dhclient-script,v 1.4 2005/07/07 13:39:35 tg Exp $
+# $OpenBSD: dhclient-script,v 1.8 2005/05/24 03:11:12 todd Exp $
+d27 1
+a27 1
+		ifconfig $interface inet -alias $old_ip_address $medium
+d45 1
+a45 1
+		ifconfig $interface inet -alias $alias_ip_address >/dev/null 2>&1
+d52 1
+a52 1
+		ifconfig $interface inet alias $alias_ip_address netmask \
+d227 1
+a227 1
+	ifconfig $interface inet -alias $new_ip_address $medium
+@
+
+
+1.4
+log
+@/bin/sh and /bin/ksh -> /bin/mksh
+
+This should cover most uses.
+@
+text
+@d2 2
+a3 2
+# $MirOS: src/sbin/dhclient/dhclient-script,v 1.3 2005/04/17 04:24:10 tg Exp $
+# $OpenBSD: dhclient-script,v 1.7 2005/04/09 09:14:58 jmc Exp $
+d28 1
+a28 1
+		route -n delete "$old_ip_address" 127.0.0.1 >/dev/null 2>&1
+d40 1
+a40 1
+	route -n add $new_ip_address 127.0.0.1 >/dev/null 2>&1
+d46 1
+a46 1
+		route -n delete $alias_ip_address 127.0.0.1 >/dev/null 2>&1
+d54 1
+a54 1
+		route -n add $alias_ip_address 127.0.0.1
+d61 1
+a61 1
+	route -n delete default >/dev/null 2>&1
+d66 1
+a66 1
+			route delete "$1" "$2"
+d78 1
+a78 1
+			route -n add default -iface $router >/dev/null 2>&1
+d80 1
+a80 1
+			route -n add default $router >/dev/null 2>&1
+d90 1
+a90 1
+			route -n add $1 $2
+a161 1
+	ifconfig $interface inet -alias 0.0.0.0 $medium >/dev/null 2>&1
+d167 1
+a167 1
+	ifconfig $interface inet 0.0.0.0 netmask 0.0.0.0 broadcast 255.255.255.255 up
+@
+
+
+1.3
+log
+@merge all but httpd
+@
+text
+@d1 2
+a2 2
+#!/bin/sh
+# $MirOS: src/sbin/dhclient/dhclient-script,v 1.2 2005/03/06 19:49:50 tg Exp $
+a19 2
+#
+#
+@
+
+
+1.2
+log
+@merge src/sbin
+@
+text
+@d2 2
+a3 2
+# $MirOS$
+# $OpenBSD: dhclient-script,v 1.6 2004/05/06 18:22:41 claudio Exp $
+d5 1
+a5 1
+# Copyright (c) 2004
+d101 1
+a101 1
+	# #3135 reported some ISP's only provide $new_domain_name_servers and
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 1
+a2 1
+#
+d5 2
+d30 1
+a30 1
+		route delete "$old_ip_address" 127.0.0.1 >/dev/null 2>&1
+d42 1
+a42 1
+	route add $new_ip_address 127.0.0.1 >/dev/null 2>&1
+d47 2
+a48 2
+		ifconfig $interface inet -alias $alias_ip_address > /dev/null 2>&1
+		route delete $alias_ip_address 127.0.0.1 > /dev/null 2>&1
+d56 1
+a56 1
+		route add $alias_ip_address 127.0.0.1
+d63 1
+a63 1
+	route delete default >/dev/null 2>&1
+d80 1
+a80 1
+			route add default -iface $router >/dev/null 2>&1
+d82 1
+a82 1
+			route add default $router >/dev/null 2>&1
+d92 1
+a92 1
+			route add $1 $2
+d122 7
+d134 1
+a134 1
+			cat /etc/resolv.conf > /etc/resolv.conf.save
+d136 1
+a136 1
+		cat /etc/resolv.conf.std > /etc/resolv.conf
+d208 3
+a210 1
+		cat /etc/resolv.conf.save > /etc/resolv.conf
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@some more updates/fixes from obsd
+@
+text
+@d3 1
+a3 1
+# $OpenBSD: dhclient-script,v 1.7 2005/04/09 09:14:58 jmc Exp $
+d99 1
+a99 1
+	# #3135 reported some ISPs only provide $new_domain_name_servers and
+@
+
+
+1.1.1.3
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d3 1
+a3 1
+# $OpenBSD: dhclient-script,v 1.8 2005/05/24 03:11:12 todd Exp $
+d155 1
+d161 1
+a161 1
+	ifconfig $interface up
+@
+
+
+1.1.1.4
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d3 1
+a3 1
+# $OpenBSD: dhclient-script,v 1.10 2006/06/03 19:30:06 mpf Exp $
+d27 1
+a27 1
+		ifconfig $interface inet $old_ip_address delete $medium
+d45 1
+a45 1
+		ifconfig $interface inet $alias_ip_address delete > /dev/null 2>&1
+d52 1
+a52 1
+		ifconfig $interface inet $alias_ip_address alias netmask \
+d218 1
+a218 1
+	ifconfig $interface inet $new_ip_address delete $medium
+@
+
+

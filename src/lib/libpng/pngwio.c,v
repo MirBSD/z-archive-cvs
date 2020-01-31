@@ -1,0 +1,931 @@
+head	1.1;
+branch	1.1.107;
+access;
+symbols
+	png-1_2_57:1.1.107.8
+	png-1_2_50:1.1.107.7
+	png-1_2_35:1.1.107.6
+	png-1_2_32:1.1.107.5
+	png-1_2_26:1.1.107.4
+	png-1_2_25:1.1.107.4
+	MIRBSD_10:1.1.107.3.0.2
+	MIRBSD_10_BASE:1.1.107.3
+	png-1_2_18:1.1.107.3
+	png-1_2_12:1.1.107.2
+	MIRBSD_9_BASE:1.1.107.2
+	png-1_2_10:1.1.107.2
+	MIRBSD_8:1.1.107.1.0.2
+	MIRBSD_8_BASE:1.1.107.1
+	png-1_2_8:1.1.107.1
+	libpng:1.1.107;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.03.06.15.16.20;	author tg;	state Exp;
+branches
+	1.1.107.1;
+next	;
+
+1.1.107.1
+date	2005.03.06.15.16.20;	author tg;	state Exp;
+branches;
+next	1.1.107.2;
+
+1.1.107.2
+date	2006.06.09.00.13.10;	author tg;	state Exp;
+branches;
+next	1.1.107.3;
+commitid	1004488BD054F510AF1;
+
+1.1.107.3
+date	2007.05.22.20.25.38;	author tg;	state Exp;
+branches;
+next	1.1.107.4;
+commitid	100465351CF4103214A;
+
+1.1.107.4
+date	2008.03.23.17.15.18;	author tg;	state Exp;
+branches;
+next	1.1.107.5;
+commitid	10047E69020419198D8;
+
+1.1.107.5
+date	2008.10.22.18.55.39;	author tg;	state Exp;
+branches;
+next	1.1.107.6;
+commitid	10048FF773834003AB5;
+
+1.1.107.6
+date	2009.03.15.19.57.26;	author tg;	state Exp;
+branches;
+next	1.1.107.7;
+commitid	10049BD5DB90DBE42DE;
+
+1.1.107.7
+date	2013.08.06.17.35.00;	author tg;	state Exp;
+branches;
+next	1.1.107.8;
+commitid	100520133D730551D16;
+
+1.1.107.8
+date	2017.04.15.15.00.13;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F2359276DB0E16;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@
+/* pngwio.c - functions for data output
+ *
+ * libpng 1.2.8 - December 3, 2004
+ * For conditions of distribution and use, see copyright notice in png.h
+ * Copyright (c) 1998-2004 Glenn Randers-Pehrson
+ * (Version 0.96 Copyright (c) 1996, 1997 Andreas Dilger)
+ * (Version 0.88 Copyright (c) 1995, 1996 Guy Eric Schalnat, Group 42, Inc.)
+ *
+ * This file provides a location for all output.  Users who need
+ * special handling are expected to write functions that have the same
+ * arguments as these and perform similar functions, but that possibly
+ * use different output methods.  Note that you shouldn't change these
+ * functions, but rather write replacement functions and then change
+ * them at run time with png_set_write_fn(...).
+ */
+
+#define PNG_INTERNAL
+#include "png.h"
+#ifdef PNG_WRITE_SUPPORTED
+
+/* Write the data to whatever output you are using.  The default routine
+   writes to a file pointer.  Note that this routine sometimes gets called
+   with very small lengths, so you should implement some kind of simple
+   buffering if you are using unbuffered writes.  This should never be asked
+   to write more than 64K on a 16 bit machine.  */
+
+void /* PRIVATE */
+png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
+{
+   if (png_ptr->write_data_fn != NULL )
+      (*(png_ptr->write_data_fn))(png_ptr, data, length);
+   else
+      png_error(png_ptr, "Call to NULL write function");
+}
+
+#if !defined(PNG_NO_STDIO)
+/* This is the function that does the actual writing of data.  If you are
+   not writing to a standard C stream, you should create a replacement
+   write_data function and use it at run time with png_set_write_fn(), rather
+   than changing the library. */
+#ifndef USE_FAR_KEYWORD
+void PNGAPI
+png_default_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
+{
+   png_uint_32 check;
+
+#if defined(_WIN32_WCE)
+   if ( !WriteFile((HANDLE)(png_ptr->io_ptr), data, length, &check, NULL) )
+      check = 0;
+#else
+   check = fwrite(data, 1, length, (png_FILE_p)(png_ptr->io_ptr));
+#endif
+   if (check != length)
+      png_error(png_ptr, "Write Error");
+}
+#else
+/* this is the model-independent version. Since the standard I/O library
+   can't handle far buffers in the medium and small models, we have to copy
+   the data.
+*/
+
+#define NEAR_BUF_SIZE 1024
+#define MIN(a,b) (a <= b ? a : b)
+
+void PNGAPI
+png_default_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
+{
+   png_uint_32 check;
+   png_byte *near_data;  /* Needs to be "png_byte *" instead of "png_bytep" */
+   png_FILE_p io_ptr;
+
+   /* Check if data really is near. If so, use usual code. */
+   near_data = (png_byte *)CVT_PTR_NOCHECK(data);
+   io_ptr = (png_FILE_p)CVT_PTR(png_ptr->io_ptr);
+   if ((png_bytep)near_data == data)
+   {
+#if defined(_WIN32_WCE)
+      if ( !WriteFile(io_ptr, near_data, length, &check, NULL) )
+         check = 0;
+#else
+      check = fwrite(near_data, 1, length, io_ptr);
+#endif
+   }
+   else
+   {
+      png_byte buf[NEAR_BUF_SIZE];
+      png_size_t written, remaining, err;
+      check = 0;
+      remaining = length;
+      do
+      {
+         written = MIN(NEAR_BUF_SIZE, remaining);
+         png_memcpy(buf, data, written); /* copy far buffer to near buffer */
+#if defined(_WIN32_WCE)
+         if ( !WriteFile(io_ptr, buf, written, &err, NULL) )
+            err = 0;
+#else
+         err = fwrite(buf, 1, written, io_ptr);
+#endif
+         if (err != written)
+            break;
+         else
+            check += err;
+         data += written;
+         remaining -= written;
+      }
+      while (remaining != 0);
+   }
+   if (check != length)
+      png_error(png_ptr, "Write Error");
+}
+
+#endif
+#endif
+
+/* This function is called to output any data pending writing (normally
+   to disk).  After png_flush is called, there should be no data pending
+   writing in any buffers. */
+#if defined(PNG_WRITE_FLUSH_SUPPORTED)
+void /* PRIVATE */
+png_flush(png_structp png_ptr)
+{
+   if (png_ptr->output_flush_fn != NULL)
+      (*(png_ptr->output_flush_fn))(png_ptr);
+}
+
+#if !defined(PNG_NO_STDIO)
+void PNGAPI
+png_default_flush(png_structp png_ptr)
+{
+#if !defined(_WIN32_WCE)
+   png_FILE_p io_ptr;
+   io_ptr = (png_FILE_p)CVT_PTR((png_ptr->io_ptr));
+   if (io_ptr != NULL)
+      fflush(io_ptr);
+#endif
+}
+#endif
+#endif
+
+/* This function allows the application to supply new output functions for
+   libpng if standard C streams aren't being used.
+
+   This function takes as its arguments:
+   png_ptr       - pointer to a png output data structure
+   io_ptr        - pointer to user supplied structure containing info about
+                   the output functions.  May be NULL.
+   write_data_fn - pointer to a new output function that takes as its
+                   arguments a pointer to a png_struct, a pointer to
+                   data to be written, and a 32-bit unsigned int that is
+                   the number of bytes to be written.  The new write
+                   function should call png_error(png_ptr, "Error msg")
+                   to exit and output any fatal error messages.
+   flush_data_fn - pointer to a new flush function that takes as its
+                   arguments a pointer to a png_struct.  After a call to
+                   the flush function, there should be no data in any buffers
+                   or pending transmission.  If the output method doesn't do
+                   any buffering of ouput, a function prototype must still be
+                   supplied although it doesn't have to do anything.  If
+                   PNG_WRITE_FLUSH_SUPPORTED is not defined at libpng compile
+                   time, output_flush_fn will be ignored, although it must be
+                   supplied for compatibility. */
+void PNGAPI
+png_set_write_fn(png_structp png_ptr, png_voidp io_ptr,
+   png_rw_ptr write_data_fn, png_flush_ptr output_flush_fn)
+{
+   png_ptr->io_ptr = io_ptr;
+
+#if !defined(PNG_NO_STDIO)
+   if (write_data_fn != NULL)
+      png_ptr->write_data_fn = write_data_fn;
+   else
+      png_ptr->write_data_fn = png_default_write_data;
+#else
+   png_ptr->write_data_fn = write_data_fn;
+#endif
+
+#if defined(PNG_WRITE_FLUSH_SUPPORTED)
+#if !defined(PNG_NO_STDIO)
+   if (output_flush_fn != NULL)
+      png_ptr->output_flush_fn = output_flush_fn;
+   else
+      png_ptr->output_flush_fn = png_default_flush;
+#else
+   png_ptr->output_flush_fn = output_flush_fn;
+#endif
+#endif /* PNG_WRITE_FLUSH_SUPPORTED */
+
+   /* It is an error to read while writing a png file */
+   if (png_ptr->read_data_fn != NULL)
+   {
+      png_ptr->read_data_fn = NULL;
+      png_warning(png_ptr,
+         "Attempted to set both read_data_fn and write_data_fn in");
+      png_warning(png_ptr,
+         "the same structure.  Resetting read_data_fn to NULL.");
+   }
+}
+
+#if defined(USE_FAR_KEYWORD)
+#if defined(_MSC_VER)
+void *png_far_to_near(png_structp png_ptr,png_voidp ptr, int check)
+{
+   void *near_ptr;
+   void FAR *far_ptr;
+   FP_OFF(near_ptr) = FP_OFF(ptr);
+   far_ptr = (void FAR *)near_ptr;
+   if(check != 0)
+      if(FP_SEG(ptr) != FP_SEG(far_ptr))
+         png_error(png_ptr,"segment lost in conversion");
+   return(near_ptr);
+}
+#  else
+void *png_far_to_near(png_structp png_ptr,png_voidp ptr, int check)
+{
+   void *near_ptr;
+   void FAR *far_ptr;
+   near_ptr = (void FAR *)ptr;
+   far_ptr = (void FAR *)near_ptr;
+   if(check != 0)
+      if(far_ptr != ptr)
+         png_error(png_ptr,"segment lost in conversion");
+   return(near_ptr);
+}
+#   endif
+#   endif
+#endif /* PNG_WRITE_SUPPORTED */
+@
+
+
+1.1.107.1
+log
+@libpng-1_2_8 with the following directories removed:
+- contrib
+- projects
+- scripts
+@
+text
+@@
+
+
+1.1.107.2
+log
+@there's a newer libpng out there
+@
+text
+@d4 1
+a4 1
+ * Last changed in libpng 1.2.3 - May 21, 2002
+d6 1
+a6 1
+ * Copyright (c) 1998-2002 Glenn Randers-Pehrson
+@
+
+
+1.1.107.3
+log
+@Upgrade libpng (fixes some holes)
+@
+text
+@d4 1
+a4 1
+ * Last changed in libpng 1.2.13 November 13, 2006
+a47 1
+   if(png_ptr == NULL) return;
+a72 1
+   if(png_ptr == NULL) return;
+a133 3
+#endif
+   if(png_ptr == NULL) return;
+#if !defined(_WIN32_WCE)
+a167 1
+   if(png_ptr == NULL) return;
+@
+
+
+1.1.107.4
+log
+@Import libpng-1.2.25 with the following change log.
+Requested by bsiegert@@ due to security fix relevance.
+
+version 1.2.19beta1 [May 18, 2007]
+  Changed "const static" to "static PNG_CONST" everywhere, mostly undoing
+    change of libpng-1.2.17beta2.  Changed other "const" to "PNG_CONST"
+  Changed some handling of unused parameters, to avoid compiler warnings.
+    "if (unused == NULL) return;" becomes "unused = unused".
+
+version 1.2.19beta2 [May 18, 2007]
+  Only use the valid bits of tRNS value in png_do_expand() (Brian Cartier)
+
+version 1.2.19beta3 [May 19, 2007]
+  Add some "png_byte" typecasts in png_check_keyword() and write new_key
+  instead of key in zTXt chunk (Kevin Ryde).
+
+version 1.2.19beta4 [May 21, 2007]
+  Add png_snprintf() function and use it in place of sprint() for improved
+    defense against buffer overflows.
+
+version 1.2.19beta5 [May 21, 2007]
+  Fixed png_handle_tRNS() to only use the valid bits of tRNS value.
+  Changed handling of more unused parameters, to avoid compiler warnings.
+  Removed some PNG_CONST in pngwutil.c to avoid compiler warnings.
+
+version 1.2.19beta6 [May 22, 2007]
+  Added some #ifdef PNG_MMX_CODE_SUPPORTED where needed in pngvcrd.c
+  Added a special "_MSC_VER" case that defines png_snprintf to _snprintf
+
+version 1.2.19beta7 [May 22, 2007]
+  Squelched png_squelch_warnings() in pnggccrd.c and added an
+    #ifdef PNG_MMX_CODE_SUPPORTED block around the declarations that caused
+    the warnings that png_squelch_warnings was squelching.
+
+version 1.2.19beta8 [May 22, 2007]
+  Removed __MMX__ from test in pngconf.h.
+
+version 1.2.19beta9 [May 23, 2007]
+  Made png_squelch_warnings() available via PNG_SQUELCH_WARNINGS macro.
+  Revised png_squelch_warnings() so it might work.
+  Updated makefile.sgcc and makefile.solaris; added makefile.solaris-x86.
+
+version 1.2.19beta10 [May 24, 2007]
+  Resquelched png_squelch_warnings(), use "__attribute__((used))" instead.
+
+version 1.2.19beta11 [May 28, 2007]
+  Return 0 from png_get_sPLT() and png_get_unknown_chunks() if png_ptr is NULL;
+    changed three remaining instances of png_strcpy() to png_strncpy() (David
+    Hill).
+  Make test for NULL row_buf at the beginning of png_do_read_transformations
+    unconditional.
+
+version 1.2.19beta12 [May 28, 2007]
+  Revised pnggccrd.c.
+
+version 1.2.19beta13 [June 14, 2007]
+  Prefer PNG_USE_PNGVCRD when _MSC_VER is defined in pngconf.h
+
+version 1.2.19beta14 [June 16, 2007]
+  Fix bug with handling of 16-bit transparency, introduced in 1.2.19beta2
+
+version 1.2.19beta15 [June 17, 2007]
+  Revised pnggccrd.c.
+
+version 1.2.19beta16 [June 18, 2007]
+  Revised pnggccrd.c again.
+  Updated contrib/gregbook.
+  Changed '#include "pnggccrd.c"' to 'include "$srcdir/pnggccrd.c"'
+    in configure.ac
+
+version 1.2.19beta17 [June 19, 2007]
+  Revised many of the makefiles, to set -DPNG_NO_MMX_CODE where needed
+    and to not use -O3 unless -DPNG_NO_MMX_CODE is also set.
+
+version 1.2.19beta18 [June 23, 2007]
+  Replaced some C++ style comments with C style comments in pnggccrd.c.
+  Copied optimized C code from pnggccrd.c to pngrutil.c, removed dependency
+    on pnggccrd.o from many makefiles.
+  Added sl and dylib to list of extensions be installed by Makefile.am
+
+version 1.2.19beta19 [June 28, 2007]
+  Fixed testing PNG_RGB_TO_GRAY_ERR & PNG_RGB_TO_GRAY_WARN in pngrtran.c
+  More cleanup of pnggccrd.c and pngvcrd.c
+
+version 1.2.19beta20 [June 29, 2007]
+  Rebuilt Makefile.in and configure using libtool-1.5.24.
+  Fixed typo in pnggccrd.c
+
+version 1.2.19beta21 [June 30, 2007]
+  More revision of pnggccrd.c
+  Added "test" target to Makefile.in and Makefile.am
+
+version 1.2.19beta22 [July 3, 2007]
+  Added info about pngrutil/pnggccrd/pngvcrd to png_get_header_version()
+  Fix type definition of dummy_value_a, b in pnggccrd.c
+
+version 1.2.19beta23 [July 10, 2007]
+  Revert change to type definition of dummy_value_a, b in pnggccrd.c
+  Make sure __PIC__ is defined in pnggccrd.c when PIC is defined.
+  Require gcc-4.1 or better to use PNG_HAVE_MMX_FILTER_ROW on x86_64 platforms
+
+version 1.2.19beta24 [July 14, 2007]
+  Added PNG_NO_READ_FILTER, PNG_NO_WRITE_FILTER, PNG_NO_WARNING macros.
+  Added contrib/pngminim to demonstrate building minimal encoder and decoder
+
+version 1.2.19beta25 [July 15, 2007]
+  Removed the new PNG_NO_READ_FILTER macro since it would make the library
+    unable to read valid PNG files, and filtering is at the heart of the
+    PNG format.
+
+version 1.2.19beta26 [July 16, 2007]
+  Changed "png_free(str)" to "png_free(png_ptr,str)" in pngrutil.c WinCE
+    code (Yves Piguet).  This bug was introduced in libpng-1.2.14.
+  Updated scripts/CMakeLists.txt
+  Relocated a misplaced #endif in pnggccrd.c
+
+version 1.2.19beta27 [July 17, 2007]
+  Fixed incorrect stride and number of bytes copied (was 4 instead of
+    6 bytes) in the cleanup loop of pnggccrd.c and pngvcrd.c for handling
+    the end of 48-bit interlaced rows (Glenn R-P).
+
+version 1.2.19beta28 [July 19, 2007]
+  Removed requirement for gcc-4.1 or better to use PNG_HAVE_MMX_FILTER_ROW
+    on x86_64 platforms
+  Added png_warning() in pngrutil.c for short iCCP, iTXt, sPLT, or zTXT chunks.
+  Revised pngtest.c so warnings are displayed regardless of PNG_NO_STDIO.
+
+version 1.2.19beta29 [July 20, 2007]
+  Fix typo in pnggccrd.c (%%eax should be %%ax in secondloop48)
+
+version 1.2.19beta30 [July 26, 2007]
+  Revised pnggccrd.c
+
+version 1.2.19beta31 [July 27, 2007]
+  Fix typos in pnggccrd.c
+
+version 1.0.27rc1 and 1.2.19rc1 [July 31, 2007]
+  Disable PNG_MMX_CODE_SUPPORTED when PNG_ASSEMBLER_CODE_SUPPORTED is off.
+  Enable PNG_MMX_READ_FILTER_* by default, except when gcc-3.x is being
+    used (they were inadvertently disabled in libpng-1.2.19beta23).
+  Fix some debugging statements in pnggccrd.c and pngrutil.c
+  Added information about disabling the MMX code in libpng documentation.
+
+version 1.0.27rc2 and 1.2.19rc2 [August 4, 2007]
+  Removed some "#if 0" blocks.
+  Made a global struct local in pngvcrd.c to make it thread safe.
+  Issue a png_error() if application attempts to transform a row tht
+    has not been initialized.
+
+version 1.0.27rc3 and 1.2.19rc3 [August 9, 2007]
+  Slightly revised pngvcrd.c
+
+version 1.0.27rc4 and 1.2.19rc4 [August 9, 2007]
+  Revised pnggccrd.c debugging change of rc1, which was broken.
+  Revised scripts/CMakeLists.txt
+  Change default to PNG_NO_GLOBAL_ARRAYS for MSVC.
+  Turn off PNG_FLAG_ROW_INIT flag when setting transforms that expand pixels.
+
+version 1.0.27rc5 and 1.2.19rc5 [August 10, 2007]
+  Fix typo (missing '"') in pnggccrd.c
+  Revise handling of png_strtod in recent versions of WINCE
+
+version 1.0.27rc6 and 1.2.19rc6 [August 15, 2007]
+  Fix typo (missing ',') in contrib/gregbook/readpng2.c
+  Undid row initialization error exit added to rc2 and rc4.
+
+version 1.0.27 and 1.2.19 [August 18, 2007]
+  Conditionally restored row initialization error exit.
+
+version 1.2.20beta01 [August 19, 2007]
+  Fixed problem with compiling pnggccrd.c on Intel-Apple platforms.
+  Changed png_malloc() to png_malloc_warn() in png_set_sPLT().
+  Added PNG_NO_ERROR_TEXT feature, with demo in contrib/pngminim
+  Removed define PNG_WARN_UNINITIALIZED_ROW 1 /* 0: warning; 1: error */
+    because it caused some trouble.
+
+version 1.2.20beta02 [August 20, 2007]
+  Avoid compiling pnggccrd.c on Intel-Apple platforms.
+
+version 1.2.20beta03 [August 20, 2007]
+  Added "/D PNG_NO_MMX_CODE" to the non-mmx builds of projects/visualc6
+    and visualc71.
+
+version 1.2.20beta04 [August 21, 2007]
+  Revised pngvcrd.c for improved efficiency (Steve Snyder).
+
+version 1.2.20rc1 [August 23, 2007]
+  Revised pngconf.h to set PNG_NO_MMX_CODE for gcc-3.x compilers.
+
+version 1.2.20rc2 [August 27, 2007]
+  Revised scripts/CMakeLists.txt
+  Revised #ifdefs to ensure one and only one of pnggccrd.c, pngvcrd.c,
+    or part of pngrutil.c is selected.
+
+version 1.2.20rc3 [August 30, 2007]
+  Remove a little more code in pngwutil.c when PNG_NO_WRITE_FILTER is selected.
+  Added /D _CRT_SECURE_NO_WARNINGS to visual6c and visualc71 projects.
+  Compile png_mmx_support() in png.c even when PNG_NO_MMX_CODE is defined.
+  Restored a "superfluous" #ifdef that was removed from 1.2.20rc2 pnggccrd.c,
+    breaking the png_mmx_support() function.
+
+version 1.2.20rc4 [September 1, 2007]
+  Removed Intel contributions (MMX, Optimized C).
+
+version 1.2.20rc5 [September 2, 2007]
+  Restored configure and Makefile.in to rc3 and put a snippet of code in
+    pnggccrd.c, to ensure configure makes the same PNG_NO_MMX_CODE selection
+
+version 1.2.20rc6 [September 2, 2007]
+  Fixed bugs in scripts/CMakeLists.txt
+  Removed pngvcrd.c references from msvc projects.
+
+version 1.0.28 and 1.2.20 [September 8, 2007]
+  Removed "(NO READ SUPPORT)" from png_get_header_version() string.
+
+version 1.2.21beta1 [September 14, 2007]
+  Fixed various mistakes reported by George Cook and Jeff Phillips:
+  logical vs bitwise NOT in pngrtran.c, bug introduced in 1.2.19rc2
+  16-bit cheap transparency expansion, bug introduced in 1.2.19beta2
+  errors with sizeof(unknown_chunk.name), bugs introduced in 1.2.19beta11
+  <= compare with unsigned var in pngset.c, should be ==.
+
+version 1.2.21beta2 [September 18, 2007]
+  Removed some extraneous typecasts.
+
+version 1.2.21rc1 [September 25, 2007]
+  Fixed potential out-of-bounds reads in png_handle_pCAL() and
+    png_handle_ztXt() ("flayer" results reported by Tavis Ormandy).
+
+version 1.2.21rc2 [September 26, 2007]
+  Fixed potential out-of-bounds reads in png_handle_sCAL(),
+    png_handle_iTXt(), and png_push_read_tEXt().
+  Remove some PNG_CONST declarations from pngwutil.c to avoid compiler warnings
+  Revised makefiles to update paths in libpng.pc properly.
+
+version 1.2.21rc3 [September 27, 2007]
+  Revised makefiles to update "Libs" in libpng.pc properly.
+
+version 1.0.29 and 1.2.21rc3 [October 4, 2007]
+  No changes.
+
+version 1.2.22beta1 [October 4, 2007]
+  Again, fixed logical vs bitwise NOT in pngrtran.c, bug introduced
+    in 1.2.19rc2
+
+version 1.2.22beta2 [October 5, 2007]
+  Fixed string length error in pngset.c (caused crashes while decoding iCCP)
+  Add terminating NULL after each instance of png_strncpy().
+
+version 1.2.22beta3 [October 6, 2007]
+  Fix two off-by-one terminating NULL after png_strncpy().
+
+version 1.2.22beta4 [October 7, 2007]
+  Changed some 0 to '\0'.
+
+version 1.0.30rc1 and 1.2.22rc1 [October 8, 2007]
+  No changes.
+
+version 1.0.30 and 1.2.22 [October 13, 2007]
+  No changes.
+
+version 1.2.23beta01 [October 15, 2007]
+  Reduced number of invocations of png_strlen() in pngset.c.
+  Changed [azAZ09_] to [_abcde...89] in Makefile.am for better localization.
+
+version 1.2.23beta02 [October 16, 2007]
+  Eliminated png_strncpy() and png_strcpy() (Pierre Poissinger)
+  Changed $AN to $(AN) in Makefile.am.
+
+version 1.2.23beta03 [October 16, 2007]
+  Fixed off-by-one error in pngset.c
+  Restore statement to set last character of buffer to \0 in pngerror.c
+
+version 1.2.23beta04 [October 23, 2007]
+  Reject attempt to set all-zero cHRM values.
+
+version 1.2.23beta05 [October 26, 2007]
+  Add missing quotes in projects/visualc6, lost in version 1.2.20rc3
+
+version 1.2.23rc01 [November 2, 2007]
+  No changes.
+
+version 1.2.23 [November 6, 2007]
+  No changes.
+
+version 1.2.24beta01 [November 19, 2007]
+  Moved misplaced test for malloc failure in png_set_sPLT().  This bug was
+    introduced in libpng-1.2.20beta01.
+  Ifdef out avg_row etc from png.h and pngwrite.c when PNG_NO_WRITE_FILTER
+  Do not use png_ptr->free_fn and png_ptr->mem_fn in png_destroy_read_struct()
+    when png_ptr is NULL (Marshall Clow).
+  Updated handling of symbol prefixes in Makefile.am and configure.ac (Mike
+    Frysinger).
+
+version 1.2.24beta02 [November 30, 2007]
+  Removed a useless test and fixed incorrect test in png_set_cHRM_fixed()
+    (David Hill).
+
+version 1.2.24rc01 [December 7, 2007]
+  No changes.
+
+version 1.2.24     [December 14, 2007]
+  Make sure not to redefine _BSD_SOURCE in pngconf.h
+  Revised gather.sh and makefile.std in contrib/pngminim to avoid compiling
+    unused files.
+
+version 1.2.25beta01 [January 7, 2008]
+  Fixed bug with unknown chunk handling, introduced in version 1.2.17rc2
+
+version 1.2.25beta02 [January 10, 2008]
+  Prevent gamma from being applied twice.
+
+version 1.2.25rc01 [January 17, 2008]
+  No changes.
+
+version 1.2.25beta03 [January 22, 2008]
+  Fixed some continue-after-malloc-failure errors in pngset.c (David Hill)
+  Check for info_ptr == NULL in png_read_info() and png_process_data().
+  Check for possible use of NULL user_png_ver[] in png_create_read_struct().
+  Change "if (swidth == NULL)" to "if (sheight == NULL)" in png_handle_sCAL
+    (bug introduced in libpng-1.2.4/1.0.13).
+  Return from png_destroy_read_struct() if png_ptr_ptr is NULL.
+  Fix overflow of "msg" in png_decompres_chunk().
+
+version 1.2.25beta04 [January 26, 2008]
+  Work around Coverity bug report by slightly refactoring
+    png_read_push_finish_row()
+
+version 1.2.25beta05 [January 31, 2008]
+  Added libpng-1.2.25beta05.tar.lzma to distribution.  Get the lzma codec
+    from <http://tukaani.org/lzma>.
+  Added lp1225b05.7z to distribution.  Get the 7-zip decoder from
+    from <http://www.7-zip.org>.
+  Fixed some broken links in the README file.
+
+version 1.2.25beta06 [February 6, 2008]
+  Refactored png_read_push_finish_row() again, trying to satisfy Coverity.
+  Fixed potential NULL dereference of png_ptr in png_destroy_write_struct();
+  clarified potential NULL dereference of png_ptr in png_destroy_read_struct();
+  fixed potential NULL dereference of info_ptr in png_handle_bKGD();
+  fixed potential NULL dereference of user_png_ver[] in
+    png_create_write_struct_2(). (Coverity)
+
+version 1.2.25rc02 [February 10, 2008]
+  Reset png_ptr->pass in png_read_push_finish_row() before break.
+  Changed "pass" from png_byte to int.
+
+version 1.2.25 and 1.0.31 [February 18, 2008]
+  No changes.
+@
+text
+@d6 1
+a6 1
+ * Copyright (c) 1998-2006 Glenn Randers-Pehrson
+@
+
+
+1.1.107.5
+log
+@SECURITY update of libpng to 1.2.32
+@
+text
+@d4 1
+a4 1
+ * Last changed in libpng 1.2.30 [August 15, 2008]
+d6 1
+a6 1
+ * Copyright (c) 1998-2008 Glenn Randers-Pehrson
+d48 1
+a48 1
+   if (png_ptr == NULL) return;
+d74 1
+a74 1
+   if (png_ptr == NULL) return;
+d137 1
+a137 1
+   if (png_ptr == NULL) return;
+d173 1
+a173 1
+   if (png_ptr == NULL) return;
+d209 1
+a209 1
+void *png_far_to_near(png_structp png_ptr, png_voidp ptr, int check)
+d215 3
+a217 3
+   if (check != 0)
+      if (FP_SEG(ptr) != FP_SEG(far_ptr))
+         png_error(png_ptr, "segment lost in conversion");
+d221 1
+a221 1
+void *png_far_to_near(png_structp png_ptr, png_voidp ptr, int check)
+d227 3
+a229 3
+   if (check != 0)
+      if (far_ptr != ptr)
+         png_error(png_ptr, "segment lost in conversion");
+@
+
+
+1.1.107.6
+log
+@libpng 1.2.35
+@
+text
+@d4 1
+a4 1
+ * Last changed in libpng 1.2.35 [February 14, 2009]
+d6 1
+a6 1
+ * Copyright (c) 1998-2009 Glenn Randers-Pehrson
+d140 1
+a140 1
+   if (io_ptr != NULL && fileno(io_ptr) != -1)
+@
+
+
+1.1.107.7
+log
+@Update libpng in the base system, too
+@
+text
+@d4 2
+a5 1
+ * Last changed in libpng 1.2.41 [December 3, 2009]
+a9 4
+ * This code is released under the libpng license.
+ * For conditions of distribution and use, see the disclaimer
+ * and license in png.h
+ *
+a18 1
+#define PNG_NO_PEDANTIC_WARNINGS
+d23 4
+a26 5
+ * writes to a file pointer.  Note that this routine sometimes gets called
+ * with very small lengths, so you should implement some kind of simple
+ * buffering if you are using unbuffered writes.  This should never be asked
+ * to write more than 64K on a 16 bit machine.
+ */
+d37 1
+a37 1
+#ifdef PNG_STDIO_SUPPORTED
+d39 3
+a41 4
+ * not writing to a standard C stream, you should create a replacement
+ * write_data function and use it at run time with png_set_write_fn(), rather
+ * than changing the library.
+ */
+d48 2
+a49 3
+   if (png_ptr == NULL)
+      return;
+#ifdef _WIN32_WCE
+d59 4
+a62 4
+/* This is the model-independent version. Since the standard I/O library
+ * can't handle far buffers in the medium and small models, we have to copy
+ * the data.
+ */
+d74 1
+a74 2
+   if (png_ptr == NULL)
+      return;
+d80 1
+a80 1
+#ifdef _WIN32_WCE
+d96 2
+a97 2
+         png_memcpy(buf, data, written); /* Copy far buffer to near buffer */
+#ifdef _WIN32_WCE
+a104 1
+
+a106 1
+
+d120 3
+a122 4
+ * to disk).  After png_flush is called, there should be no data pending
+ * writing in any buffers.
+ */
+#ifdef PNG_WRITE_FLUSH_SUPPORTED
+d130 1
+a130 1
+#ifdef PNG_STDIO_SUPPORTED
+d134 1
+a134 1
+#ifndef _WIN32_WCE
+d137 2
+a138 3
+   if (png_ptr == NULL)
+      return;
+#ifndef _WIN32_WCE
+d140 2
+a141 1
+   fflush(io_ptr);
+d148 21
+a168 28
+ * libpng if standard C streams aren't being used.
+ *
+ * This function takes as its arguments:
+ * png_ptr       - pointer to a png output data structure
+ * io_ptr        - pointer to user supplied structure containing info about
+ *                 the output functions.  May be NULL.
+ * write_data_fn - pointer to a new output function that takes as its
+ *                 arguments a pointer to a png_struct, a pointer to
+ *                 data to be written, and a 32-bit unsigned int that is
+ *                 the number of bytes to be written.  The new write
+ *                 function should call png_error(png_ptr, "Error msg")
+ *                 to exit and output any fatal error messages.  May be
+ *                 NULL, in which case libpng's default function will
+ *                 be used.
+ * flush_data_fn - pointer to a new flush function that takes as its
+ *                 arguments a pointer to a png_struct.  After a call to
+ *                 the flush function, there should be no data in any buffers
+ *                 or pending transmission.  If the output method doesn't do
+ *                 any buffering of output, a function prototype must still be
+ *                 supplied although it doesn't have to do anything.  If
+ *                 PNG_WRITE_FLUSH_SUPPORTED is not defined at libpng compile
+ *                 time, output_flush_fn will be ignored, although it must be
+ *                 supplied for compatibility.  May be NULL, in which case
+ *                 libpng's default function will be used, if
+ *                 PNG_WRITE_FLUSH_SUPPORTED is defined.  This is not
+ *                 a good idea if io_ptr does not point to a standard
+ *                 *FILE structure.
+ */
+d173 1
+a173 3
+   if (png_ptr == NULL)
+      return;
+
+d176 1
+a176 1
+#ifdef PNG_STDIO_SUPPORTED
+a178 1
+
+d185 2
+a186 2
+#ifdef PNG_WRITE_FLUSH_SUPPORTED
+#ifdef PNG_STDIO_SUPPORTED
+a188 1
+
+d207 2
+a208 2
+#ifdef USE_FAR_KEYWORD
+#ifdef _MSC_VER
+a214 1
+
+a217 1
+
+a226 1
+
+a229 1
+
+@
+
+
+1.1.107.8
+log
+@update libpng
+@
+text
+@d5 1
+a5 1
+ * Copyright (c) 1998-2002,2004,2006-209 Glenn Randers-Pehrson
+@
+
+

@@ -1,0 +1,684 @@
+head	1.14;
+access;
+symbols
+	mirbsd:1.1.7;
+locks; strict;
+comment	@# @;
+
+
+1.14
+date	2018.10.07.01.10.14;	author tg;	state Exp;
+branches;
+next	1.13;
+commitid	1005BB95CA10BF418E8;
+
+1.13
+date	2009.10.30.15.29.18;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	1004AEB0657446D105F;
+
+1.12
+date	2008.11.08.22.24.23;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	1004916117E0B020D70;
+
+1.11
+date	2006.07.28.13.21.43;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	10044CA0F781479B01C;
+
+1.10
+date	2006.07.28.13.18.25;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	10044CA0EAE7249CF5F;
+
+1.9
+date	2006.07.28.13.15.19;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10044CA0DFA3F9595E1;
+
+1.8
+date	2006.07.28.13.14.53;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10044CA0DDF43764838;
+
+1.7
+date	2006.06.26.14.14.19;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100449FEB6C2A497C12;
+
+1.6
+date	2006.03.27.07.19.54;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100442791FB2367B483;
+
+1.5
+date	2006.01.28.16.18.59;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10043DB9977438B7220;
+
+1.4
+date	2006.01.28.14.43.33;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10043DB82E743FE3623;
+
+1.3
+date	2005.12.17.05.46.07;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10043A3A3E65E20A413;
+
+1.2
+date	2005.05.25.23.50.29;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	715c42950f4ccef2;
+
+1.1
+date	2005.02.05.02.36.15;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.02.05.02.36.15;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.14
+log
+@spelling cleanup: “programme” is distinct from “program”; even in
+British English, the latter is used for computer programs, while
+the former serves for things like the TV programme, or a programme
+to plant trees
+@
+text
+@#!/bin/mksh
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.13 2009/10/30 15:29:18 tg Exp $
+#-
+# Copyright (c) 2004, 2006
+#	Thorsten "mirabilos" Glaser <tg@@mirbsd.org>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# All advertising materials mentioning features or use of this soft-
+# ware must display the following acknowledgement:
+#	This product includes material provided by Thorsten Glaser.
+#
+# Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+# express, or implied, to the maximum extent permitted by applicable
+# law, without malicious intent or gross negligence; in no event may
+# licensor, an author or contributor be held liable for any indirect
+# or other damage, or direct damage except proven a consequence of a
+# direct error of said person and intended use of this work, loss or
+# other issues arising in any way out of its use, even if advised of
+# the possibility of such damage or existence of a nontrivial bug.
+#-
+# Sample implementation for the Heartbeat protocol, originally desi-
+# gned by the SixXS IPv6 tunnel provider. MirOS hbServer is not sup-
+# ported or endorsed by SixXS.
+# This is the client part of the implementation.
+#
+# Overview:
+# This script is intended to be both usable as standalone command as
+# well as a DJB-style "/service/*/run" script for supervision by djb
+# daemontools. Configuration is at the top of the script; first end-
+# user specific configuration such as passwords or interfaces; after
+# that, machine class configuration (such as adaptions for the OS).
+#
+# The script ought to be chmod'd 0500 so no password leakage occurs.
+#
+# Installation for the SixXS version of the script:
+# Put this into /service/sixxs/run chmod 0500. Create a subdirectory
+# log/main, chown it to the log user (for example _dnslog). Create a
+# /service/sixxs/log/run script (chmod 0555) containing these lines:
+#	#!/bin/sh
+#	exec setuidgid _dnslog multilog t ./main
+# Edit the configuration sections below and start the service.
+#
+# You need some configuration in /etc too:
+# --- begin /etc/hostname.gif4589
+# !/sbin/ifconfig \$if up
+# !/sbin/route -n add -inet6 default fe80::%\$if -mtu 1280
+# --- end /etc/hostname.gif4589
+#
+# --- snippet /etc/ppp/ip-up
+# [...]
+# ifconfig gif4589 down
+# [...]
+# pfctl -f /etc/pf.conf 2>&1	| logger -t pfctl-load
+# pfctl -i $1 -F state 2>&1	| logger -t pfctl-flush
+# pfctl -e >/dev/null 2>&1	# just in case...
+# [...]
+# /service/sixxs/run once 2>&1 | logger -t 'sixxs-reload'
+# ifconfig gif4589 giftunnel $4 212.224.0.188 up
+# [...]
+# --- end /etc/ppp/ip-up
+#
+# You also need to configure the following line in /etc/pf.conf
+# if you have a subnet:
+#	rdr on $TUNNEL inet6 from any to $MYUSER -> 2001:x:y:z:a:b:c:d
+# If not, add the following to /etc/hostname.gif4589:
+#	!/sbin/ifconfig \$if inet6 ${MYUSER} ${MYUSER%2}1 prefixlen 128
+#
+# Invocation if not run via daemontools:
+# hbclient &		- run as background process, beating
+# hbclient down		- run once, tell the server the tunnel is down
+# hbclient pass		- run once, ask server for password change
+#			  (interactively asks for new password twice)
+# hbclient once		- run once, beat once only
+#
+# Changing the password is only supported by the MirOS hbServer, not
+# by SixXS.
+
+
+#=== per-user configuration (SixXS mode) ===
+
+#-- user preferences
+
+# log to syslog (uncomment to enable)
+#SYSLOG="hbClient"			# syslog tag
+# log to stdout (comment to disable)
+STDOUT=1
+# execute script with "set -x" (uncomment to enable)
+#STDERR=1				# debug to stdout
+#STDERR=log				# debug to file
+
+# create PID file? (uncomment to enable)
+#GENPID=1				# /var/run/$TUNNEL.pid
+
+#-- SixXS login
+
+# my user name, a.k.a. IPv6 address of the tunnel
+MYUSER="2001:6f8:900:<xxxx>::2"
+# my password
+MYPASS="hagelslag"
+# IPv4 address of the tunnel server/endpoint
+SERVER="212.224.0.188"
+
+#-- machine specifics
+
+# where do I get my IP address from?
+EXT_IF="pppoe0"				# name of external interface
+#SENDER=1				# use "sender" (DANGEROUS, see below)
+
+# where do I want my tunnel to arrive?
+TUNNEL="gif4589"			# name of external interface
+
+#=== per-OS configuration (SixXS mode) ===
+
+# get IPv4 address of external interface
+function getip
+{
+	if [[ -n $SENDER ]]; then
+		# dangerous: changes to the IP address are never seen
+		# by the rest of the script, so the tunnel is not
+		# automatically configured
+		print sender
+	else
+		local gotit=0
+		ifconfig $EXT_IF |&
+		while read -p a b c; do
+			[[ $a = inet ]] || continue
+			gotit=1
+			print $b
+			break
+		done
+		[[ $gotit = 1 ]] || print 0.0.0.0
+	fi
+}
+
+#=== subroutines (not configurable) ===
+
+progname="${0:-hbClient}"	# program name
+progname="${progname##*/}"	# basename of progname
+
+#-- logging
+
+# send a line to the log
+function log
+{
+	if [[ -n $STDOUT ]]; then
+		print "$@@"
+	fi
+	if [[ ${SYSLOG+set} = set ]]; then
+		print "$@@" | logger -t "${SYSLOG:-hbClient}"
+	fi
+}
+
+# send always; send to syslog if no stdout logging
+function logall
+{
+	if [[ -n $STDOUT ]]; then
+		log "$@@"
+	else
+		print "$@@" | logger -t "${SYSLOG:-hbClient}"
+	fi
+}
+
+#-- server communication
+
+# add date, password/hash and send to server
+function tell
+{
+	line="$* $(date +%s)"
+	cl="$line $MYPASS"
+	sl="$line $(print -nr -- $cl | md5)"
+	print -n -- $sl\\0 | nc -4nuw0 $SERVER 3740
+}
+
+# send DISABLE TUNNEL to server
+function do_disable
+{
+	log disabling tunnel for $MYUSER
+	tell DISABLE TUNNEL $MYUSER sender
+}
+
+# send HEARTBEAT TUNNEL to server
+function do_heartbeat
+{
+	log beating tunnel for $MYUSER ${1+on} $1
+	tell HEARTBEAT TUNNEL $MYUSER ${1:-sender}
+}
+
+# send change request for password to server
+function do_passwd
+{
+	log changing password for $MYUSER
+	tell PASSWD "$1" $MYUSER
+}
+
+#-- running the script
+
+# clean up
+function destruct
+{
+	logall received destruct
+	[[ -n $GENPID ]] && rm -f /var/run/$TUNNEL.pid
+	do_disable
+	log bye
+	exit ${1:-0}
+}
+
+pass=
+
+# read password
+function askpass
+{
+	set -o noglob
+	stty -echo
+	read pass?"$1 "
+	stty echo
+	set +o noglob
+	print
+}
+
+# abort with error
+function die
+{
+	print -- "${progname}:" "$@@"
+	exit 1
+}
+
+#=== main program ===
+
+typeset -u parm="$1"
+
+if [[ $parm = DOWN ]]; then
+	do_disable
+	exit 0
+fi
+
+if [[ $parm = PASS ]]; then
+	print Changing password for $MYUSER
+	pass=
+	askpass "New password:"
+	np1="$pass"
+	askpass "Again please:"
+	np2="$pass"
+	[[ $np1 = $np2 ]] || die Passwords do not match
+	[[ -n $np1 ]] || die New password is empty
+	do_passwd "$np1"
+	me="$(cd $(dirname "$0"); pwd)$(basename "$0")"
+	print
+	print Do not forget to edit $me
+	print replacing the old password with the one just entered.
+	exit 0
+fi
+
+if [[ $parm = ONCE ]]; then
+	do_heartbeat $(getip)
+	exit 0
+fi
+
+[[ -n $parm ]] && die Unknown command: $parm
+
+
+#-- we can run as hbClient now
+
+# daemonise or run under supervision
+#XXX this may be the cause for failures; rewrite and use "mksh -T-" instead!
+exec 0<&-
+[[ -n $STDOUT || $STDERR = 1 ]] || exec 1>&-
+if [[ -z $STDERR ]]; then
+	exec 2>&-
+else
+	if [[ $STDERR = 1 ]]; then
+		exec 2>&1
+	else
+		eval "exec 2>>$STDERR"
+	fi
+	set -x
+fi
+
+# set up
+log Entering setup for $MYUSER
+[[ -n $GENPID ]] && print $$ >/var/run/$TUNNEL.pid
+
+# trap exits
+trap 'destruct 0' HUP TERM
+trap 'destruct 1' INT
+
+# main loop
+OLD_IP=sender
+while : ; do
+	NEW_IP=$(getip)
+	if [[ $NEW_IP != $OLD_IP ]]; then
+		# status change (never reached if SENDER)
+		if [[ -n $NEW_IP ]]; then
+			logall reconfiguring $MYUSER to $NEW_IP
+		else
+			logall ERROR: $MYUSER cannot find new IP, disabling
+			do_disable
+		fi
+		OLD_IP=$NEW_IP
+	fi
+	[[ -n $NEW_IP ]] && do_heartbeat $NEW_IP
+	sleep 60 & wait
+done
+# NOTREACHED
+@
+
+
+1.13
+log
+@document that “mksh -T- script” (or “mksh -T- -c "command"”) is better
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.12 2008/11/08 22:24:23 tg Exp $
+d143 1
+a143 1
+progname="${0:-hbClient}"	# programme name
+d233 1
+a233 1
+#=== main programme ===
+@
+
+
+1.12
+log
+@mass conversion 66h.42h.de → mirbsd.org
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.11 2006/07/28 13:21:43 tg Exp $
+d270 1
+@
+
+
+1.11
+log
+@clean up
+add more comments
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.10 2006/07/28 13:18:25 tg Exp $
+d5 1
+a5 1
+#	Thorsten "mirabilos" Glaser <tg@@66h.42h.de>
+@
+
+
+1.10
+log
+@we don't access the gif interface here any more
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.9 2006/07/28 13:15:19 tg Exp $
+d68 6
+a117 5
+# do I have a subnet? (if yes, place a line similar to
+#	rdr on $TUNNEL inet6 from any to $MYUSER -> 2001:x:y:z:a:b:c:d
+# into your /etc/pf.conf file to be ping-able)
+SUBNET=1				# comment if you only have a tunnel
+
+a140 15
+# set up tunnel interface
+function setup
+{
+}
+
+# throw the tunnel through IPv4 land
+function throw
+{
+}
+
+# clean up, remove interfaces and routes
+function clean
+{
+}
+
+a208 2
+	throw
+	clean
+a285 1
+setup
+a302 1
+		throw $NEW_IP
+@
+
+
+1.9
+log
+@a few more modern defaults
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.8 2006/07/28 13:14:53 tg Exp $
+d49 19
+a142 11
+	# just in case...
+	ifconfig $TUNNEL down >/dev/null 2>&1; sleep 1
+	ifconfig $TUNNEL destroy >/dev/null 2>&1
+
+	# set up interface and default route
+	ifconfig $TUNNEL up
+	route -n add -inet6 default fe80::%$TUNNEL -mtu 1280
+
+	# set up point-to-point tunnel if needed
+	[[ -n $SUBNET ]] \
+	    || ifconfig $TUNNEL inet6 ${MYUSER} ${MYUSER%2}1 prefixlen 128
+a147 6
+	# never reached if SENDER is set
+	ifconfig $TUNNEL down
+	ifconfig $TUNNEL deletetunnel
+	[[ -z $1 ]] \
+	    || ifconfig $TUNNEL giftunnel $1 $SERVER
+	ifconfig $TUNNEL up
+a152 4
+	ifconfig $TUNNEL down
+	route -n delete -inet6 default
+	sleep 1
+	ifconfig $TUNNEL destroy
+@
+
+
+1.8
+log
+@add ONCE option
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.7 2006/06/26 14:14:19 tg Exp $
+d87 1
+a87 1
+EXT_IF="tun0"				# name of external interface
+d91 1
+a91 1
+TUNNEL="gif0"				# name of external interface
+@
+
+
+1.7
+log
+@the getip function of hbmulti is cooler (and more failsafe)
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.6 2006/03/27 07:19:54 tg Exp $
+d54 1
+d277 5
+@
+
+
+1.6
+log
+@ifconfig down and sleep 1 before ifconfig destroy, just in case *hrhr*
+
+I got an interesting kernel panic on 'svc -d /service/hbmulti'
+at herc yesterday night... in6_something.
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.5 2006/01/28 16:18:59 tg Exp $
+d108 5
+a112 3
+		ifconfig $EXT_IF \
+		    | grep "^	inet " | head -1 \
+		    | while read a b c; do
+d114 1
+d116 1
+@
+
+
+1.5
+log
+@* add multi-server heartbeat client (draft)
+* fix $progname in the other clients
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.4 2006/01/28 14:43:33 tg Exp $
+d120 1
+d146 1
+d148 1
+@
+
+
+1.4
+log
+@prevent the following state table entries from happen:
+
+| pppoe0 ipv6 $tunnelserver -> $oldip -> $newip       SINGLE:NO_TRAFFIC
+| pppoe0 ipv6 $newip -> $oldip -> $tunnelserver       MULTIPLE:SINGLE
+
+oldip = IPv4 address before forced reconnect
+newip = current IPv4 address on pppoe0
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.3 2005/12/17 05:46:07 tg Exp $
+d151 3
+@
+
+
+1.3
+log
+@big fat licence update (I left some which are bsiegert@@'s alone though)
+also, remove licence boilerplate from some .h files who don't deserve it
+and remove and add some advertising clauses because I say so
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.2 2005/05/25 23:50:29 tg Exp $
+d4 2
+a5 2
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+d135 1
+d139 1
+@
+
+
+1.2
+log
+@mksh is pretty mature; switch most of contrib/ to it
+@
+text
+@d2 1
+a2 1
+# $MirOS: contrib/code/heartbeat/hbclient,v 1.1.7.1 2005/02/05 02:36:15 tg Exp $
+d18 8
+a25 7
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+a2 2
+#!/bin/ksh
+# $MirOS$
+@
+
+
+1.1.7.1
+log
+@All the code in the contributed section
+@
+text
+@@

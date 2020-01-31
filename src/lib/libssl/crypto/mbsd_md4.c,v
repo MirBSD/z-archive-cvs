@@ -1,0 +1,111 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2014.12.15.21.04.20;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100548F4CC703E2776F;
+
+1.1
+date	2014.11.29.23.47.03;	author tg;	state Exp;
+branches;
+next	;
+commitid	100547A5ABB3AF49A1B;
+
+
+desc
+@@
+
+
+1.2
+log
+@inline wrappers instead of having one more function call plus some
+assorted stack shuffling (especially where argument order differs)
+which gives us a small but nice speedup and another size reduction
+@
+text
+@#include <openssl/md4.h>
+
+#ifndef L_one
+#undef MD4_version
+#undef MD4_Init
+#undef MD4_Update
+#undef MD4_Final
+#undef MD4_Transform
+
+const char MD4_version[] __attribute__((__used__)) = "$MirOS: src/lib/libssl/crypto/mbsd_md4.c,v 1.1 2014/11/29 23:47:03 tg Exp $";
+
+int
+MD4_Init(MD4_CTX *c)
+{
+	MD4Init(c);
+	return (1);
+}
+
+int
+MD4_Update(MD4_CTX *c, const void *data, unsigned long len)
+{
+	if (len)
+		MD4Update(c, data, len);
+	return (1);
+}
+
+int
+MD4_Final(unsigned char *md, MD4_CTX *c)
+{
+	MD4Final(md, c);
+	return (1);
+}
+
+void
+MD4_Transform(MD4_CTX *c, const unsigned char *b)
+{
+	MD4Transform(c->state, b);
+}
+
+#else
+
+unsigned char *
+MD4(const unsigned char *d, unsigned long n, unsigned char *md)
+{
+	static unsigned char imd[MD4_DIGEST_LENGTH];
+	MD4_CTX ctx;
+
+	if (!md)
+		md = imd;
+	MD4Init(&ctx);
+	if (n)
+		MD4Update(&ctx, d, n);
+	MD4Final(md, &ctx);
+
+	return (md);
+}
+#endif
+@
+
+
+1.1
+log
+@replace OpenSSL’s MD4 by minimal adapter around MirBSD implementation
+
+type             16 bytes     64 bytes    256 bytes   1024 bytes   8192 bytes
+OpenSSL           7986.94k    29371.09k    90663.33k   192134.21k   285419.63k
+MirBSD            7824.78k    25051.96k    62529.97k   103412.33k   126034.92k
+
+This saves us 4491 bytes in the .so file though, and is much better
+for maintenance and sustainability (especially with SHA-2 yet to come).
+Also, having only one codepath is better.
+@
+text
+@d3 8
+a10 1
+const char MD4_version[] __attribute__((__used__)) = "$MirOS$";
+d40 2
+d57 1
+@
+

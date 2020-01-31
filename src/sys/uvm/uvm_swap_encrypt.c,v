@@ -1,0 +1,707 @@
+head	1.6;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.1
+	MIRBSD_10:1.2.0.6
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2010.09.19.20.00.03;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004C966BDB4A826D84;
+
+1.5
+date	2010.09.19.19.14.42;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	1004C96612772B54750;
+
+1.4
+date	2008.11.08.23.04.26;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10049161AB22DF5DFC5;
+
+1.3
+date	2008.03.21.20.57.33;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10047E420D8027C8058;
+
+1.2
+date	2005.04.29.15.02.26;	author tg;	state Exp;
+branches
+	1.2.4.1;
+next	1.1;
+
+1.1
+date	2005.02.05.17.29.22;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.2.4.1
+date	2007.10.20.23.05.12;	author tg;	state Exp;
+branches;
+next	1.2.4.2;
+commitid	100471A89B94D930F42;
+
+1.2.4.2
+date	2007.10.21.17.11.51;	author tg;	state Exp;
+branches;
+next	1.2.4.3;
+commitid	100471B879B7F0DA6F7;
+
+1.2.4.3
+date	2008.03.20.16.51.06;	author tg;	state Exp;
+branches;
+next	1.2.4.4;
+commitid	10047E2946B53F3F802;
+
+1.2.4.4
+date	2008.03.21.01.29.03;	author tg;	state Exp;
+branches;
+next	1.2.4.5;
+commitid	10047E30F651380C977;
+
+1.2.4.5
+date	2008.03.21.03.30.41;	author tg;	state Exp;
+branches;
+next	1.2.4.6;
+commitid	10047E32BEE41C72D5F;
+
+1.2.4.6
+date	2008.03.21.03.32.01;	author tg;	state Exp;
+branches;
+next	1.2.4.7;
+commitid	10047E32C475635BF76;
+
+1.2.4.7
+date	2008.03.21.03.33.05;	author tg;	state Exp;
+branches;
+next	1.2.4.8;
+commitid	10047E32C883DB5FB4F;
+
+1.2.4.8
+date	2008.03.21.03.53.07;	author tg;	state Exp;
+branches;
+next	1.2.4.9;
+commitid	10047E3312F112EA7CB;
+
+1.2.4.9
+date	2008.03.21.19.54.57;	author tg;	state Exp;
+branches;
+next	1.2.4.10;
+commitid	10047E4129F7D5DD07C;
+
+1.2.4.10
+date	2008.03.21.20.19.12;	author tg;	state Exp;
+branches;
+next	;
+commitid	10047E418572F4C5818;
+
+1.1.1.1
+date	2005.02.05.17.29.22;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.6
+log
+@fix build
+@
+text
+@/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.5 2010/09/19 19:14:42 tg Exp $ */
+/*	$OpenBSD: uvm_swap_encrypt.c,v 1.12 2003/12/26 10:04:49 markus Exp $	*/
+
+/*-
+ * Copyright 2008 Thorsten Glaser <tg@@mirbsd.org>
+ * Copyright 1999 Niels Provos <provos@@citi.umich.edu>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Niels Provos.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/malloc.h>
+#include <sys/sysctl.h>
+#include <sys/time.h>
+#include <sys/conf.h>
+#include <dev/rndvar.h>
+#include <crypto/rijndael.h>
+
+#include <uvm/uvm.h>
+
+struct swap_key *kcur = NULL;
+rijndael_ctx swap_ctxt;
+
+int uvm_doswapencrypt = 1;
+u_int uvm_swpkeyscreated = 0;
+u_int uvm_swpkeysdeleted = 0;
+
+int swap_encrypt_initialized = 0;
+
+int
+swap_encrypt_ctl(name, namelen, oldp, oldlenp, newp, newlen, p)
+	int *name;
+	u_int namelen;
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+	struct proc *p;
+{
+	/* all sysctl names at this level are terminal */
+	if (namelen != 1)
+		return (ENOTDIR);		/* overloaded */
+
+	switch (name[0]) {
+	case SWPENC_ENABLE: {
+		int doencrypt = uvm_doswapencrypt;
+		int result;
+
+		result = sysctl_int(oldp, oldlenp, newp, newlen, &doencrypt);
+		if (result)
+			return result;
+
+		/* Swap Encryption has been turned on, we need to
+		 * initialize state for swap devices that have been
+		 * added
+		 */
+		if (doencrypt)
+			uvm_swap_initcrypt_all();
+		uvm_doswapencrypt = doencrypt;
+		return (0);
+	}
+	case SWPENC_CREATED:
+		return (sysctl_rdint(oldp, oldlenp, newp, uvm_swpkeyscreated));
+	case SWPENC_DELETED:
+		return (sysctl_rdint(oldp, oldlenp, newp, uvm_swpkeysdeleted));
+	default:
+		return (EOPNOTSUPP);
+	}
+	/* NOTREACHED */
+}
+
+void
+swap_key_create(struct swap_key *key)
+{
+	key->refcount = 0;
+	arc4random_buf(key->key, sizeof(key->key));
+
+	uvm_swpkeyscreated++;
+}
+
+void
+swap_key_delete(struct swap_key *key)
+{
+	/* Make sure that this key gets removed if we just used it */
+	swap_key_cleanup(key);
+
+	memset(key, 0, sizeof(*key));
+	uvm_swpkeysdeleted++;
+}
+
+/*
+ * Encrypt the data before it goes to swap, the size should be 128-bit
+ * aligned.
+ */
+
+void
+swap_encrypt(struct swap_key *key, caddr_t src, caddr_t dst,
+	     u_int64_t block, size_t count)
+{
+	u_int32_t iv[4];
+
+	if (!swap_encrypt_initialized)
+		swap_encrypt_initialized = 1;
+
+	swap_key_prepare(key, 1);
+
+	iv[0] = block >> 32; iv[1] = block; iv[2] = ~iv[0]; iv[3] = ~iv[1];
+	(*rijndael_cbc_encrypt_fast)(&swap_ctxt, NULL, (u_char *)iv,
+	    (u_char *)iv, 1);
+	(*rijndael_cbc_encrypt_fast)(&swap_ctxt, (u_char *)iv, (u_char *)src,
+	    (u_char *)dst, count / 16);
+}
+
+/*
+ * Decrypt the data after we retrieved it from swap, the size should be 128-bit
+ * aligned.
+ */
+
+void
+swap_decrypt(struct swap_key *key, caddr_t src, caddr_t dst,
+	     u_int64_t block, size_t count)
+{
+	u_int32_t iv[4];
+
+	if (!swap_encrypt_initialized)
+		panic("swap_decrypt: key not initialized");
+
+	swap_key_prepare(key, 0);
+
+	iv[0] = block >> 32; iv[1] = block; iv[2] = ~iv[0]; iv[3] = ~iv[1];
+	(*rijndael_cbc_encrypt_fast)(&swap_ctxt, NULL, (u_char *)iv,
+	    (u_char *)iv, 1);
+	(*rijndael_cbc_decrypt_fast)(&swap_ctxt, (u_char *)iv, (u_char *)src,
+	    (u_char *)dst, count / 16);
+}
+
+void
+swap_key_prepare(struct swap_key *key, int encrypt)
+{
+	/* Check if we have prepared for this key already,
+	 * if we only have the encryption schedule, we have
+	 * to recompute and get the decryption schedule also
+	 */
+	if (kcur == key && (encrypt || !swap_ctxt.enc_only))
+		return;
+
+	if (encrypt)
+		(*rijndael_set_key_enc_only_fast)(&swap_ctxt,
+		    (u_char *)key->key, sizeof (key->key) * 8);
+	else
+		(*rijndael_set_key_fast)(&swap_ctxt,
+		    (u_char *)key->key, sizeof (key->key) * 8);
+
+	kcur = key;
+}
+
+/*
+ * Make sure that a specific key is no longer available.
+ */
+
+void
+swap_key_cleanup(struct swap_key *key)
+{
+	/* Check if we have a key */
+	if (kcur == NULL || kcur != key)
+		return;
+
+	/* Zero out the subkeys */
+       	memset(&swap_ctxt, 0, sizeof(swap_ctxt));
+
+	kcur = NULL;
+}
+@
+
+
+1.5
+log
+@we can use arc4random() “always”, even on a cold system, now
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.4 2008/11/08 23:04:26 tg Exp $ */
+a100 2
+	int i;
+
+@
+
+
+1.4
+log
+@more mass conversions, including ancient eMail addresses
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.3 2008/03/21 20:57:33 tg Exp $ */
+a101 1
+	u_int32_t *p = key->key;
+d104 1
+a104 2
+	for (i = 0; i < sizeof(key->key) / sizeof(u_int32_t); i++)
+		*p++ = arc4random();
+@
+
+
+1.3
+log
+@merge the tg-crypto-improvements branch in their entirety:
+• more efficient uvm_swap_encrypt code
+• kernel-global AES-CBC (128, 192, 256) API
+• kernel-global fast-AES API through function pointers
+• VIA C3/C7 PadLock™ is eligible for the fast API
+• hifn(4) and friends are not: modern CPUs are faster in software sometimes
+• fix a data corruption bug in the VIA HW-AES code
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.2.4.10 2008/03/21 20:19:12 tg Exp $ */
+d5 1
+a5 1
+ * Copyright 2008 Thorsten Glaser <tg@@66h.42h.de>
+@
+
+
+1.2
+log
+@encrypt swap by default, idea from obsd
+@
+text
+@d1 1
+d4 2
+a5 1
+/*
+d81 1
+a81 1
+		 * added 
+d122 1
+a122 1
+ * Encrypt the data before it goes to swap, the size should be 64-bit
+a129 2
+	u_int32_t *dsrc = (u_int32_t *)src;
+	u_int32_t *ddst = (u_int32_t *)dst;
+a130 1
+	u_int32_t iv1, iv2, iv3, iv4;
+a136 2
+	count /= sizeof(u_int32_t);
+
+d138 4
+a141 21
+	rijndael_encrypt(&swap_ctxt, (u_char *)iv, (u_char *)iv); 
+	iv1 = iv[0]; iv2 = iv[1]; iv3 = iv[2]; iv4 = iv[3];
+
+	for (; count > 0; count -= 4) {
+		ddst[0] = dsrc[0] ^ iv1;
+		ddst[1] = dsrc[1] ^ iv2;
+		ddst[2] = dsrc[2] ^ iv3;
+		ddst[3] = dsrc[3] ^ iv4;
+		/*
+		 * Do not worry about endianess, it only needs to decrypt
+		 * on this machine
+		 */
+		rijndael_encrypt(&swap_ctxt, (u_char *)ddst, (u_char *)ddst);
+		iv1 = ddst[0];
+		iv2 = ddst[1];
+		iv3 = ddst[2];
+		iv4 = ddst[3];
+
+		dsrc += 4;
+		ddst += 4;
+	}
+d145 1
+a145 1
+ * Decrypt the data after we retrieved it from swap, the size should be 64-bit
+a152 2
+	u_int32_t *dsrc = (u_int32_t *)src;
+	u_int32_t *ddst = (u_int32_t *)dst;
+a153 1
+	u_int32_t iv1, iv2, iv3, iv4, niv1, niv2, niv3, niv4;
+a159 2
+	count /= sizeof(u_int32_t);
+
+d161 4
+a164 22
+	rijndael_encrypt(&swap_ctxt, (u_char *)iv, (u_char *)iv); 
+	iv1 = iv[0]; iv2 = iv[1]; iv3 = iv[2]; iv4 = iv[3];
+
+	for (; count > 0; count -= 4) {
+		ddst[0] = niv1 = dsrc[0];
+		ddst[1] = niv2 = dsrc[1];
+		ddst[2] = niv3 = dsrc[2];
+		ddst[3] = niv4 = dsrc[3];
+		rijndael_decrypt(&swap_ctxt, (u_char *)ddst, (u_char *)ddst);
+		ddst[0] ^= iv1;
+		ddst[1] ^= iv2;
+		ddst[2] ^= iv3;
+		ddst[3] ^= iv4;
+
+		iv1 = niv1;
+		iv2 = niv2;
+		iv3 = niv3;
+		iv4 = niv4;
+
+		dsrc += 4;
+		ddst += 4;
+	}
+d178 2
+a179 2
+		rijndael_set_key_enc_only(&swap_ctxt, (u_char *)key->key,
+		    sizeof(key->key) * 8);
+d181 2
+a182 2
+		rijndael_set_key(&swap_ctxt, (u_char *)key->key,
+		    sizeof(key->key) * 8);
+@
+
+
+1.2.4.1
+log
+@use the indirected function pointers
+@
+text
+@a0 1
+/**	$MirOS$ */
+d79 1
+a79 1
+		 * added
+d141 1
+a141 1
+	(*rijndael_encrypt_fast)(&swap_ctxt, (u_char *)iv, (u_char *)iv);
+d153 1
+a153 2
+		(*rijndael_encrypt_fast)(&swap_ctxt, (u_char *)ddst,
+		    (u_char *)ddst);
+d186 1
+a186 1
+	(*rijndael_encrypt_fast)(&swap_ctxt, (u_char *)iv, (u_char *)iv);
+d194 1
+a194 2
+		(*rijndael_decrypt_fast)(&swap_ctxt, (u_char *)ddst,
+		    (u_char *)ddst);
+@
+
+
+1.2.4.2
+log
+@we need to use a different key setup method too
+XXX where do we store algorithm-specific information?
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.2.4.1 2007/10/20 23:05:12 tg Exp $ */
+d224 1
+a224 1
+		(*rijndael_set_key_enc_only_fast)(&swap_ctxt, (u_char *)key->key,
+d227 1
+a227 1
+		(*rijndael_set_key_fast)(&swap_ctxt, (u_char *)key->key,
+@
+
+
+1.2.4.3
+log
+@revert all of the old diffs for the tg-crypto-improvements branch,
+except the alignment changes to the rĳndaël ctx structure
+@
+text
+@d1 1
+d142 1
+a142 1
+	rijndael_encrypt(&swap_ctxt, (u_char *)iv, (u_char *)iv);
+d154 2
+a155 1
+		rijndael_encrypt(&swap_ctxt, (u_char *)ddst, (u_char *)ddst);
+d188 1
+a188 1
+	rijndael_encrypt(&swap_ctxt, (u_char *)iv, (u_char *)iv);
+d196 2
+a197 1
+		rijndael_decrypt(&swap_ctxt, (u_char *)ddst, (u_char *)ddst);
+d224 1
+a224 1
+		rijndael_set_key_enc_only(&swap_ctxt, (u_char *)key->key,
+d227 1
+a227 1
+		rijndael_set_key(&swap_ctxt, (u_char *)key->key,
+@
+
+
+1.2.4.4
+log
+@switch UVM swapencrypt to the non-function-pointer (for now) cbc routines,
+since they work on sparc
+@
+text
+@a0 1
+/**	$MirOS$ */
+d120 1
+a120 1
+ * Encrypt the data before it goes to swap, the size should be 128-bit
+d128 2
+d131 1
+d138 2
+d141 21
+a161 3
+	rijndael_cbc_encrypt(&swap_ctxt, NULL, (u_char *)iv, (u_char *)iv, 1);
+	rijndael_cbc_encrypt(&swap_ctxt, (u_char *)iv, (u_char *)src,
+	    (u_char *)dst, count / 16);
+d165 1
+a165 1
+ * Decrypt the data after we retrieved it from swap, the size should be 128-bit
+d173 2
+d176 1
+d183 2
+d186 22
+a207 3
+	rijndael_cbc_encrypt(&swap_ctxt, NULL, (u_char *)iv, (u_char *)iv, 1);
+	rijndael_cbc_decrypt(&swap_ctxt, (u_char *)iv, (u_char *)src,
+	    (u_char *)dst, count / 16);
+@
+
+
+1.2.4.5
+log
+@add debugging. we have data corruption.
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.2.4.4 2008/03/21 01:29:03 tg Exp $ */
+a137 4
+	printf("%s: on %d bytes, iv %08X-%08X-%08X-%08X ", count, iv[0], iv[1], iv[2], iv[3]);
+	iv[0] = block >> 32; iv[1] = block; iv[2] = ~iv[0]; iv[3] = ~iv[1];
+	rijndael_encrypt(&swap_ctxt, (u_char *)iv, (u_char *)iv); 
+	printf("should be %08X-%08X-%08X-%08X\n", iv[0], iv[1], iv[2], iv[3]);
+a159 4
+	printf("%s: on %d bytes, iv %08X-%08X-%08X-%08X ", count, iv[0], iv[1], iv[2], iv[3]);
+	iv[0] = block >> 32; iv[1] = block; iv[2] = ~iv[0]; iv[3] = ~iv[1];
+	rijndael_encrypt(&swap_ctxt, (u_char *)iv, (u_char *)iv); 
+	printf("should be %08X-%08X-%08X-%08X\n", iv[0], iv[1], iv[2], iv[3]);
+@
+
+
+1.2.4.6
+log
+@argh!
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.2.4.5 2008/03/21 03:30:41 tg Exp $ */
+d138 1
+a138 1
+	printf("%s: on %d bytes, iv %08X-%08X-%08X-%08X ", __func__, count, iv[0], iv[1], iv[2], iv[3]);
+d164 1
+a164 1
+	printf("%s: on %d bytes, iv %08X-%08X-%08X-%08X ", __func__, count, iv[0], iv[1], iv[2], iv[3]);
+@
+
+
+1.2.4.7
+log
+@gna
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.2.4.6 2008/03/21 03:32:01 tg Exp $ */
+d138 1
+a138 1
+	printf("%s: on %d bytes, iv %08X-%08X-%08X-%08X ", __func__, (int)count, iv[0], iv[1], iv[2], iv[3]);
+d164 1
+a164 1
+	printf("%s: on %d bytes, iv %08X-%08X-%08X-%08X ", __func__, (int)count, iv[0], iv[1], iv[2], iv[3]);
+@
+
+
+1.2.4.8
+log
+@remove the debugging, as IV generation was fine already
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.2.4.4 2008/03/21 01:29:03 tg Exp $ */
+d138 4
+d164 4
+@
+
+
+1.2.4.9
+log
+@actually use the _fast pointers for swap encryption now
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.2.4.8 2008/03/21 03:53:07 tg Exp $ */
+d4 1
+a4 2
+/*-
+ * Copyright 2008 Thorsten Glaser <tg@@66h.42h.de>
+d137 2
+a138 3
+	(*rijndael_cbc_encrypt_fast)(&swap_ctxt, NULL, (u_char *)iv,
+	    (u_char *)iv, 1);
+	(*rijndael_cbc_encrypt_fastt)(&swap_ctxt, (u_char *)iv, (u_char *)src,
+d159 2
+a160 3
+	(*rijndael_cbc_encrypt_fast)(&swap_ctxt, NULL, (u_char *)iv,
+	    (u_char *)iv, 1);
+	(*rijndael_cbc_decrypt_fast)(&swap_ctxt, (u_char *)iv, (u_char *)src,
+d175 2
+a176 2
+		(*rijndael_set_key_enc_only_fast)(&swap_ctxt,
+		    (u_char *)key->key, sizeof (key->key) * 8);
+d178 2
+a179 2
+		(*rijndael_set_key_fast)(&swap_ctxt,
+		    (u_char *)key->key, sizeof (key->key) * 8);
+@
+
+
+1.2.4.10
+log
+@typo
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/uvm/uvm_swap_encrypt.c,v 1.2.4.9 2008/03/21 19:54:57 tg Exp $ */
+d140 1
+a140 1
+	(*rijndael_cbc_encrypt_fast)(&swap_ctxt, (u_char *)iv, (u_char *)src,
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d48 1
+a48 1
+int uvm_doswapencrypt = 0;
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

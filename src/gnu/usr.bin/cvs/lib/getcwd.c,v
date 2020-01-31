@@ -1,0 +1,784 @@
+head	1.4;
+access;
+symbols
+	MIRBSD_10:1.1.101.2.0.4
+	MIRBSD_10_BASE:1.1.101.2
+	MIRBSD_9_BASE:1.1.101.2
+	MIRBSD_8:1.1.101.2.0.2
+	MIRBSD_8_BASE:1.1.101.2
+	cvs-1_12_13:1.1.101.2
+	cvs-1_12_12:1.1.101.1
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2017.08.07.20.13.05;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1005988C69344442E37;
+
+1.3
+date	2010.09.19.19.42.57;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C9667C83946BB2E;
+
+1.2
+date	2010.09.16.20.55.57;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004C928463526833A8;
+
+1.1
+date	2005.04.19.20.33.22;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.04.19.20.33.22;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.12.05.21.43.46;	author tg;	state Exp;
+branches;
+next	;
+commitid	2cec4394b499b817;
+
+
+desc
+@@
+
+
+1.4
+log
+@filesystem
+@
+text
+@/* Copyright (C) 1991,92,93,94,95,96,97,98,99,2004,2005 Free Software
+   Foundation, Inc.
+   This file is part of the GNU C Library.
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2, or (at your option)
+   any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License along
+   with this program; if not, write to the Free Software Foundation,
+   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.  */
+
+#ifdef	HAVE_CONFIG_H
+# include <config.h>
+#endif
+
+#if !_LIBC
+# include "getcwd.h"
+#endif
+
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+#include <fcntl.h> /* For AT_FDCWD on Solaris 9.  */
+
+__RCSID("$MirOS: src/gnu/usr.bin/cvs/lib/getcwd.c,v 1.3 2010/09/19 19:42:57 tg Exp $");
+
+#ifndef __set_errno
+# define __set_errno(val) (errno = (val))
+#endif
+
+#if HAVE_DIRENT_H || _LIBC
+# include <dirent.h>
+# ifndef _D_EXACT_NAMLEN
+#  define _D_EXACT_NAMLEN(d) strlen ((d)->d_name)
+# endif
+#else
+# define dirent direct
+# if HAVE_SYS_NDIR_H
+#  include <sys/ndir.h>
+# endif
+# if HAVE_SYS_DIR_H
+#  include <sys/dir.h>
+# endif
+# if HAVE_NDIR_H
+#  include <ndir.h>
+# endif
+#endif
+#ifndef _D_EXACT_NAMLEN
+# define _D_EXACT_NAMLEN(d) ((d)->d_namlen)
+#endif
+#ifndef _D_ALLOC_NAMLEN
+# define _D_ALLOC_NAMLEN(d) (_D_EXACT_NAMLEN (d) + 1)
+#endif
+
+#if HAVE_UNISTD_H || _LIBC
+# include <unistd.h>
+#endif
+
+#include <stdlib.h>
+#include <string.h>
+
+#if _LIBC
+# ifndef mempcpy
+#  define mempcpy __mempcpy
+# endif
+#else
+# include "mempcpy.h"
+#endif
+
+#include <limits.h>
+
+#ifdef ENAMETOOLONG
+# define is_ENAMETOOLONG(x) ((x) == ENAMETOOLONG)
+#else
+# define is_ENAMETOOLONG(x) 0
+#endif
+
+#ifndef MAX
+# define MAX(a, b) ((a) < (b) ? (b) : (a))
+#endif
+#ifndef MIN
+# define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef PATH_MAX
+# ifdef	MAXPATHLEN
+#  define PATH_MAX MAXPATHLEN
+# else
+#  define PATH_MAX 1024
+# endif
+#endif
+
+#if D_INO_IN_DIRENT
+# define MATCHING_INO(dp, ino) ((dp)->d_ino == (ino))
+#else
+# define MATCHING_INO(dp, ino) true
+#endif
+
+#if !_LIBC
+# define __getcwd getcwd
+# define __lstat lstat
+# define __closedir closedir
+# define __opendir opendir
+# define __readdir readdir
+#endif
+
+/* Get the name of the current working directory, and put it in SIZE
+   bytes of BUF.  Returns NULL if the directory couldn't be determined or
+   SIZE was too small.  If successful, returns BUF.  In GNU, if BUF is
+   NULL, an array is allocated with `malloc'; the array is SIZE bytes long,
+   unless SIZE == 0, in which case it is as big as necessary.  */
+
+char *
+__getcwd (char *buf, size_t size)
+{
+  /* Lengths of big file name components and entire file names, and a
+     deep level of file name nesting.  These numbers are not upper
+     bounds; they are merely large values suitable for initial
+     allocations, designed to be large enough for most real-world
+     uses.  */
+  enum
+    {
+      BIG_FILE_NAME_COMPONENT_LENGTH = 255,
+      BIG_FILE_NAME_LENGTH = MIN (4095, PATH_MAX - 1),
+      DEEP_NESTING = 100
+    };
+
+#ifdef AT_FDCWD
+  int fd = AT_FDCWD;
+  bool fd_needs_closing = false;
+#else
+  char dots[DEEP_NESTING * sizeof ".." + BIG_FILE_NAME_COMPONENT_LENGTH + 1];
+  char *dotlist = dots;
+  size_t dotsize = sizeof dots;
+  size_t dotlen = 0;
+#endif
+  DIR *dirstream = NULL;
+  dev_t rootdev, thisdev;
+  ino_t rootino, thisino;
+  char *dir;
+  register char *dirp;
+  struct stat st;
+  size_t allocated = size;
+  size_t used;
+
+#if HAVE_PARTLY_WORKING_GETCWD
+  /* The system getcwd works, except it sometimes fails when it
+     shouldn't, setting errno to ERANGE, ENAMETOOLONG, or ENOENT.  If
+     AT_FDCWD is not defined, the algorithm below is O(N**2) and this
+     is much slower than the system getcwd (at least on GNU/Linux).
+     So trust the system getcwd's results unless they look
+     suspicious.  */
+# undef getcwd
+  dir = getcwd (buf, size);
+  if (dir || (errno != ERANGE && !is_ENAMETOOLONG (errno) && errno != ENOENT))
+    return dir;
+#endif
+
+  if (size == 0)
+    {
+      if (buf != NULL)
+	{
+	  __set_errno (EINVAL);
+	  return NULL;
+	}
+
+      allocated = BIG_FILE_NAME_LENGTH + 1;
+    }
+
+  if (buf == NULL)
+    {
+      dir = malloc (allocated);
+      if (dir == NULL)
+	return NULL;
+    }
+  else
+    dir = buf;
+
+  dirp = dir + allocated;
+  *--dirp = '\0';
+
+  if (__lstat (".", &st) < 0)
+    goto lose;
+  thisdev = st.st_dev;
+  thisino = st.st_ino;
+
+  if (__lstat ("/", &st) < 0)
+    goto lose;
+  rootdev = st.st_dev;
+  rootino = st.st_ino;
+
+  while (!(thisdev == rootdev && thisino == rootino))
+    {
+      struct dirent *d;
+      dev_t dotdev;
+      ino_t dotino;
+      bool mount_point;
+      int parent_status;
+      size_t dirroom;
+      size_t namlen;
+      bool use_d_ino = true;
+
+      /* Look at the parent directory.  */
+#ifdef AT_FDCWD
+      fd = openat (fd, "..", O_RDONLY);
+      if (fd < 0)
+	goto lose;
+      fd_needs_closing = true;
+      parent_status = fstat (fd, &st);
+#else
+      dotlist[dotlen++] = '.';
+      dotlist[dotlen++] = '.';
+      dotlist[dotlen] = '\0';
+      parent_status = __lstat (dotlist, &st);
+#endif
+      if (parent_status != 0)
+	goto lose;
+
+      if (dirstream && __closedir (dirstream) != 0)
+	{
+	  dirstream = NULL;
+	  goto lose;
+	}
+
+      /* Figure out if this directory is a mount point.  */
+      dotdev = st.st_dev;
+      dotino = st.st_ino;
+      mount_point = dotdev != thisdev;
+
+      /* Search for the last directory.  */
+#ifdef AT_FDCWD
+      dirstream = fdopendir (fd);
+      if (dirstream == NULL)
+	goto lose;
+      fd_needs_closing = false;
+#else
+      dirstream = __opendir (dotlist);
+      if (dirstream == NULL)
+	goto lose;
+      dotlist[dotlen++] = '/';
+#endif
+      for (;;)
+	{
+	  /* Clear errno to distinguish EOF from error if readdir returns
+	     NULL.  */
+	  __set_errno (0);
+	  d = __readdir (dirstream);
+
+	  /* When we've iterated through all directory entries without finding
+	     one with a matching d_ino, rewind the stream and consider each
+	     name again, but this time, using lstat.  This is necessary in a
+	     chroot on at least one system (glibc-2.3.6 + linux 2.6.12), where
+	     .., ../.., ../../.., etc. all had the same device number, yet the
+	     d_ino values for entries in / did not match those obtained
+	     via lstat.  */
+	  if (d == NULL && errno == 0 && use_d_ino)
+	    {
+	      use_d_ino = false;
+	      rewinddir (dirstream);
+	      d = __readdir (dirstream);
+	    }
+
+	  if (d == NULL)
+	    {
+	      if (errno == 0)
+		/* EOF on dirstream, which can mean e.g., that the current
+		   directory has been removed.  */
+		__set_errno (ENOENT);
+	      goto lose;
+	    }
+	  if (d->d_name[0] == '.' &&
+	      (d->d_name[1] == '\0' ||
+	       (d->d_name[1] == '.' && d->d_name[2] == '\0')))
+	    continue;
+
+	  if (use_d_ino)
+	    {
+	      bool match = (MATCHING_INO (d, thisino) || mount_point);
+	      if (! match)
+		continue;
+	    }
+
+	  {
+	    int entry_status;
+#ifdef AT_FDCWD
+	    entry_status = fstatat (fd, d->d_name, &st, AT_SYMLINK_NOFOLLOW);
+#else
+	    /* Compute size needed for this file name, or for the file
+	       name ".." in the same directory, whichever is larger.
+	       Room for ".." might be needed the next time through
+	       the outer loop.  */
+	    size_t name_alloc = _D_ALLOC_NAMLEN (d);
+	    size_t filesize = dotlen + MAX (sizeof "..", name_alloc);
+
+	    if (filesize < dotlen)
+	      goto memory_exhausted;
+
+	    if (dotsize < filesize)
+	      {
+		/* My, what a deep directory tree you have, Grandma.  */
+		size_t newsize = MAX (filesize, dotsize * 2);
+		size_t i;
+		if (newsize < dotsize)
+		  goto memory_exhausted;
+		if (dotlist != dots)
+		  free (dotlist);
+		dotlist = malloc (newsize);
+		if (dotlist == NULL)
+		  goto lose;
+		dotsize = newsize;
+
+		i = 0;
+		do
+		  {
+		    dotlist[i++] = '.';
+		    dotlist[i++] = '.';
+		    dotlist[i++] = '/';
+		  }
+		while (i < dotlen);
+	      }
+
+	    memcpy (dotlist + dotlen, d->d_name, _D_ALLOC_NAMLEN (d));
+	    entry_status = __lstat (dotlist, &st);
+#endif
+	    /* We don't fail here if we cannot stat() a directory entry.
+	       This can happen when (network) filesystems fail.  If this
+	       entry is in fact the one we are looking for we will find
+	       out soon as we reach the end of the directory without
+	       having found anything.  */
+	    if (entry_status == 0 && S_ISDIR (st.st_mode)
+		&& st.st_dev == thisdev && st.st_ino == thisino)
+	      break;
+	  }
+	}
+
+      dirroom = dirp - dir;
+      namlen = _D_EXACT_NAMLEN (d);
+
+      if (dirroom <= namlen)
+	{
+	  if (size != 0)
+	    {
+	      __set_errno (ERANGE);
+	      goto lose;
+	    }
+	  else
+	    {
+	      char *tmp;
+	      size_t oldsize = allocated;
+
+	      allocated += MAX (allocated, namlen);
+	      if (allocated < oldsize
+		  || ! (tmp = realloc (dir, allocated)))
+		goto memory_exhausted;
+
+	      /* Move current contents up to the end of the buffer.
+		 This is guaranteed to be non-overlapping.  */
+	      dirp = memcpy (tmp + allocated - (oldsize - dirroom),
+			     tmp + dirroom,
+			     oldsize - dirroom);
+	      dir = tmp;
+	    }
+	}
+      dirp -= namlen;
+      memcpy (dirp, d->d_name, namlen);
+      *--dirp = '/';
+
+      thisdev = dotdev;
+      thisino = dotino;
+    }
+
+  if (dirstream && __closedir (dirstream) != 0)
+    {
+      dirstream = NULL;
+      goto lose;
+    }
+
+  if (dirp == &dir[allocated - 1])
+    *--dirp = '/';
+
+#ifndef AT_FDCWD
+  if (dotlist != dots)
+    free (dotlist);
+#endif
+
+  used = dir + allocated - dirp;
+  memmove (dir, dirp, used);
+
+  if (buf == NULL && size == 0)
+    /* Ensure that the buffer is only as large as necessary.  */
+    buf = realloc (dir, used);
+
+  if (buf == NULL)
+    /* Either buf was NULL all along, or `realloc' failed but
+       we still have the original string.  */
+    buf = dir;
+
+  return buf;
+
+ memory_exhausted:
+  __set_errno (ENOMEM);
+ lose:
+  {
+    int save = errno;
+    if (dirstream)
+      __closedir (dirstream);
+#ifdef AT_FDCWD
+    if (fd_needs_closing)
+      close (fd);
+#else
+    if (dotlist != dots)
+      free (dotlist);
+#endif
+    if (buf == NULL)
+      free (dir);
+    __set_errno (save);
+  }
+  return NULL;
+}
+
+#ifdef weak_alias
+weak_alias (__getcwd, getcwd)
+#endif
+@
+
+
+1.3
+log
+@merge from ports/devel/cvs
+@
+text
+@d35 1
+a35 1
+__RCSID("$MirOS: ports/devel/cvs/patches/patch-lib_getcwd_c,v 1.1 2010/09/15 20:56:58 tg Exp $");
+d336 1
+a336 1
+	       This can happen when (network) file systems fail.  If this
+@
+
+
+1.2
+log
+@begin attempting to synchronise with the port
+@
+text
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+a2 2
+/* Copyright (C) 1991,92,93,94,95,96,97,98,99,2004 Free Software Foundation,
+   Inc.
+d17 1
+a17 1
+   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+d20 1
+a20 1
+# include "config.h"
+d33 3
+a35 3
+#if HAVE_FCNTL_H
+# include <fcntl.h> /* For AT_FDCWD on Solaris 9.  */
+#endif
+d117 1
+a117 1
+/* Get the pathname of the current working directory, and put it in SIZE
+d150 2
+a151 2
+  char *path;
+  register char *pathp;
+d156 1
+a156 1
+#if HAVE_PARTLY_WORKING_GETCWD && !defined AT_FDCWD
+d164 3
+a166 3
+  path = getcwd (buf, size);
+  if (path || (errno != ERANGE && !is_ENAMETOOLONG (errno) && errno != ENOENT))
+    return path;
+d182 2
+a183 2
+      path = malloc (allocated);
+      if (path == NULL)
+d187 1
+a187 1
+    path = buf;
+d189 2
+a190 2
+  pathp = path + allocated;
+  *--pathp = '\0';
+d209 3
+d252 1
+a252 4
+      /* Clear errno to distinguish EOF from error if readdir returns
+	 NULL.  */
+      __set_errno (0);
+      while ((d = __readdir (dirstream)) != NULL)
+d254 27
+d285 2
+a286 1
+	  if (MATCHING_INO (d, thisino) || mount_point)
+d288 7
+a294 1
+	      int entry_status;
+d296 1
+a296 1
+	      entry_status = fstatat (fd, d->d_name, &st, AT_SYMLINK_NOFOLLOW);
+d298 47
+a344 6
+	      /* Compute size needed for this file name, or for the file
+		 name ".." in the same directory, whichever is larger.
+	         Room for ".." might be needed the next time through
+		 the outer loop.  */
+	      size_t name_alloc = _D_ALLOC_NAMLEN (d);
+	      size_t filesize = dotlen + MAX (sizeof "..", name_alloc);
+d346 2
+a347 2
+	      if (filesize < dotlen)
+		goto memory_exhausted;
+d349 6
+a354 35
+	      if (dotsize < filesize)
+		{
+		  /* My, what a deep directory tree you have, Grandma.  */
+		  size_t newsize = MAX (filesize, dotsize * 2);
+		  size_t i;
+		  if (newsize < dotsize)
+		    goto memory_exhausted;
+		  if (dotlist != dots)
+		    free (dotlist);
+		  dotlist = malloc (newsize);
+		  if (dotlist == NULL)
+		    goto lose;
+		  dotsize = newsize;
+
+		  i = 0;
+		  do
+		    {
+		      dotlist[i++] = '.';
+		      dotlist[i++] = '.';
+		      dotlist[i++] = '/';
+		    }
+		  while (i < dotlen);
+		}
+
+	      strcpy (dotlist + dotlen, d->d_name);
+	      entry_status = __lstat (dotlist, &st);
+#endif
+	      /* We don't fail here if we cannot stat() a directory entry.
+		 This can happen when (network) file systems fail.  If this
+		 entry is in fact the one we are looking for we will find
+		 out soon as we reach the end of the directory without
+		 having found anything.  */
+	      if (entry_status == 0 && S_ISDIR (st.st_mode)
+		  && st.st_dev == thisdev && st.st_ino == thisino)
+		break;
+d356 9
+a364 13
+	}
+      if (d == NULL)
+	{
+	  if (errno == 0)
+	    /* EOF on dirstream, which means that the current directory
+	       has been removed.  */
+	    __set_errno (ENOENT);
+	  goto lose;
+	}
+      else
+	{
+	  size_t pathroom = pathp - path;
+	  size_t namlen = _D_EXACT_NAMLEN (d);
+d366 6
+a371 24
+	  if (pathroom <= namlen)
+	    {
+	      if (size != 0)
+		{
+		  __set_errno (ERANGE);
+		  goto lose;
+		}
+	      else
+		{
+		  char *tmp;
+		  size_t oldsize = allocated;
+
+		  allocated += MAX (allocated, namlen);
+		  if (allocated < oldsize
+		      || ! (tmp = realloc (path, allocated)))
+		    goto memory_exhausted;
+
+		  /* Move current contents up to the end of the buffer.
+		     This is guaranteed to be non-overlapping.  */
+		  pathp = memcpy (tmp + allocated - (oldsize - pathroom),
+				  tmp + pathroom,
+				  oldsize - pathroom);
+		  path = tmp;
+		}
+a372 3
+	  pathp -= namlen;
+	  memcpy (pathp, d->d_name, namlen);
+	  *--pathp = '/';
+d374 3
+d388 2
+a389 2
+  if (pathp == &path[allocated - 1])
+    *--pathp = '/';
+d396 2
+a397 2
+  used = path + allocated - pathp;
+  memmove (path, pathp, used);
+d401 1
+a401 1
+    buf = realloc (path, used);
+d406 1
+a406 1
+    buf = path;
+d425 1
+a425 1
+      free (path);
+@
+
+
+1.1.101.1
+log
+@GNU CVS 1.12.12 "should" fix security issues
+@
+text
+@@
+
+
+1.1.101.2
+log
+@Import current version of GNU CVS, in the hope to actually fix bugs...
+@
+text
+@d1 2
+a2 2
+/* Copyright (C) 1991,92,93,94,95,96,97,98,99,2004,2005 Free Software
+   Foundation, Inc.
+d17 1
+a17 1
+   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.  */
+d20 1
+a20 1
+# include <config.h>
+d33 3
+a35 1
+#include <fcntl.h> /* For AT_FDCWD on Solaris 9.  */
+d117 1
+a117 1
+/* Get the name of the current working directory, and put it in SIZE
+d150 2
+a151 2
+  char *dir;
+  register char *dirp;
+d164 3
+a166 3
+  dir = getcwd (buf, size);
+  if (dir || (errno != ERANGE && !is_ENAMETOOLONG (errno) && errno != ENOENT))
+    return dir;
+d182 2
+a183 2
+      dir = malloc (allocated);
+      if (dir == NULL)
+d187 1
+a187 1
+    dir = buf;
+d189 2
+a190 2
+  dirp = dir + allocated;
+  *--dirp = '\0';
+d321 1
+a321 1
+	  size_t dirroom = dirp - dir;
+d324 1
+a324 1
+	  if (dirroom <= namlen)
+d338 1
+a338 1
+		      || ! (tmp = realloc (dir, allocated)))
+d343 4
+a346 4
+		  dirp = memcpy (tmp + allocated - (oldsize - dirroom),
+				 tmp + dirroom,
+				 oldsize - dirroom);
+		  dir = tmp;
+d349 3
+a351 3
+	  dirp -= namlen;
+	  memcpy (dirp, d->d_name, namlen);
+	  *--dirp = '/';
+d364 2
+a365 2
+  if (dirp == &dir[allocated - 1])
+    *--dirp = '/';
+d372 2
+a373 2
+  used = dir + allocated - dirp;
+  memmove (dir, dirp, used);
+d377 1
+a377 1
+    buf = realloc (dir, used);
+d382 1
+a382 1
+    buf = dir;
+d401 1
+a401 1
+      free (dir);
+@
+

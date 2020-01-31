@@ -1,0 +1,935 @@
+head	1.3;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2017.04.15.19.20.03;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10058F2723111C7BEE2;
+
+1.2
+date	2006.06.29.20.24.10;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.42.56;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.53.52;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.42.56;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.34.05;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.38.24;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2017.04.15.15.41.53;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.3
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftdebug.c                                                              */
+/*                                                                         */
+/*    Debugging and logging component for amiga (body).                    */
+/*                                                                         */
+/*  Copyright 1996-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, Werner Lemberg and Detlef Würkner.       */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* This component contains various macros and functions used to ease the */
+  /* debugging of the FreeType engine.  Its main purpose is in assertion   */
+  /* checking, tracing, and error detection.                               */
+  /*                                                                       */
+  /* There are now three debugging modes:                                  */
+  /*                                                                       */
+  /* - trace mode                                                          */
+  /*                                                                       */
+  /*   Error and trace messages are sent to the log file (which can be the */
+  /*   standard error output).                                             */
+  /*                                                                       */
+  /* - error mode                                                          */
+  /*                                                                       */
+  /*   Only error messages are generated.                                  */
+  /*                                                                       */
+  /* - release mode:                                                       */
+  /*                                                                       */
+  /*   No error message is sent or generated.  The code is free from any   */
+  /*   debugging parts.                                                    */
+  /*                                                                       */
+  /*************************************************************************/
+
+
+  /*
+   * Based on the default ftdebug.c,
+   * replaced vprintf() with KVPrintF(),
+   * commented out exit(),
+   * replaced getenv() with GetVar().
+   */
+
+#include <exec/types.h>
+#include <utility/tagitem.h>
+#include <dos/exall.h>
+#include <dos/var.h>
+#define __NOLIBBASE__
+#define __NOLOBALIFACE__
+#define __USE_INLINE__
+#include <proto/dos.h>
+#include <clib/debug_protos.h>
+
+#ifndef __amigaos4__
+  extern struct Library *DOSBase;
+#else
+  extern struct DOSIFace *IDOS;
+#endif
+
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_INTERNAL_DEBUG_H
+
+
+#if defined( FT_DEBUG_LEVEL_ERROR )
+
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( void )
+  FT_Message( const char*  fmt,
+              ... )
+  {
+    va_list  ap;
+
+
+    va_start( ap, fmt );
+    KVPrintF( fmt, ap );
+    va_end( ap );
+  }
+
+
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( void )
+  FT_Panic( const char*  fmt,
+            ... )
+  {
+    va_list  ap;
+
+
+    va_start( ap, fmt );
+    KVPrintF( fmt, ap );
+    va_end( ap );
+
+/*  exit( EXIT_FAILURE ); */
+  }
+
+
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( int )
+  FT_Throw( FT_Error     error,
+            int          line,
+            const char*  file )
+  {
+    FT_UNUSED( error );
+    FT_UNUSED( line );
+    FT_UNUSED( file );
+
+    return 0;
+  }
+
+#endif /* FT_DEBUG_LEVEL_ERROR */
+
+
+
+#ifdef FT_DEBUG_LEVEL_TRACE
+
+  /* array of trace levels, initialized to 0 */
+  int  ft_trace_levels[trace_count];
+
+
+  /* define array of trace toggle names */
+#define FT_TRACE_DEF( x )  #x ,
+
+  static const char*  ft_trace_toggles[trace_count + 1] =
+  {
+#include FT_INTERNAL_TRACE_H
+    NULL
+  };
+
+#undef FT_TRACE_DEF
+
+
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( FT_Int )
+  FT_Trace_Get_Count( void )
+  {
+    return trace_count;
+  }
+
+
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( const char * )
+  FT_Trace_Get_Name( FT_Int  idx )
+  {
+    int  max = FT_Trace_Get_Count();
+
+
+    if ( idx < max )
+      return ft_trace_toggles[idx];
+    else
+      return NULL;
+  }
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* Initialize the tracing sub-system.  This is done by retrieving the    */
+  /* value of the `FT2_DEBUG' environment variable.  It must be a list of  */
+  /* toggles, separated by spaces, `;', or `,'.  Example:                  */
+  /*                                                                       */
+  /*    export FT2_DEBUG="any:3 memory:7 stream:5"                         */
+  /*                                                                       */
+  /* This requests that all levels be set to 3, except the trace level for */
+  /* the memory and stream components which are set to 7 and 5,            */
+  /* respectively.                                                         */
+  /*                                                                       */
+  /* See the file `include/freetype/internal/fttrace.h' for details of the */
+  /* available toggle names.                                               */
+  /*                                                                       */
+  /* The level must be between 0 and 7; 0 means quiet (except for serious  */
+  /* runtime errors), and 7 means _very_ verbose.                          */
+  /*                                                                       */
+  FT_BASE_DEF( void )
+  ft_debug_init( void )
+  {
+/*  const char*  ft2_debug = getenv( "FT2_DEBUG" ); */
+    char         buf[256];
+    const char*  ft2_debug = &buf[0];
+
+
+/*  if ( ft2_debug ) */
+    if ( GetVar( "FT2_DEBUG", (STRPTR)ft2_debug, 256, LV_VAR ) > 0 )
+    {
+      const char*  p = ft2_debug;
+      const char*  q;
+
+
+      for ( ; *p; p++ )
+      {
+        /* skip leading whitespace and separators */
+        if ( *p == ' ' || *p == '\t' || *p == ',' || *p == ';' || *p == '=' )
+          continue;
+
+        /* read toggle name, followed by ':' */
+        q = p;
+        while ( *p && *p != ':' )
+          p++;
+
+        if ( !*p )
+          break;
+
+        if ( *p == ':' && p > q )
+        {
+          FT_Int  n, i, len = (FT_Int)( p - q );
+          FT_Int  level = -1, found = -1;
+
+
+          for ( n = 0; n < trace_count; n++ )
+          {
+            const char*  toggle = ft_trace_toggles[n];
+
+
+            for ( i = 0; i < len; i++ )
+            {
+              if ( toggle[i] != q[i] )
+                break;
+            }
+
+            if ( i == len && toggle[i] == 0 )
+            {
+              found = n;
+              break;
+            }
+          }
+
+          /* read level */
+          p++;
+          if ( *p )
+          {
+            level = *p - '0';
+            if ( level < 0 || level > 7 )
+              level = -1;
+          }
+
+          if ( found >= 0 && level >= 0 )
+          {
+            if ( found == trace_any )
+            {
+              /* special case for `any' */
+              for ( n = 0; n < trace_count; n++ )
+                ft_trace_levels[n] = level;
+            }
+            else
+              ft_trace_levels[found] = level;
+          }
+        }
+      }
+    }
+  }
+
+
+#else  /* !FT_DEBUG_LEVEL_TRACE */
+
+
+  FT_BASE_DEF( void )
+  ft_debug_init( void )
+  {
+    /* nothing */
+  }
+
+
+  FT_BASE_DEF( FT_Int )
+  FT_Trace_Get_Count( void )
+  {
+    return 0;
+  }
+
+
+  FT_BASE_DEF( const char * )
+  FT_Trace_Get_Name( FT_Int  idx )
+  {
+    FT_UNUSED( idx );
+
+    return NULL;
+  }
+
+
+#endif /* !FT_DEBUG_LEVEL_TRACE */
+
+/*
+Local Variables:
+coding: latin-1
+End:
+*/
+/* END */
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d5 1
+a5 1
+/*    Debugging and logging component (body).                              */
+d7 1
+a7 1
+/*  Copyright 1996-2001, 2002, 2004, 2005 by                               */
+d44 6
+a49 6
+/*
+ * Based on the default ftdebug.c,
+ * replaced vprintf() with KVPrintF(),
+ * commented out exit(),
+ * replaced getenv() with GetVar().
+ */
+d62 1
+a62 1
+extern struct Library *DOSBase;
+d64 1
+a64 1
+extern struct DOSIFace *IDOS;
+d78 2
+a79 1
+  FT_Message( const char*  fmt, ... )
+a84 1
+/*  vprintf( fmt, ap ); */
+d93 2
+a94 1
+  FT_Panic( const char*  fmt, ... )
+a99 1
+/*  vprintf( fmt, ap ); */
+d106 15
+d179 1
+a179 1
+  /* See the file <include/freetype/internal/fttrace.h> for details of the */
+d211 3
+d242 1
+a242 1
+            level = *p++ - '0';
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@a0 3
+// TetiSoft: replaced vprintf() with KVPrintF() and commented out exit()
+extern void __stdargs KVPrintF( const char *formatString, const void *values );
+
+d7 2
+a8 2
+/*  Copyright 1996-2001 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+d44 21
+a64 6
+#include <ft2build.h>
+#include FT_INTERNAL_DEBUG_H
+
+
+#ifdef FT_DEBUG_LEVEL_TRACE
+  char  ft_trace_levels[trace_max];
+d68 3
+a70 1
+#if defined( FT_DEBUG_LEVEL_ERROR ) || defined( FT_DEBUG_LEVEL_TRACE )
+d73 1
+a73 2
+#include <stdarg.h>
+#include <stdlib.h>
+d75 1
+d77 1
+a77 1
+  FT_EXPORT_DEF( void )
+d84 1
+a84 1
+//  vprintf( fmt, ap );
+d90 3
+a92 1
+  FT_EXPORT_DEF( void )
+d99 1
+a99 1
+//  vprintf( fmt, ap );
+d103 31
+a133 1
+//  exit( EXIT_FAILURE );
+d137 7
+d145 5
+a149 3
+  /* since I don't know wether "getenv" is available on the Amiga */
+  /* I prefer to simply disable this code for now in all builds   */
+  /*                                                              */
+a150 2
+/* #ifdef FT_DEBUG_LEVEL_TRACE */
+#if 0
+d152 18
+d173 3
+a175 1
+    const char*  ft2_debug = getenv( "FT2_DEBUG" );
+d178 2
+a179 1
+    if ( ft2_debug )
+d191 1
+a191 1
+        /* read toggle name, followed by '=' */
+d198 2
+a199 2
+          int  n, i, len = p - q;
+          int  level = -1, found = -1;
+d225 1
+a225 1
+            if ( level < 0 || level > 6 )
+d233 1
+a233 1
+              /* special case for "any" */
+d256 16
+d274 5
+a278 1
+
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d1 3
+d10 2
+a11 2
+/*  Copyright 1996-2001, 2002, 2004, 2005 by                               */
+/*  David Turner, Robert Wilhelm, Werner Lemberg and Detlef Würkner.       */
+d47 6
+a52 21
+/*
+ * Based on the default ftdebug.c,
+ * replaced vprintf() with KVPrintF(),
+ * commented out exit(),
+ * replaced getenv() with GetVar().
+ */
+
+#include <exec/types.h>
+#include <utility/tagitem.h>
+#include <dos/exall.h>
+#include <dos/var.h>
+#define __NOLIBBASE__
+#define __NOLOBALIFACE__
+#define __USE_INLINE__
+#include <proto/dos.h>
+#include <clib/debug_protos.h>
+
+#ifndef __amigaos4__
+extern struct Library *DOSBase;
+#else
+extern struct DOSIFace *IDOS;
+d56 1
+a56 3
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_INTERNAL_DEBUG_H
+d59 2
+a60 1
+#if defined( FT_DEBUG_LEVEL_ERROR )
+a61 1
+  /* documentation is in ftdebug.h */
+d63 1
+a63 1
+  FT_BASE_DEF( void )
+d70 1
+a70 1
+/*  vprintf( fmt, ap ); */
+d76 1
+a76 3
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( void )
+d83 1
+a83 1
+/*  vprintf( fmt, ap ); */
+d87 1
+a87 31
+/*  exit( EXIT_FAILURE ); */
+  }
+
+#endif /* FT_DEBUG_LEVEL_ERROR */
+
+
+
+#ifdef FT_DEBUG_LEVEL_TRACE
+
+  /* array of trace levels, initialized to 0 */
+  int  ft_trace_levels[trace_count];
+
+
+  /* define array of trace toggle names */
+#define FT_TRACE_DEF( x )  #x ,
+
+  static const char*  ft_trace_toggles[trace_count + 1] =
+  {
+#include FT_INTERNAL_TRACE_H
+    NULL
+  };
+
+#undef FT_TRACE_DEF
+
+
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( FT_Int )
+  FT_Trace_Get_Count( void )
+  {
+    return trace_count;
+a90 7
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( const char * )
+  FT_Trace_Get_Name( FT_Int  idx )
+  {
+    int  max = FT_Trace_Get_Count();
+
+d92 3
+a94 5
+    if ( idx < max )
+      return ft_trace_toggles[idx];
+    else
+      return NULL;
+  }
+d96 2
+a98 18
+  /*************************************************************************/
+  /*                                                                       */
+  /* Initialize the tracing sub-system.  This is done by retrieving the    */
+  /* value of the `FT2_DEBUG' environment variable.  It must be a list of  */
+  /* toggles, separated by spaces, `;', or `,'.  Example:                  */
+  /*                                                                       */
+  /*    export FT2_DEBUG="any:3 memory:7 stream:5"                         */
+  /*                                                                       */
+  /* This requests that all levels be set to 3, except the trace level for */
+  /* the memory and stream components which are set to 7 and 5,            */
+  /* respectively.                                                         */
+  /*                                                                       */
+  /* See the file <include/freetype/internal/fttrace.h> for details of the */
+  /* available toggle names.                                               */
+  /*                                                                       */
+  /* The level must be between 0 and 7; 0 means quiet (except for serious  */
+  /* runtime errors), and 7 means _very_ verbose.                          */
+  /*                                                                       */
+d102 1
+a102 3
+/*  const char*  ft2_debug = getenv( "FT2_DEBUG" ); */
+    char         buf[256];
+    const char*  ft2_debug = &buf[0];
+d105 1
+a105 2
+/*  if ( ft2_debug ) */
+    if ( GetVar( "FT2_DEBUG", (STRPTR)ft2_debug, 256, LV_VAR ) > 0 )
+d117 1
+a117 1
+        /* read toggle name, followed by ':' */
+d124 2
+a125 2
+          FT_Int  n, i, len = (FT_Int)( p - q );
+          FT_Int  level = -1, found = -1;
+d151 1
+a151 1
+            if ( level < 0 || level > 7 )
+d159 1
+a159 1
+              /* special case for `any' */
+d182 1
+a182 6
+  FT_BASE_DEF( FT_Int )
+  FT_Trace_Get_Count( void )
+  {
+    return 0;
+  }
+
+a183 10
+  FT_BASE_DEF( const char * )
+  FT_Trace_Get_Name( FT_Int  idx )
+  {
+    FT_UNUSED( idx );
+
+    return NULL;
+  }
+
+
+#endif /* !FT_DEBUG_LEVEL_TRACE */
+a184 5
+/*
+Local Variables:
+coding: latin-1
+End:
+*/
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d1 3
+d10 2
+a11 2
+/*  Copyright 1996-2001, 2002, 2004, 2005 by                               */
+/*  David Turner, Robert Wilhelm, Werner Lemberg and Detlef Würkner.       */
+d47 6
+a52 21
+/*
+ * Based on the default ftdebug.c,
+ * replaced vprintf() with KVPrintF(),
+ * commented out exit(),
+ * replaced getenv() with GetVar().
+ */
+
+#include <exec/types.h>
+#include <utility/tagitem.h>
+#include <dos/exall.h>
+#include <dos/var.h>
+#define __NOLIBBASE__
+#define __NOLOBALIFACE__
+#define __USE_INLINE__
+#include <proto/dos.h>
+#include <clib/debug_protos.h>
+
+#ifndef __amigaos4__
+extern struct Library *DOSBase;
+#else
+extern struct DOSIFace *IDOS;
+d56 1
+a56 3
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_INTERNAL_DEBUG_H
+d59 2
+a60 1
+#if defined( FT_DEBUG_LEVEL_ERROR )
+a61 1
+  /* documentation is in ftdebug.h */
+d63 1
+a63 1
+  FT_BASE_DEF( void )
+d70 1
+a70 1
+/*  vprintf( fmt, ap ); */
+d76 1
+a76 3
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( void )
+d83 1
+a83 1
+/*  vprintf( fmt, ap ); */
+d87 1
+a87 31
+/*  exit( EXIT_FAILURE ); */
+  }
+
+#endif /* FT_DEBUG_LEVEL_ERROR */
+
+
+
+#ifdef FT_DEBUG_LEVEL_TRACE
+
+  /* array of trace levels, initialized to 0 */
+  int  ft_trace_levels[trace_count];
+
+
+  /* define array of trace toggle names */
+#define FT_TRACE_DEF( x )  #x ,
+
+  static const char*  ft_trace_toggles[trace_count + 1] =
+  {
+#include FT_INTERNAL_TRACE_H
+    NULL
+  };
+
+#undef FT_TRACE_DEF
+
+
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( FT_Int )
+  FT_Trace_Get_Count( void )
+  {
+    return trace_count;
+a90 7
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( const char * )
+  FT_Trace_Get_Name( FT_Int  idx )
+  {
+    int  max = FT_Trace_Get_Count();
+
+d92 3
+a94 5
+    if ( idx < max )
+      return ft_trace_toggles[idx];
+    else
+      return NULL;
+  }
+d96 2
+a98 18
+  /*************************************************************************/
+  /*                                                                       */
+  /* Initialize the tracing sub-system.  This is done by retrieving the    */
+  /* value of the `FT2_DEBUG' environment variable.  It must be a list of  */
+  /* toggles, separated by spaces, `;', or `,'.  Example:                  */
+  /*                                                                       */
+  /*    export FT2_DEBUG="any:3 memory:7 stream:5"                         */
+  /*                                                                       */
+  /* This requests that all levels be set to 3, except the trace level for */
+  /* the memory and stream components which are set to 7 and 5,            */
+  /* respectively.                                                         */
+  /*                                                                       */
+  /* See the file <include/freetype/internal/fttrace.h> for details of the */
+  /* available toggle names.                                               */
+  /*                                                                       */
+  /* The level must be between 0 and 7; 0 means quiet (except for serious  */
+  /* runtime errors), and 7 means _very_ verbose.                          */
+  /*                                                                       */
+d102 1
+a102 3
+/*  const char*  ft2_debug = getenv( "FT2_DEBUG" ); */
+    char         buf[256];
+    const char*  ft2_debug = &buf[0];
+d105 1
+a105 2
+/*  if ( ft2_debug ) */
+    if ( GetVar( "FT2_DEBUG", (STRPTR)ft2_debug, 256, LV_VAR ) > 0 )
+d117 1
+a117 1
+        /* read toggle name, followed by ':' */
+d124 2
+a125 2
+          FT_Int  n, i, len = (FT_Int)( p - q );
+          FT_Int  level = -1, found = -1;
+d151 1
+a151 1
+            if ( level < 0 || level > 7 )
+d159 1
+a159 1
+              /* special case for `any' */
+d182 1
+a182 6
+  FT_BASE_DEF( FT_Int )
+  FT_Trace_Get_Count( void )
+  {
+    return 0;
+  }
+
+a183 10
+  FT_BASE_DEF( const char * )
+  FT_Trace_Get_Name( FT_Int  idx )
+  {
+    FT_UNUSED( idx );
+
+    return NULL;
+  }
+
+
+#endif /* !FT_DEBUG_LEVEL_TRACE */
+a184 5
+/*
+Local Variables:
+coding: latin-1
+End:
+*/
+@
+
+
+1.1.115.3
+log
+@letâ€™s see whether we canâ€™t update freetype2 as wellâ€¦
+@
+text
+@d5 1
+a5 1
+/*    Debugging and logging component for amiga (body).                    */
+d7 1
+a7 1
+/*  Copyright 1996-2016 by                                                 */
+d44 6
+a49 6
+  /*
+   * Based on the default ftdebug.c,
+   * replaced vprintf() with KVPrintF(),
+   * commented out exit(),
+   * replaced getenv() with GetVar().
+   */
+d62 1
+a62 1
+  extern struct Library *DOSBase;
+d64 1
+a64 1
+  extern struct DOSIFace *IDOS;
+d78 1
+a78 2
+  FT_Message( const char*  fmt,
+              ... )
+d84 1
+d93 1
+a93 2
+  FT_Panic( const char*  fmt,
+            ... )
+d99 1
+a105 15
+
+  /* documentation is in ftdebug.h */
+
+  FT_BASE_DEF( int )
+  FT_Throw( FT_Error     error,
+            int          line,
+            const char*  file )
+  {
+    FT_UNUSED( error );
+    FT_UNUSED( line );
+    FT_UNUSED( file );
+
+    return 0;
+  }
+
+d164 1
+a164 1
+  /* See the file `include/freetype/internal/fttrace.h' for details of the */
+a195 3
+        if ( !*p )
+          break;
+
+d224 1
+a224 1
+            level = *p - '0';
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

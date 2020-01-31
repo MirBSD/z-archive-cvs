@@ -1,0 +1,641 @@
+head	1.4;
+access;
+symbols
+	MIRBSD_10:1.4.0.4
+	MIRBSD_10_BASE:1.4
+	MIRBSD_9_BASE:1.4
+	MIRBSD_8:1.4.0.2
+	MIRBSD_8_BASE:1.4
+	binutils-20050707:1.1.101.3
+	FSF:1.1.101;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2005.06.05.21.24.09;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	3cf942a36d3e2dcb;
+
+1.3
+date	2005.03.28.22.06.05;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.03.13.16.06.54;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.00.18.31;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.02.05.00.18.31;	author tg;	state Exp;
+branches;
+next	1.1.101.2;
+
+1.1.101.2
+date	2005.03.28.15.36.16;	author tg;	state Exp;
+branches;
+next	1.1.101.3;
+
+1.1.101.3
+date	2005.05.14.16.42.02;	author tg;	state Exp;
+branches;
+next	;
+commitid	3a6242862a097542;
+
+
+desc
+@@
+
+
+1.4
+log
+@first attempt to merge binutils and gdb of today (minus generated files)
+XXX elf.sc yields equivalent results for MirOS; double-check against
+XXX other platforms. this merger took as much time as ALL the other files!
+@
+text
+@/* Copyright 2001, 2003, 2005 Free Software Foundation, Inc.
+   Written by Steve Chamberlain of Cygnus Support (steve@@cygnus.com).
+
+This file is part of GNU binutils.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.  */
+
+%{
+#include <stdio.h>
+#include <stdlib.h>
+
+static char writecode;
+static char *it;
+static int code;
+static char * repeat;
+static char *oldrepeat;
+static char *name;
+static int rdepth;
+static char *names[] = {" ","[n]","[n][m]"};
+static char *pnames[]= {"","*","**"};
+
+static int yyerror (char *s);
+extern int yylex (void);
+%}
+
+
+%union {
+ int i;
+ char *s;
+} 
+%token COND
+%token REPEAT
+%token '(' ')'
+%token <s> TYPE
+%token <s> NAME
+%token <i> NUMBER UNIT
+%type <i> attr_size 
+%type <s> attr_desc attr_id attr_type
+%%
+
+top:  {
+  switch (writecode)
+    {
+    case 'i':
+      printf("#ifdef SYSROFF_SWAP_IN\n");
+      break; 
+    case 'p':
+      printf("#ifdef SYSROFF_p\n");
+      break; 
+    case 'd':
+      break;
+    case 'g':
+      printf("#ifdef SYSROFF_SWAP_OUT\n");
+      break;
+    case 'c':
+      printf("#ifdef SYSROFF_PRINT\n");
+      printf("#include <stdio.h>\n");
+      printf("#include <stdlib.h>\n");
+      printf("#include <ansidecl.h>\n");
+      break;
+    }
+ } 
+it_list {
+  switch (writecode) {
+  case 'i':
+  case 'p':
+  case 'g':
+  case 'c':
+    printf("#endif\n");
+    break; 
+  case 'd':
+    break;
+  }
+}
+
+  ;
+
+
+it_list: it it_list
+  |
+  ;
+
+it:
+	'(' NAME NUMBER 
+      {
+	it = $2; code = $3;
+	switch (writecode) 
+	  {
+	  case 'd':
+	    printf("\n\n\n#define IT_%s_CODE 0x%x\n", it,code);
+	    printf("struct IT_%s;\n", it);
+	    printf("extern void sysroff_swap_%s_in PARAMS ((struct IT_%s *));\n",
+		   $2, it);
+	    printf("extern void sysroff_swap_%s_out PARAMS ((FILE *, struct IT_%s *));\n",
+		   $2, it);
+	    printf("extern void sysroff_print_%s_out PARAMS ((struct IT_%s *));\n",
+		   $2, it);
+	    printf("struct IT_%s { \n", it);
+	    break;
+	  case 'i':
+	    printf("void sysroff_swap_%s_in(ptr)\n",$2);
+	    printf("struct IT_%s *ptr;\n", it);
+	    printf("{\n");
+	    printf("unsigned char raw[255];\n");
+	    printf("\tint idx = 0 ;\n");
+	    printf("\tint size;\n");
+	    printf("memset(raw,0,255);\n");	
+	    printf("memset(ptr,0,sizeof(*ptr));\n");
+	    printf("size = fillup(raw);\n");
+	    break;
+	  case 'g':
+	    printf("void sysroff_swap_%s_out(file,ptr)\n",$2);
+	    printf("FILE * file;\n");
+	    printf("struct IT_%s *ptr;\n", it);
+	    printf("{\n");
+	    printf("\tunsigned char raw[255];\n");
+	    printf("\tint idx = 16 ;\n");
+	    printf("\tmemset (raw, 0, 255);\n");
+	    printf("\tcode = IT_%s_CODE;\n", it);
+	    break;
+	  case 'o':
+	    printf("void sysroff_swap_%s_out(abfd,ptr)\n",$2);
+	    printf("bfd * abfd;\n");
+	    printf("struct IT_%s *ptr;\n",it);
+	    printf("{\n");
+	    printf("int idx = 0 ;\n");
+	    break;
+	  case 'c':
+	    printf("void sysroff_print_%s_out(ptr)\n",$2);
+	    printf("struct IT_%s *ptr;\n", it);
+	    printf("{\n");
+	    printf("itheader(\"%s\", IT_%s_CODE);\n",$2,$2);
+	    break;
+
+	  case 't':
+	    break;
+	  }
+
+      } 
+	it_field_list 
+')'
+{
+  switch (writecode) {
+  case 'd': 
+    printf("};\n");
+    break;
+  case 'g':
+    printf("\tchecksum(file,raw, idx, IT_%s_CODE);\n", it);
+    
+  case 'i':
+
+  case 'o':
+  case 'c':
+    printf("}\n");
+  }
+}
+;
+
+
+
+it_field_list:
+		it_field it_field_list
+	|	cond_it_field it_field_list	
+	|	repeat_it_field it_field_list
+	|
+	;
+
+repeat_it_field: '(' REPEAT NAME
+	{
+	  rdepth++;
+	  switch (writecode) 
+	    {
+	    case 'c':
+	      if (rdepth==1)
+	      printf("\tprintf(\"repeat %%d\\n\", %s);\n",$3);
+	      if (rdepth==2)
+	      printf("\tprintf(\"repeat %%d\\n\", %s[n]);\n",$3);
+	    case 'i':
+	    case 'g':
+	    case 'o':
+
+	      if (rdepth==1) 
+		{
+	      printf("\t{ int n; for (n = 0; n < %s; n++) {\n",    $3);
+	    }
+	      if (rdepth == 2) {
+	      printf("\t{ int m; for (m = 0; m < %s[n]; m++) {\n",    $3);
+	    }		
+
+	      break;
+	    }
+
+	  oldrepeat = repeat;
+         repeat = $3;
+	}
+
+	 it_field_list ')' 
+
+	{
+	  repeat = oldrepeat;
+	  oldrepeat =0;
+	  rdepth--;
+	  switch (writecode)
+	    {
+	    case 'i':
+	    case 'g':
+	    case 'o':
+	    case 'c':
+	  printf("\t}}\n");
+	}
+	}
+       ;
+
+
+cond_it_field: '(' COND NAME
+	{
+	  switch (writecode) 
+	    {
+	    case 'i':
+	    case 'g':
+	    case 'o':
+	    case 'c':
+	      printf("\tif (%s) {\n", $3);
+	      break;
+	    }
+	}
+
+	 it_field_list ')' 
+	{
+	  switch (writecode)
+	    {
+	    case 'i':
+	    case 'g':
+	    case 'o':
+	    case 'c':
+	  printf("\t}\n");
+	}
+	}
+       ;
+
+it_field:
+	'(' attr_desc '(' attr_type attr_size ')' attr_id 
+	{name = $7; } 
+	enums ')'
+	{
+	  char *desc = $2;
+	  char *type = $4;
+	  int size = $5;
+	  char *id = $7;
+char *p = names[rdepth];
+char *ptr = pnames[rdepth];
+	  switch (writecode) 
+	    {
+	    case 'g':
+	      if (size % 8) 
+		{
+		  
+		  printf("\twriteBITS(ptr->%s%s,raw,&idx,%d);\n",
+			 id,
+			 names[rdepth], size);
+
+		}
+	      else {
+		printf("\twrite%s(ptr->%s%s,raw,&idx,%d,file);\n",
+		       type,
+		       id,
+		       names[rdepth],size/8);
+		}
+	      break;	      
+	    case 'i':
+	      {
+
+		if (rdepth >= 1)
+
+		  {
+		    printf("if (!ptr->%s) ptr->%s = (%s*)xcalloc(%s, sizeof(ptr->%s[0]));\n", 
+			   id, 
+			   id,
+			   type,
+			   repeat,
+			   id);
+		  }
+
+		if (rdepth == 2)
+		  {
+		    printf("if (!ptr->%s[n]) ptr->%s[n] = (%s**)xcalloc(%s[n], sizeof(ptr->%s[n][0]));\n", 
+			   id, 
+			   id,
+			   type,
+			   repeat,
+			   id);
+		  }
+
+	      }
+
+	      if (size % 8) 
+		{
+		  printf("\tptr->%s%s = getBITS(raw,&idx, %d,size);\n",
+			 id,
+			 names[rdepth], 
+			 size);
+		}
+	      else {
+		printf("\tptr->%s%s = get%s(raw,&idx, %d,size);\n",
+		       id,
+		       names[rdepth],
+		       type,
+		       size/8);
+		}
+	      break;
+	    case 'o':
+	      printf("\tput%s(raw,%d,%d,&idx,ptr->%s%s);\n", type,size/8,size%8,id,names[rdepth]);
+	      break;
+	    case 'd':
+	      if (repeat) 
+		printf("\t/* repeat %s */\n", repeat);
+
+		  if (type[0] == 'I') {
+		  printf("\tint %s%s; \t/* %s */\n",ptr,id, desc);
+		}
+		  else if (type[0] =='C') {
+		  printf("\tchar %s*%s;\t /* %s */\n",ptr,id, desc);
+		}
+	      else {
+		printf("\tbarray %s%s;\t /* %s */\n",ptr,id, desc);
+	      }
+		  break;
+		case 'c':
+	      printf("tabout();\n");
+		  printf("\tprintf(\"/*%-30s*/ ptr->%s = \");\n", desc, id);
+
+		  if (type[0] == 'I')
+		  printf("\tprintf(\"%%d\\n\",ptr->%s%s);\n", id,p);
+		  else   if (type[0] == 'C')
+		  printf("\tprintf(\"%%s\\n\",ptr->%s%s);\n", id,p);
+
+		  else   if (type[0] == 'B') 
+		    {
+		  printf("\tpbarray(&ptr->%s%s);\n", id,p);
+		}
+	      else abort();
+		  break;
+		}
+	}
+
+	;
+
+
+attr_type:	
+	 TYPE { $$ = $1; }
+ 	|  { $$ = "INT";}
+	;
+
+attr_desc: 
+	'(' NAME ')'	
+	{ $$ = $2; }
+	;
+
+attr_size:
+	 NUMBER UNIT 
+	{ $$ = $1 * $2; }
+	;
+
+
+attr_id:
+		'(' NAME ')'	{ $$ = $2; }
+	|	{ $$ = "dummy";}
+	;	
+	
+enums: 
+	| '(' enum_list ')' ;
+
+enum_list:
+	|
+	enum_list '(' NAME NAME ')' { 
+	  switch (writecode) 
+	    {
+	    case 'd':
+	      printf("#define %s %s\n", $3,$4);
+	      break;
+	    case 'c':
+		printf("if (ptr->%s%s == %s) { tabout(); printf(\"%s\\n\");}\n", name, names[rdepth],$4,$3);
+	    }
+	}
+
+	;
+
+
+
+%%
+/* four modes
+
+   -d write structure definitions for sysroff in host format
+   -i write functions to swap into sysroff format in
+   -o write functions to swap into sysroff format out
+   -c write code to print info in human form */
+
+int yydebug;
+
+int 
+main (int ac, char **av)
+{
+  yydebug=0;
+  if (ac > 1)
+    writecode = av[1][1];
+if (writecode == 'd')
+  {
+    printf("typedef struct { unsigned char *data; int len; } barray; \n");
+    printf("typedef  int INT;\n");
+    printf("typedef  char * CHARS;\n");
+
+  }
+  yyparse();
+return 0;
+}
+
+static int
+yyerror (char *s)
+{
+  fprintf(stderr, "%s\n" , s);
+  return 0;
+}
+@
+
+
+1.3
+log
+@merge binutils
+@
+text
+@a0 2
+/* $MirOS: src/gnu/usr.bin/binutils/binutils/sysinfo.y,v 1.2 2005/03/13 16:06:54 tg Exp $ */
+
+d18 1
+a18 1
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+d24 9
+a32 18
+int yylex(void);
+
+extern char *word;
+extern char writecode;
+extern int number;
+extern int unit;
+char nice_name[1000];
+char *it;
+int sofar;
+int width;
+int code;
+char * repeat;
+char *oldrepeat;
+char *name;
+int rdepth;
+char *loop [] = {"","n","m","/*BAD*/"};
+char *names[] = {" ","[n]","[n][m]"};
+char *pnames[]= {"","*","**"};
+a410 1
+char writecode;
+@
+
+
+1.2
+log
+@merge binutils, minus generated files, plus generated+hacked files
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d3 1
+a3 1
+/* Copyright 2001, 2003 Free Software Foundation, Inc.
+d44 3
+d127 1
+a127 1
+	    printf("char raw[255];\n");
+d139 1
+a139 1
+	    printf("\tchar raw[255];\n");
+d441 1
+a441 1
+int
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 2
+d26 2
+@
+
+
+1.1.101.1
+log
+@GNU binutils (CVS snapshot)
+@
+text
+@@
+
+
+1.1.101.2
+log
+@GNU binutils (CVS snapshot), without
+* top-level files
+* bfd/po
+* binutils/po
+* binutils/testsuite
+* gas/po
+* gas/testsuite
+* gprof
+* intl
+* ld/po
+* ld/testsuite
+* libiberty/config
+* opcodes/po
+* texinfo
+(same procedure as usual)
+@
+text
+@d1 1
+a1 1
+/* Copyright 2001, 2003, 2005 Free Software Foundation, Inc.
+a39 3
+
+static int yyerror (char *s);
+extern int yylex (void);
+d120 1
+a120 1
+	    printf("unsigned char raw[255];\n");
+d132 1
+a132 1
+	    printf("\tunsigned char raw[255];\n");
+d434 1
+a434 1
+static int
+@
+
+
+1.1.101.3
+log
+@GNU binutils, -current (mainline) snapshot as of today,
+with the usual bunch of files removed
+@
+text
+@d18 1
+a18 1
+Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.  */
+d24 16
+a39 9
+static char writecode;
+static char *it;
+static int code;
+static char * repeat;
+static char *oldrepeat;
+static char *name;
+static int rdepth;
+static char *names[] = {" ","[n]","[n][m]"};
+static char *pnames[]= {"","*","**"};
+d418 1
+@
+
+

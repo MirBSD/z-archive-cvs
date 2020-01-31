@@ -1,0 +1,282 @@
+head	1.3;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.1.6.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.2
+	cvs-20101220:1.1.1.2
+	mbsd-20101220:1.1.1.1.0.6
+	cvs-201012191730:1.1.1.1
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.1
+	cvs-200805071200:1.1.1.1
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	cvs-200803022030:1.1.1.1
+	cvs-200707152000:1.1.1.1
+	cvs-200704292000:1.1.1.1
+	cvs-200702051700:1.1.1.1
+	cvs-200609121900:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200606151800:1.1.1.1
+	cvs-200603231300:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2014.06.09.15.17.34;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005395CFC65E5646F1;
+
+1.2
+date	2011.07.02.15.04.00;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E0F31C5496AB95F;
+
+1.1
+date	2005.02.05.17.24.27;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.27;	author tg;	state Exp;
+branches
+	1.1.1.1.6.1;
+next	1.1.1.2;
+
+1.1.1.2
+date	2011.07.02.15.00.21;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.1.6.1
+date	2011.07.02.15.02.44;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.127.1
+date	2010.12.19.14.45.49;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2014.06.09.14.29.21;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@/*
+ * Copyright (c) 2000-2002 Proofpoint, Inc. and its suppliers.
+ *	All rights reserved.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ */
+
+#include <sm/gen.h>
+SM_IDSTR(id, "@@(#)$Id: t-types.c,v 1.19 2013-11-22 20:51:44 ca Exp $")
+
+#include <sm/limits.h>
+#include <sm/io.h>
+#include <sm/string.h>
+#include <sm/test.h>
+#include <sm/types.h>
+
+int
+main(argc, argv)
+	int argc;
+	char **argv;
+{
+	LONGLONG_T ll;
+	LONGLONG_T volatile lt;
+	ULONGLONG_T ull;
+	char buf[128];
+	char *r;
+
+	sm_test_begin(argc, argv, "test standard integral types");
+
+	SM_TEST(sizeof(LONGLONG_T) == sizeof(ULONGLONG_T));
+
+	/*
+	**  sendmail assumes that ino_t, off_t and void* can be cast
+	**  to ULONGLONG_T without losing information.
+	*/
+
+	if (!SM_TEST(sizeof(ino_t) <= sizeof(ULONGLONG_T)) ||
+	    !SM_TEST(sizeof(off_t) <= sizeof(ULONGLONG_T)) ||
+	    !SM_TEST(sizeof(void*) <= sizeof(ULONGLONG_T)))
+	{
+		(void) sm_io_fprintf(smioerr, SM_TIME_DEFAULT, "\
+Your C compiler appears to support a 64 bit integral type,\n\
+but libsm is not configured to use it.  You will need to set\n\
+either SM_CONF_LONGLONG or SM_CONF_QUAD_T to 1.  See libsm/README\n\
+for more details.\n");
+	}
+
+	/*
+	**  Most compilers notice that LLONG_MIN - 1 generate an underflow.
+	**  Some compiler generate code that will use the 'X' status bit
+	**  in a CPU and hence (LLONG_MIN - 1 > LLONG_MIN) will be false.
+	**  So we have to decide whether we want compiler warnings or
+	**  a wrong test...
+	**  Question: where do we really need what this test tests?
+	*/
+
+#if SM_CONF_TEST_LLONG
+	ll = LLONG_MIN;
+	(void) sm_io_fprintf(smioerr, SM_TIME_DEFAULT, "\
+Your C compiler maybe issued a warning during compilation,\n\
+please IGNORE the compiler warning!.\n");
+	lt = LLONG_MIN - 1;
+	SM_TEST(lt > ll);
+	sm_snprintf(buf, sizeof(buf), "%llx", ll);
+	r = "0";
+	if (!SM_TEST(buf[0] == '8')
+	    || !SM_TEST(strspn(&buf[1], r) == sizeof(ll) * 2 - 1))
+	{
+		(void) sm_io_fprintf(smioerr, SM_TIME_DEFAULT,
+			"oops: LLONG_MIN=%s\n", buf);
+	}
+
+	ll = LLONG_MAX;
+	lt = ll + 1;
+	SM_TEST(lt < ll);
+	sm_snprintf(buf, sizeof(buf), "%llx", ll);
+	r = "f";
+	if (!SM_TEST(buf[0] == '7')
+	    || !SM_TEST(strspn(&buf[1], r) == sizeof(ll) * 2 - 1))
+	{
+		(void) sm_io_fprintf(smioerr, SM_TIME_DEFAULT,
+			"oops: LLONG_MAX=%s\n", buf);
+	}
+#endif /* SM_CONF_TEST_LLONG */
+
+	ull = ULLONG_MAX;
+	SM_TEST(ull + 1 == 0);
+	sm_snprintf(buf, sizeof(buf), "%llx", ull);
+	r = "f";
+	SM_TEST(strspn(buf, r) == sizeof(ll) * 2);
+
+	/*
+	**  If QUAD_MAX is defined by <limits.h> then quad_t is defined.
+	**  Make sure LONGLONG_T is at least as big as quad_t.
+	*/
+#ifdef QUAD_MAX
+	SM_TEST(QUAD_MAX <= LLONG_MAX);
+#endif
+
+	return sm_test_end();
+}
+@
+
+
+1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2002 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_IDSTR(id, "@@(#)$Id: t-types.c,v 1.18 2002/03/13 17:29:53 gshapiro Exp $")
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d11 1
+a11 1
+SM_IDSTR(id, "@@(#)$Sendmail: t-types.c,v 1.18 2002/03/13 17:29:53 gshapiro Exp $")
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d11 1
+a11 1
+SM_IDSTR(id, "@@(#)$Id: t-types.c,v 1.18 2002/03/13 17:29:53 gshapiro Exp $")
+@
+
+
+1.1.127.2
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2002 Proofpoint, Inc. and its suppliers.
+d11 1
+a11 1
+SM_IDSTR(id, "@@(#)$Id: t-types.c,v 1.19 2013-11-22 20:51:44 ca Exp $")
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.1.6.1
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d11 1
+a11 1
+SM_IDSTR(id, "@@(#)$Id: t-types.c,v 1.18 2002/03/13 17:29:53 gshapiro Exp $")
+@
+
+
+1.1.1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d11 1
+a11 1
+SM_IDSTR(id, "@@(#)$Id: t-types.c,v 1.18 2002/03/13 17:29:53 gshapiro Exp $")
+@
+

@@ -1,0 +1,313 @@
+head	1.6;
+access;
+symbols
+	tg-beforemerge-ksrc10:1.1.1.1
+	MIRBSD_10:1.5.0.2
+	MIRBSD_10_BASE:1.5
+	MIRBSD_9_BASE:1.5
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2008.11.17.01.11.42;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004920C4903A8D6AAA;
+
+1.5
+date	2006.06.25.03.57.56;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100449E09CD353EDDF1;
+
+1.4
+date	2006.04.27.20.44.32;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10044512D3D3EEA74B3;
+
+1.3
+date	2006.03.31.03.46.15;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100442CA5DA0DEFA153;
+
+1.2
+date	2005.03.06.21.26.59;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.27.25;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.27.25;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.6
+log
+@enable (E)COFF execution
+
+This is very weird though: I only got an NMAGIC executable with the
+following source code and build way to work, which is auto-detected
+by GNU bfd as “pe-i386”, but cannot be created by ld(1) in an auto-
+mated manner…
+
+tg@@bleu:~ $ as -o hwtdb.o hwtdb.s
+tg@@bleu:~ $ ld --oformat binary -Ttext 0 hwtdb.o -o hwtdb
+tg@@bleu:~ $ ./hwtdb
+Hello, World!
+
+	.intel_syntax noprefix
+	.text
+
+	.globl	_start
+_start:
+
+fhdr:	.short	0x014C			# f_magic
+	.short	3			# f_nscns
+	.long	0, 0, 0			# f_timdat, f_symptr, f_nsyms
+	.short	ohsz			# f_opthdr
+	.short	0x010F			# f_flags
+
+ohdr:	.short	0407			# magic
+	.short	134			# vstamp
+	.long	tssz			# tsize
+	.long	dssz			# dsize
+	.long	bssz			# bsize
+	.long	0x1C000000		# entry
+	.long	0x1C000000		# text_start
+	.long	0x1C000000 + dofs	# data_start
+	.long	0			# bss_start
+	ohsz = . - ohdr
+
+shdrt:	.asciz	".text"			# s_name
+	. = shdrt + 8
+	.long	0x1C000000		# s_paddr
+	.long	0x1C000000		# s_vaddr
+	.long	tssz			# s_size
+	.long	tsec			# s_scnptr
+	.long	0, 0			# s_relptr, s_lnnoptr
+	.short	0, 0			# s_nreloc, s_nlnno
+	.long	0x20			# s_flags
+
+shdrd:	.asciz	".data"			# s_name
+	. = shdrd + 8
+	.long	0x1C000000 + dofs	# s_paddr
+	.long	0x1C000000 + dofs	# s_vaddr
+	.long	dssz			# s_size
+	.long	dsec			# s_scnptr
+	.long	0, 0			# s_relptr, s_lnnoptr
+	.short	0, 0			# s_nreloc, s_nlnno
+	.long	0x40			# s_flags
+
+shdrb:	.asciz	".bss"			# s_name
+	. = shdrb + 8
+	.long	0			# s_paddr
+	.long	0x1C000000 + bofs	# s_vaddr
+	.long	bssz			# s_size
+	.long	0			# s_scnptr
+	.long	0, 0			# s_relptr, s_lnnoptr
+	.short	0, 0			# s_nreloc, s_nlnno
+	.long	0x80			# s_flags
+
+	.p2align 4, 0
+
+	fofs = .
+
+tsec:
+	call	Lmain
+Ltext:	.ascii	"Hello, World!\n"
+	Ltxsz = . - Ltext
+sc_write:
+	mov	eax,4
+	int	0x80
+	ret
+Lmain:	pop	ecx
+	push	dword ptr Ltxsz
+	push	ecx
+	push	dword ptr 1
+	call	sc_write
+	add	esp,12
+	push	dword ptr 0
+	call	sc__exit
+sc__exit:
+	xor	eax,eax
+	inc	eax
+	int	0x80
+1:	jmp	1b
+tpad:	.p2align 4, 0x90
+	tssz = . - tsec
+
+	dofs = . - fofs
+dsec:
+dpad:	.p2align 4, 0
+	dssz = . - dsec
+
+	bofs = . - fofs
+bsec:
+	bssz = . - bsec
+@
+text
+@/**	$MirOS: src/sys/arch/i386/include/exec.h,v 1.5 2006/06/25 03:57:56 tg Exp $ */
+/*	$OpenBSD: exec.h,v 1.9 2003/04/17 03:42:14 drahn Exp $	*/
+/*	$NetBSD: exec.h,v 1.6 1994/10/27 04:16:05 cgd Exp $	*/
+
+/*
+ * Copyright (c) 1993 Christopher G. Demetriou
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#ifndef _I386_EXEC_H_
+#define _I386_EXEC_H_
+
+#define __LDPGSZ	4096
+
+/* Relocation format for a.out. */
+#ifndef __ELF__
+struct relocation_info_i386 {
+	int r_address;			/* offset in text or data segment */
+	unsigned int r_symbolnum : 24,	/* ordinal number of add symbol */
+			 r_pcrel :  1,	/* 1 if value should be pc-relative */
+			r_length :  2,	/* log base 2 of value's width */
+			r_extern :  1,	/* 1 if need to add symbol to value */
+		       r_baserel :  1,	/* linkage table relative */
+		      r_jmptable :  1,	/* relocate to jump table */
+		      r_relative :  1,	/* load address relative */
+			  r_copy :  1;	/* run time copy */
+};
+#define relocation_info	relocation_info_i386
+#endif
+
+#define NATIVE_EXEC_ELF
+
+#define ARCH_ELFSIZE		32
+
+#define ELF_TARG_CLASS		ELFCLASS32
+#define ELF_TARG_DATA		ELFDATA2LSB
+#define ELF_TARG_MACH		EM_386 /* XXX - EM_486 is currently unused
+                                          by all OSs/compilers/linkers */
+
+#define _NLIST_DO_ELF
+#define _KERN_DO_ELF
+
+#ifndef SMALL_KERNEL
+#define _NLIST_DO_AOUT
+#define _KERN_DO_AOUT
+#define _KERN_DO_ECOFF		/* for ports/plan9/kencc */
+#endif
+
+#endif  /* _I386_EXEC_H_ */
+@
+
+
+1.5
+log
+@don't even bother with (E)COFF for now, it's broken anyway
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/arch/i386/include/exec.h,v 1.4 2006/04/27 20:44:32 tg Exp $ */
+a67 1
+#if 0
+a69 1
+#endif
+@
+
+
+1.4
+log
+@put a.out and (E)COFF into #ifndef SMALL_KERNEL
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/sys/arch/i386/include/exec.h,v 1.3 2006/03/31 03:46:15 tg Exp $ */
+d68 1
+d71 1
+@
+
+
+1.3
+log
+@throw in EXEC_ECOFF support for i386...
+I get an EPERM but maybe someone can debug this?
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+a61 1
+#define _NLIST_DO_AOUT
+d63 1
+d65 2
+a67 1
+#define _KERN_DO_ELF
+d69 1
+@
+
+
+1.2
+log
+@* merge src/sys/
+  (at least the better part of it)
+* revert IPv6 networking to OpenBSD, since
+  I didn't get IPV4_MAPPED addresses working :(
+@
+text
+@d1 1
+d67 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d36 16
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

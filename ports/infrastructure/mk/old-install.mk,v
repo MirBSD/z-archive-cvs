@@ -1,0 +1,345 @@
+head	1.8;
+access;
+symbols
+	MIRBSD_8_BASE:1.6;
+locks; strict;
+comment	@# @;
+
+
+1.8
+date	2007.08.16.18.16.51;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10046C494A55125D7CA;
+
+1.7
+date	2006.09.13.22.07.12;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100450881212EF3914B;
+
+1.6
+date	2005.12.20.19.57.54;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10043A8624B52844F91;
+
+1.5
+date	2005.12.15.01.24.43;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10043A0C5D7068BC1DF;
+
+1.4
+date	2005.08.20.12.33.54;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1bdf4307228d6819;
+
+1.3
+date	2005.07.06.18.34.55;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	170b42cc240dc977;
+
+1.2
+date	2005.03.19.23.17.45;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.03.18.15.47.19;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.47.19;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.8
+log
+@typo accidentally found while grepping
+@
+text
+@# $MirOS: ports/infrastructure/mk/old-install.mk,v 1.7 2006/09/13 22:07:12 tg Exp $
+# $OpenBSD: old-install.mk,v 1.10 2002/06/27 12:47:23 mpech Exp $
+# Stuff that is needed for old, pre-fake, port installations.
+
+# If ${FAKE} == No
+# install		- Install the results of a build.
+# reinstall		- Install the results of a build, ignoring "already installed"
+#				  flag.
+# deinstall		- Remove the installation.  Alias: uninstall
+# package		- Create a package from an _installed_ port.
+
+# FORCE_PKG_REGISTER - If set, it will overwrite any existing package
+#				  registration information in ${PKG_DBDIR}/${FULLPKGNAME}.
+
+
+# XXX
+PREFIX=/usr/local
+
+${_FAKE_COOKIE}: ${_BUILD_COOKIE}
+	@@echo 1>&2 "*** ${FULLPKGNAME} does not use fake installation yet"
+
+# The real install, old version
+${_INSTALL_COOKIE}: ${_BUILD_COOKIE}
+	@@cd ${.CURDIR} && exec ${SUDO} ${MAKE} run-depends lib-depends
+.if !defined(NO_INSTALL)
+	@@${ECHO_MSG} "===>  Installing for ${FULLPKGNAME}"
+# Kludge
+.  if ${CONFIGURE_STYLE:Mimake}
+	@@${SUDO} mkdir -p /usr/local/lib/X11
+	@@if [ ! -e /usr/local/lib/X11/app-defaults ]; then \
+		${SUDO} ln -sf /etc/X11/app-defaults /usr/local/lib/X11/app-defaults; \
+	fi
+.  endif
+.  if !defined(NO_PKG_REGISTER) && !defined(FORCE_PKG_REGISTER)
+	@@if [ -d ${PKG_DBDIR}/${FULLPKGNAME} -o "X$$(ls -d ${PKG_DBDIR}/${FULLPKGNAME:C/-[0-9].*//g}-* 2> /dev/null)" != "X" ]; then \
+		echo "===>  ${FULLPKGNAME} is already installed - perhaps an older version?"; \
+		echo "      If so, you may wish to \"mmake deinstall\" and install"; \
+		echo "      this port again by \"mmake reinstall\" to upgrade it properly."; \
+		echo "      If you really wish to overwrite the old port of ${FULLPKGNAME}"; \
+		echo "      without deleting it first, set the variable \"FORCE_PKG_REGISTER\""; \
+		echo "      in your environment or the \"mmake install\" command line."; \
+		exit 1; \
+	fi
+.  endif
+	@@if [ $$(${SH} -c umask) != ${DEF_UMASK} ]; then \
+		${ECHO_MSG} "===>  Warning: your umask is \"$$(${SH} -c umask)"\".; \
+		${ECHO_MSG} "      If this is not desired, set it to an appropriate value"; \
+		${ECHO_MSG} "      and install this port again by \"mmake reinstall\"."; \
+	fi
+	@@${_MAKE_COOKIE} ${_INSTALL_PRE_COOKIE}
+.  if target(pre-install)
+	@@cd ${.CURDIR} && exec ${SUDO} ${MAKE} pre-install
+.  endif
+.  if target(do-install)
+	@@cd ${.CURDIR} && exec ${SUDO} ${MAKE} do-install
+.  else
+# What INSTALL normally does:
+	@@cd ${WRKBUILD} && ${SUDO} ${SETENV} ${MAKE_ENV} ${MAKE_PROGRAM} ${MAKE_FLAGS} -f ${MAKE_FILE} ${INSTALL_TARGET}
+# End of INSTALL.
+.  endif
+.  if target(post-install)
+	@@cd ${.CURDIR} && exec ${SUDO} ${MAKE} post-install
+.  endif
+.  if defined(_MANPAGES) || defined(_CATPAGES)
+.    if defined(MANCOMPRESSED) && defined(NOMANCOMPRESS)
+	@@${ECHO_MSG} "===>   Uncompressing manual pages for ${FULLPKGNAME}"
+.      for manpage in ${_MANPAGES} ${_CATPAGES}
+	@@${SUDO} ${GUNZIP_CMD} ${manpage}.gz
+.      endfor
+.    elif !defined(MANCOMPRESSED) && !defined(NOMANCOMPRESS)
+	@@${ECHO_MSG} "===>   Compressing manual pages for ${FULLPKGNAME}"
+.      for manpage in ${_MANPAGES} ${_CATPAGES}
+	@@if [ -L ${manpage} ]; then \
+		set - $$(file ${manpage}); \
+		shift $$(expr $$# - 1); \
+		${SUDO} ln -sf $${1}.gz ${manpage}.gz; \
+		${SUDO} rm ${manpage}; \
+	else \
+		${SUDO} ${GZIP_CMD} ${manpage}; \
+	fi
+.        endfor
+.    endif
+.  endif
+.  if defined(MESSAGE)
+	@@cat	${WRKBUILD}/MESSAGE${SUBPACKAGE}
+.  endif
+.  if !defined(NO_PKG_REGISTER)
+	@@cd ${.CURDIR} && exec ${SUDO} ${MAKE} fake-pkg
+.  endif
+.endif
+	@@${SUDO} ${_MAKE_COOKIE} $@@
+
+# Figure out where the local mtree file is
+# XXX needs testing
+MTREE_FILE?=	${PORTSDIR}/infrastructure/db/fake.mtree
+
+plist: install
+	@@DESTDIR=${PREFIX} PREFIX=${PREFIX} LDCONFIG=${LDCONFIG:Q} MTREE_FILE=${MTREE_FILE} \
+	INSTALL_PRE_COOKIE=${_INSTALL_PRE_COOKIE} \
+	perl ${PORTSDIR}/infrastructure/scripts/make-plist ${PLIST}
+
+# Fake installation of package so that user can pkg_delete it later.
+# Also, make sure that an installed port is recognized correctly in
+# accordance to the @@pkgdep directive in the packing lists
+
+fake-pkg: ${_PKG_PREREQ}
+	@@if [ $$(echo ${_COMMENT:Q} | wc -c) -gt 72 ]; then \
+	    echo "** "${_COMMENT:Q}" too large - installation not recorded."; \
+	    exit 1; \
+	 fi
+	@@if [ ! -d ${PKG_DBDIR} ]; then rm -f ${PKG_DBDIR}; mkdir -p ${PKG_DBDIR}; fi
+.if defined(FORCE_PKG_REGISTER)
+	@@rm -rf ${PKG_DBDIR}/${FULLPKGNAME}
+.endif
+	@@if [ ! -d ${PKG_DBDIR}/${FULLPKGNAME} ]; then \
+		${ECHO_MSG} "===>  Registering installation for ${FULLPKGNAME}"; \
+		mkdir -p ${PKG_DBDIR}/${FULLPKGNAME}; \
+		${PKG_CMD} ${PKG_ARGS} -O ${PKGFILE} > ${PKG_DBDIR}/${FULLPKGNAME}/+CONTENTS; \
+		cp ${WRKPKG}/DESCR${SUBPACKAGE} ${PKG_DBDIR}/${FULLPKGNAME}/+DESC; \
+		echo ${_COMMENT:Q} >${PKG_DBDIR}/${FULLPKGNAME}/+COMMENT; \
+		if [ -f ${WRKPKG}/INSTALL${SUBPACKAGE} ]; then \
+			cp ${WRKPKG}/INSTALL${SUBPACKAGE} ${PKG_DBDIR}/${FULLPKGNAME}/+INSTALL; \
+		fi; \
+		if [ -f ${WRKPKG}/DEINSTALL${SUBPACKAGE} ]; then \
+			cp ${WRKPKG}/DEINSTALL${SUBPACKAGE} ${PKG_DBDIR}/${FULLPKGNAME}/+DEINSTALL; \
+		fi; \
+		if [ -f ${WRKPKG}/REQ${SUBPACKAGE} ]; then \
+			cp ${WRKPKG}/REQ${SUBPACKAGE} ${PKG_DBDIR}/${FULLPKGNAME}/+REQ; \
+		fi; \
+		if [ -f ${WRKPKG}/MESSAGE${SUBPACKAGE} ]; then \
+			cp ${WRKPKG}/MESSAGE${SUBPACKAGE} ${PKG_DBDIR}/${FULLPKGNAME}/+DISPLAY; \
+		fi; \
+		for dep in $$(cd ${.CURDIR} && ${MAKE} package-depends ECHO_MSG=true | ${_SORT_DEPENDS}); do \
+			if [ -d ${PKG_DBDIR}/$$dep ]; then \
+				if ! grep ^${FULLPKGNAME}$$ ${PKG_DBDIR}/$$dep/+REQUIRED_BY \
+					>/dev/null 2>&1; then \
+					echo ${FULLPKGNAME} >> ${PKG_DBDIR}/$$dep/+REQUIRED_BY; \
+				fi; \
+			fi; \
+		done; \
+	fi
+
+.PHONY: fake-pkg
+@
+
+
+1.7
+log
+@fix after $COMMENT changes
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/infrastructure/mk/old-install.mk,v 1.6 2005/12/20 19:57:54 tg Exp $
+d128 1
+a128 1
+			cp ${WRKPKG}}/REQ${SUBPACKAGE} ${PKG_DBDIR}/${FULLPKGNAME}/+REQ; \
+@
+
+
+1.6
+log
+@make -> mmake, as discussed
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/infrastructure/mk/old-install.mk,v 1.5 2005/12/15 01:24:43 tg Exp $
+d107 2
+a108 2
+	@@if [ $$(echo ${_COMMENT} | wc -c) -gt 72 ]; then \
+	    echo "** "${_COMMENT}" too large - installation not recorded."; \
+d120 1
+a120 1
+		echo ${_COMMENT} >${PKG_DBDIR}/${FULLPKGNAME}/+COMMENT; \
+@
+
+
+1.5
+log
+@* use ${FOO:Q} i.p.v. '${FOO}' or "${FOO}"
+* replace v='' and v="" with v= while here
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/infrastructure/mk/old-install.mk,v 1.4 2005/08/20 12:33:54 tg Exp $
+d37 2
+a38 2
+		echo "      If so, you may wish to \"make deinstall\" and install"; \
+		echo "      this port again by \"make reinstall\" to upgrade it properly."; \
+d41 1
+a41 1
+		echo "      in your environment or the \"make install\" command line."; \
+d48 1
+a48 1
+		${ECHO_MSG} "      and install this port again by \"make reinstall\"."; \
+@
+
+
+1.4
+log
+@half-hearted attempt to unify LOCALBASE to /usr/mpkg for all platforms
+agreed some time ago bsiegert@@
+no veto on miros-discuss@@
+
+for now, hardcode PREFIX to /usr/local for imake and old-install ports
+(we should probably do something about imake anyway, regarding both
+Interix and Darwin - maybe require our own XFree86® port, but later...)
+
+some of the code (especially shell and make) will be rewritten now,
+since it can be simplified (nuking bugs, maybe)
+
+what about changing /etc/mk.conf as well (conflict with obsd and maybe
+others)? I think of /etc/${MAKE}.cfg (MAKE=make or mmake) maybe?
+
+please test, as usual...
+@
+text
+@d1 1
+a1 1
+# $MirOS: ports/infrastructure/mk/old-install.mk,v 1.3 2005/07/06 18:34:55 bsiegert Exp $
+d98 1
+a98 1
+	@@DESTDIR=${PREFIX} PREFIX=${PREFIX} LDCONFIG="${LDCONFIG}" MTREE_FILE=${MTREE_FILE} \
+@
+
+
+1.3
+log
+@Unbreak (at least the index generation) when PREFIX != /usr/local. The whole
+stuff smells bad, and ports that use FAKE=no should be updated anyway.
+
+ok tg@@
+@
+text
+@d1 1
+a1 1
+# $MirOS$
+d16 3
+@
+
+
+1.2
+log
+@One more new path. Does anything still use this?
+@
+text
+@d91 2
+a92 5
+.if ${PREFIX} == "/usr/local"
+MTREE_FILE?=	/etc/mtree/BSD.local.dist
+.else
+ERRORS+=	Can't figure out MTREE_FILE
+.endif
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d100 1
+a100 1
+	perl ${PORTSDIR}/infrastructure/install/make-plist ${PLIST}
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

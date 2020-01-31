@@ -1,0 +1,463 @@
+head	1.13;
+access;
+symbols
+	MIRBSD_10:1.7.0.2
+	MIRBSD_10_BASE:1.7;
+locks; strict;
+comment	@# @;
+
+
+1.13
+date	2010.09.12.18.50.24;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	1004C8D20FC68053736;
+
+1.12
+date	2010.09.12.18.19.56;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	1004C8D19CE4D7E4CD9;
+
+1.11
+date	2008.08.01.13.46.08;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	100489313B0766D4103;
+
+1.10
+date	2008.07.06.16.44.45;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	1004870F68A5B5B5EEB;
+
+1.9
+date	2008.07.06.16.38.34;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004870F50F6B95F2BD;
+
+1.8
+date	2008.04.06.16.57.37;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10047F901172CB152C3;
+
+1.7
+date	2007.05.07.16.15.57;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100463F507166871BCE;
+
+1.6
+date	2007.05.07.15.50.40;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100463F4AE56575365A;
+
+1.5
+date	2007.03.13.18.22.53;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10045F6EC14570C78F0;
+
+1.4
+date	2007.03.02.03.56.08;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10045E7A06F18B6561D;
+
+1.3
+date	2007.02.28.16.11.32;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10045E5A951020DE68F;
+
+1.2
+date	2007.02.18.16.51.44;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045D88436428DE860;
+
+1.1
+date	2007.02.12.20.59.47;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045D0D52B012FBB8B;
+
+
+desc
+@@
+
+
+1.13
+log
+@a bit more like it's supposed to work
+@
+text
+@/*-
+ * Copyright (c) 2006, 2007, 2008
+ *	Thorsten Glaser <tg@@mirbsd.de>
+ * The adler32 algorithm is
+ * Copyright (C) 1995 Mark Adler
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ *-
+ * See also:
+ *	contrib/hosted/fwcf/adler.h
+ *	src/lib/libc/hash/adh32.c
+ *	src/kern/z/adler32s.c
+ *	src/kern/z/adler32_i386.S
+ */
+
+#include <machine/asm.h>
+
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.12 2010/09/12 18:19:56 tg Exp $")
+
+#define BASE	65521	/* largest prime smaller than 65536 */
+#define NMAX	5552	/* largest n: 255n(n+1)/2 + (n+1)(BASE-1) <= 2^32-1 */
+
+	.intel_syntax noprefix
+	.text
+
+/* void ADLER32_Update(ADLER32_CTX *ctx, const uint8_t *buf, size_t len) */
+/* u_long adler32(u_long adler, const uint8_t *buf, unsigned len) */
+ENTRY(adler32)
+	push	ebp
+	mov	ebp,esp
+	push	ebx
+	push	esi
+	push	edi
+	mov	edi,[ebp+8]	/* adler */
+	mov	esi,[ebp+12]	/* buf */
+	mov	ecx,[ebp+16]	/* len */
+
+	xor	ebx,ebx
+	mov	bx,di		/* EBX = s1 (lower half) */
+	shr	edi,16		/* EDI = s2 (upper half) */
+
+	cld
+.L1:	jecxz	.L4
+	mov	edx,NMAX
+	cmp	ecx,edx
+	jae	.L2
+	mov	edx,ecx
+.L2:	sub	ecx,edx
+	/* do at most NMAX bytes at a time */
+	xor	eax,eax
+.L3:	lodsb
+	add	ebx,eax
+	add	edi,ebx
+	dec	edx
+	jnz	.L3
+	/* s{1,2} %= BASE; */
+	push	ebp
+	mov	ebp,BASE
+	/* EDX is already 0, cool */
+	xor	eax,eax
+	xchg	eax,ebx
+	div	ebp
+	xchg	ebx,edx
+	/* EDX is 0 again, cool */
+	mov	eax,edi
+	div	ebp
+	mov	edi,edx
+	pop	ebp
+	/* and loop */
+	jmp	.L1
+.L4:	/* return */
+	shl	edi,16
+	lea	eax,[edi+ebx]
+#if defined(_KERNEL) || !defined(_STANDALONE)
+	push	eax			/* return value */
+	lea	eax,[esp]		/* == function argument */
+	push	4			/* size */
+	push	eax			/* address */
+#ifdef _KERNEL
+	call	rnd_lopool_add
+#else
+	call	arc4random_pushb_fast
+#endif
+	pop	eax			/* dummy */
+	pop	eax			/* dummy */
+	pop	eax			/* return value */
+#endif
+	pop	edi
+	pop	esi
+	pop	ebx
+	pop	ebp
+	ret
+@
+
+
+1.12
+log
+@part 1: remove the addpool, replace with dummy lopool
+do not install this, it reduces entropy
+@
+text
+@a29 3
+#ifdef _KERNEL
+#include <dev/rndvar.h>
+#endif
+d31 1
+a31 1
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.11 2008/08/01 13:46:08 tg Exp $")
+@
+
+
+1.11
+log
+@RCS ID and include police
+@
+text
+@d34 1
+a34 1
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.10 2008/07/06 16:44:45 tg Exp $")
+d90 1
+a90 9
+#if defined(_KERNEL)
+	mov	ebx,[rnd_addpool_num]	/* where are we at? */
+	xor	[rnd_addpool_buf+4*ecx],eax
+	inc	ebx
+	cmp	bl,rnd_addpool_size	/* ring buffer wraparound? */
+	jb	.Ladrw
+	xor	ebx,ebx
+.Ladrw:	mov	[rnd_addpool_num],bl
+#elif !defined(_STANDALONE)
+a91 4
+#ifdef DONT_USE_PUSHK	/* for use if arc4random_pushk is not a C function */
+	push	eax			/* function argument */
+	call	_C_LABEL(arc4random_push)
+#else
+d95 5
+a99 1
+	call	_C_LABEL(arc4random_pushk)
+a100 1
+#endif
+@
+
+
+1.10
+log
+@if arc4random_pushk(3) is indeed a C function, we can use it (= default)
+@
+text
+@a0 2
+/* $MirOS: src/kern/z/adler32_i386.S,v 1.9 2008/07/06 16:38:34 tg Exp $ */
+
+a12 4
+ * Advertising materials mentioning features or use of this work must
+ * display the following acknowledgement:
+ *	This product includes material provided by Thorsten Glaser.
+ *
+d34 1
+a34 1
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.9 2008/07/06 16:38:34 tg Exp $")
+@
+
+
+1.9
+log
+@we cannot call arc4random_pushk in here, as it's not necessarily a function
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32_i386.S,v 1.7 2007/05/07 16:15:57 tg Exp $ */
+d40 1
+a40 1
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.7 2007/05/07 16:15:57 tg Exp $")
+d106 1
+d109 7
+@
+
+
+1.8
+log
+@arc4random_pushk
+@
+text
+@d96 1
+a96 1
+#ifdef _KERNEL
+d103 2
+a104 3
+.Ladrw:	mov	[rnd_addpool_num],ebx
+#endif
+#if !defined(_KERNEL) && !defined(_STANDALONE)
+d106 2
+a107 5
+	lea	eax,[esp]		/* == function argument */
+	push	4			/* size */
+	push	eax			/* address */
+	call	_C_LABEL(arc4random_pushk)
+	pop	eax			/* dummy */
+@
+
+
+1.7
+log
+@• make HASH API functions for ADLER32 in libc, too (size-optimised but no asm)
+• cross-reference them all in the man pages
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32_i386.S,v 1.6 2007/05/07 15:50:40 tg Exp $ */
+d4 1
+a4 1
+ * Copyright (c) 2006, 2007
+d40 1
+a40 1
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.6 2007/05/07 15:50:40 tg Exp $")
+d107 5
+a111 2
+	push	eax			/* function argument */
+	call	_C_LABEL(arc4random_push)
+@
+
+
+1.6
+log
+@add xrefs
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32_i386.S,v 1.5 2007/03/13 18:22:53 tg Exp $ */
+d30 1
+a30 1
+ *	src/bin/md5/cksum.c
+d40 1
+a40 1
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.5 2007/03/13 18:22:53 tg Exp $")
+@
+
+
+1.5
+log
+@fix paths in comment
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32_i386.S,v 1.4 2007/03/02 03:56:08 tg Exp $ */
+d30 1
+d40 1
+a40 1
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.4 2007/03/02 03:56:08 tg Exp $")
+@
+
+
+1.4
+log
+@optimise for size, safe here (checked)
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32_i386.S,v 1.3 2007/02/28 16:11:32 tg Exp $ */
+d30 2
+a31 2
+ *	kern/z/adler32s.c
+ *	kern/z/adler32_i386.S
+d39 1
+a39 1
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.3 2007/02/28 16:11:32 tg Exp $")
+@
+
+
+1.3
+log
+@* fix pathnames in comment
+* C impl: RCSID is ok for kernel (gets stripped, but what the hey),
+  but not standalone (we can't be sure to use the macro, in contrast
+  to the asm impl)
+* asm impl: do rnd_addpool_add() for kernel, arc4random_push() for
+  (not kernel) and (not standalone)
+* some more comment overhaul
+
+XXX this code isn't used yet, but better should
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32_i386.S,v 1.2 2007/02/18 16:51:44 tg Exp $ */
+d39 1
+a39 1
+RCSID("$MirOS: src/kern/z/adler32_i386.S,v 1.2 2007/02/18 16:51:44 tg Exp $")
+a93 4
+#ifdef _KERNEL
+	mov	eax,[rnd_addpool_allow]
+	or	eax,eax			/* allowed to rnd_addpool_add? */
+#endif
+a95 1
+	jz	.Ladrn			/* no, just return the value */
+a102 1
+.Ladrn:
+@
+
+
+1.2
+log
+@unify style
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/kern/z/adler32_i386.S,v 1.1 2007/02/12 20:59:47 tg Exp $ */
+d4 1
+a4 1
+ * Copyright (c) 2006
+d29 1
+a29 1
+ *	contrib/hosted/fwcf/adler.h,v
+d35 3
+d39 1
+a39 1
+RCSID("$MirOS$")
+d94 4
+d99 18
+@
+
+
+1.1
+log
+@move sys/lib/libsa/adler32s.c and sys/arch/i386/stand/libz/adler32.S
+to kern/z/adler32{s.c,_i386.S} in order to be able to share them; no
+code changes yet (but there will be, e.g. a header file)
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/share/misc/licence.template,v 1.20 2006/12/11 21:04:56 tg Rel $ */
+d34 3
+a36 5
+#ifdef UNDERSCORES
+#define	_C(x)	_ ## x
+#else
+#define	_C(x)	x
+#endif
+a41 2
+	.section .comment
+	.asciz	"$MirOS: src/sys/arch/i386/stand/libz/adler32.S,v 1.3 2006/12/11 23:55:01 tg Exp $"
+d46 1
+a46 2
+	.globl	_C(adler32)
+_C(adler32):
+@
+

@@ -1,0 +1,445 @@
+head	1.5;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype:1.1.115;
+locks; strict;
+comment	@ * @;
+
+
+1.5
+date	2017.04.15.19.21.44;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10058F2723111C7BEE2;
+
+1.4
+date	2013.08.06.19.48.00;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.06.12.20.54.38;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10048518C1E44F62885;
+
+1.2
+date	2008.02.26.20.05.00;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	10047C470A72A1E13CE;
+
+1.1
+date	2006.06.29.18.36.49;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10044A41DBD6368BED5;
+
+1.1.1.1
+date	2008.02.26.19.53.21;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.38.55;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.115.1
+date	2006.06.29.18.36.49;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.2
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.3
+date	2017.04.15.15.42.00;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.5
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftzopen.h                                                              */
+/*                                                                         */
+/*    FreeType support for .Z compressed files.                            */
+/*                                                                         */
+/*  This optional component relies on NetBSD's zopen().  It should mainly  */
+/*  be used to parse compressed PCF fonts, as found with many X11 server   */
+/*  distributions.                                                         */
+/*                                                                         */
+/*  Copyright 2005-2016 by                                                 */
+/*  David Turner.                                                          */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+#ifndef FTZOPEN_H_
+#define FTZOPEN_H_
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
+
+
+  /*
+   *  This is a complete re-implementation of the LZW file reader,
+   *  since the old one was incredibly badly written, using
+   *  400 KByte of heap memory before decompressing anything.
+   *
+   */
+
+#define FT_LZW_IN_BUFF_SIZE        64
+#define FT_LZW_DEFAULT_STACK_SIZE  64
+
+#define LZW_INIT_BITS     9
+#define LZW_MAX_BITS      16
+
+#define LZW_CLEAR         256
+#define LZW_FIRST         257
+
+#define LZW_BIT_MASK      0x1F
+#define LZW_BLOCK_MASK    0x80
+#define LZW_MASK( n )     ( ( 1U << (n) ) - 1U )
+
+
+  typedef enum  FT_LzwPhase_
+  {
+    FT_LZW_PHASE_START = 0,
+    FT_LZW_PHASE_CODE,
+    FT_LZW_PHASE_STACK,
+    FT_LZW_PHASE_EOF
+
+  } FT_LzwPhase;
+
+
+  /*
+   *  state of LZW decompressor
+   *
+   *  small technical note
+   *  --------------------
+   *
+   *  We use a few tricks in this implementation that are explained here to
+   *  ease debugging and maintenance.
+   *
+   *  - First of all, the `prefix' and `suffix' arrays contain the suffix
+   *    and prefix for codes over 256; this means that
+   *
+   *      prefix_of(code) == state->prefix[code-256]
+   *      suffix_of(code) == state->suffix[code-256]
+   *
+   *    Each prefix is a 16-bit code, and each suffix an 8-bit byte.
+   *
+   *    Both arrays are stored in a single memory block, pointed to by
+   *    `state->prefix'.  This means that the following equality is always
+   *    true:
+   *
+   *      state->suffix == (FT_Byte*)(state->prefix + state->prefix_size)
+   *
+   *    Of course, state->prefix_size is the number of prefix/suffix slots
+   *    in the arrays, corresponding to codes 256..255+prefix_size.
+   *
+   *  - `free_ent' is the index of the next free entry in the `prefix'
+   *    and `suffix' arrays.  This means that the corresponding `next free
+   *    code' is really `256+free_ent'.
+   *
+   *    Moreover, `max_free' is the maximum value that `free_ent' can reach.
+   *
+   *    `max_free' corresponds to `(1 << max_bits) - 256'.  Note that this
+   *    value is always <= 0xFF00, which means that both `free_ent' and
+   *    `max_free' can be stored in an FT_UInt variable, even on 16-bit
+   *    machines.
+   *
+   *    If `free_ent == max_free', you cannot add new codes to the
+   *    prefix/suffix table.
+   *
+   *  - `num_bits' is the current number of code bits, starting at 9 and
+   *    growing each time `free_ent' reaches the value of `free_bits'.  The
+   *    latter is computed as follows
+   *
+   *      if num_bits < max_bits:
+   *         free_bits = (1 << num_bits)-256
+   *      else:
+   *         free_bits = max_free + 1
+   *
+   *    Since the value of `max_free + 1' can never be reached by
+   *    `free_ent', `num_bits' cannot grow larger than `max_bits'.
+   */
+
+  typedef struct  FT_LzwStateRec_
+  {
+    FT_LzwPhase  phase;
+    FT_Int       in_eof;
+
+    FT_Byte      buf_tab[16];
+    FT_UInt      buf_offset;
+    FT_UInt      buf_size;
+    FT_Bool      buf_clear;
+    FT_Offset    buf_total;
+
+    FT_UInt      max_bits;    /* max code bits, from file header   */
+    FT_Int       block_mode;  /* block mode flag, from file header */
+    FT_UInt      max_free;    /* (1 << max_bits) - 256             */
+
+    FT_UInt      num_bits;    /* current code bit number */
+    FT_UInt      free_ent;    /* index of next free entry */
+    FT_UInt      free_bits;   /* if reached by free_ent, increment num_bits */
+    FT_UInt      old_code;
+    FT_UInt      old_char;
+    FT_UInt      in_code;
+
+    FT_UShort*   prefix;      /* always dynamically allocated / reallocated */
+    FT_Byte*     suffix;      /* suffix = (FT_Byte*)(prefix + prefix_size)  */
+    FT_UInt      prefix_size; /* number of slots in `prefix' or `suffix'    */
+
+    FT_Byte*     stack;       /* character stack */
+    FT_UInt      stack_top;
+    FT_Offset    stack_size;
+    FT_Byte      stack_0[FT_LZW_DEFAULT_STACK_SIZE]; /* minimize heap alloc */
+
+    FT_Stream    source;      /* source stream */
+    FT_Memory    memory;
+
+  } FT_LzwStateRec, *FT_LzwState;
+
+
+  FT_LOCAL( void )
+  ft_lzwstate_init( FT_LzwState  state,
+                    FT_Stream    source );
+
+  FT_LOCAL( void )
+  ft_lzwstate_done( FT_LzwState  state );
+
+
+  FT_LOCAL( void )
+  ft_lzwstate_reset( FT_LzwState  state );
+
+
+  FT_LOCAL( FT_ULong )
+  ft_lzwstate_io( FT_LzwState  state,
+                  FT_Byte*     buffer,
+                  FT_ULong     out_size );
+
+/* */
+
+#endif /* FTZOPEN_H_ */
+
+
+/* END */
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d11 2
+a12 1
+/*  Copyright 2005, 2006, 2007, 2008 by David Turner.                      */
+d22 2
+a23 2
+#ifndef __FT_ZOPEN_H__
+#define __FT_ZOPEN_H__
+d45 1
+a45 1
+#define LZW_BIT_MASK      0x1f
+d119 2
+a120 2
+    FT_Int       buf_offset;
+    FT_Int       buf_size;
+d169 1
+a169 1
+#endif /* __FT_ZOPEN_H__ */
+@
+
+
+1.3
+log
+@Merge freetype 2.3.6
+@
+text
+@d121 1
+a121 1
+    FT_Int       buf_total;
+d140 1
+a140 1
+    FT_UInt      stack_size;
+@
+
+
+1.2
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d11 1
+a11 1
+/*  Copyright 2005, 2006, 2007 by David Turner.                            */
+d49 1
+a49 1
+  typedef enum
+d112 1
+a112 1
+  typedef struct  _FT_LzwStateRec
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d11 1
+a11 1
+/*  Copyright 2005, 2006 by David Turner.                                  */
+a114 1
+
+a115 2
+    FT_Byte*     in_cursor;   /* current buffer pos   */
+    FT_Byte*     in_limit;    /* current buffer limit */
+d117 5
+a121 2
+    FT_UInt32    pad;         /* a pad value where incoming bits were read */
+    FT_Int       pad_bits;    /* number of meaningful bits in pad value    */
+a140 2
+
+    FT_Byte      in_buff[FT_LZW_IN_BUFF_SIZE];       /* small read-buffer   */
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d11 1
+a11 1
+/*  Copyright 2005, 2006, 2007 by David Turner.                            */
+d115 1
+d117 2
+d120 2
+a121 5
+    FT_Byte      buf_tab[16];
+    FT_Int       buf_offset;
+    FT_Int       buf_size;
+    FT_Bool      buf_clear;
+    FT_Int       buf_total;
+d141 2
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d11 1
+a11 1
+/*  Copyright 2005, 2006, 2007, 2008 by David Turner.                      */
+d49 1
+a49 1
+  typedef enum  FT_LzwPhase_
+d112 1
+a112 1
+  typedef struct  FT_LzwStateRec_
+@
+
+
+1.1.115.1
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@@
+
+
+1.1.115.2
+log
+@we need newer freetype for advance calculation
+@
+text
+@d11 1
+a11 1
+/*  Copyright 2005, 2006, 2007, 2008 by David Turner.                      */
+d49 1
+a49 1
+  typedef enum  FT_LzwPhase_
+d112 1
+a112 1
+  typedef struct  FT_LzwStateRec_
+d115 1
+d117 2
+d120 2
+a121 5
+    FT_Byte      buf_tab[16];
+    FT_Int       buf_offset;
+    FT_Int       buf_size;
+    FT_Bool      buf_clear;
+    FT_Offset    buf_total;
+d140 3
+a142 1
+    FT_Offset    stack_size;
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d11 1
+a11 2
+/*  Copyright 2005-2016 by                                                 */
+/*  David Turner.                                                          */
+d21 2
+a22 2
+#ifndef FTZOPEN_H_
+#define FTZOPEN_H_
+d44 1
+a44 1
+#define LZW_BIT_MASK      0x1F
+d118 2
+a119 2
+    FT_UInt      buf_offset;
+    FT_UInt      buf_size;
+d168 1
+a168 1
+#endif /* FTZOPEN_H_ */
+@
+
+

@@ -1,0 +1,742 @@
+head	1.4;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.1
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2017.04.15.19.21.33;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10058F2723111C7BEE2;
+
+1.3
+date	2013.08.06.19.47.49;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100520152445E05B912;
+
+1.2
+date	2006.06.29.20.24.48;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.46;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	10047C46DB5081DCD79;
+
+1.1.103.1
+date	2005.03.18.10.43.09;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.12;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.13;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.00;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.4
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  ftcmru.c                                                               */
+/*                                                                         */
+/*    FreeType MRU support (body).                                         */
+/*                                                                         */
+/*  Copyright 2003-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_CACHE_H
+#include "ftcmru.h"
+#include FT_INTERNAL_OBJECTS_H
+#include FT_INTERNAL_DEBUG_H
+
+#include "ftcerror.h"
+
+
+  FT_LOCAL_DEF( void )
+  FTC_MruNode_Prepend( FTC_MruNode  *plist,
+                       FTC_MruNode   node )
+  {
+    FTC_MruNode  first = *plist;
+
+
+    if ( first )
+    {
+      FTC_MruNode  last = first->prev;
+
+
+#ifdef FT_DEBUG_ERROR
+      {
+        FTC_MruNode  cnode = first;
+
+
+        do
+        {
+          if ( cnode == node )
+          {
+            fprintf( stderr, "FTC_MruNode_Prepend: invalid action\n" );
+            exit( 2 );
+          }
+          cnode = cnode->next;
+
+        } while ( cnode != first );
+      }
+#endif
+
+      first->prev = node;
+      last->next  = node;
+      node->next  = first;
+      node->prev  = last;
+    }
+    else
+    {
+      node->next = node;
+      node->prev = node;
+    }
+    *plist = node;
+  }
+
+
+  FT_LOCAL_DEF( void )
+  FTC_MruNode_Up( FTC_MruNode  *plist,
+                  FTC_MruNode   node )
+  {
+    FTC_MruNode  first = *plist;
+
+
+    FT_ASSERT( first );
+
+    if ( first != node )
+    {
+      FTC_MruNode  prev, next, last;
+
+
+#ifdef FT_DEBUG_ERROR
+      {
+        FTC_MruNode  cnode = first;
+        do
+        {
+          if ( cnode == node )
+            goto Ok;
+          cnode = cnode->next;
+
+        } while ( cnode != first );
+
+        fprintf( stderr, "FTC_MruNode_Up: invalid action\n" );
+        exit( 2 );
+      Ok:
+      }
+#endif
+      prev = node->prev;
+      next = node->next;
+
+      prev->next = next;
+      next->prev = prev;
+
+      last = first->prev;
+
+      last->next  = node;
+      first->prev = node;
+
+      node->next = first;
+      node->prev = last;
+
+      *plist = node;
+    }
+  }
+
+
+  FT_LOCAL_DEF( void )
+  FTC_MruNode_Remove( FTC_MruNode  *plist,
+                      FTC_MruNode   node )
+  {
+    FTC_MruNode  first = *plist;
+    FTC_MruNode  prev, next;
+
+
+    FT_ASSERT( first );
+
+#ifdef FT_DEBUG_ERROR
+      {
+        FTC_MruNode  cnode = first;
+
+
+        do
+        {
+          if ( cnode == node )
+            goto Ok;
+          cnode = cnode->next;
+
+        } while ( cnode != first );
+
+        fprintf( stderr, "FTC_MruNode_Remove: invalid action\n" );
+        exit( 2 );
+      Ok:
+      }
+#endif
+
+    prev = node->prev;
+    next = node->next;
+
+    prev->next = next;
+    next->prev = prev;
+
+    if ( node == next )
+    {
+      FT_ASSERT( first == node );
+      FT_ASSERT( prev  == node );
+
+      *plist = NULL;
+    }
+    else if ( node == first )
+      *plist = next;
+  }
+
+
+  FT_LOCAL_DEF( void )
+  FTC_MruList_Init( FTC_MruList       list,
+                    FTC_MruListClass  clazz,
+                    FT_UInt           max_nodes,
+                    FT_Pointer        data,
+                    FT_Memory         memory )
+  {
+    list->num_nodes = 0;
+    list->max_nodes = max_nodes;
+    list->nodes     = NULL;
+    list->clazz     = *clazz;
+    list->data      = data;
+    list->memory    = memory;
+  }
+
+
+  FT_LOCAL_DEF( void )
+  FTC_MruList_Reset( FTC_MruList  list )
+  {
+    while ( list->nodes )
+      FTC_MruList_Remove( list, list->nodes );
+
+    FT_ASSERT( list->num_nodes == 0 );
+  }
+
+
+  FT_LOCAL_DEF( void )
+  FTC_MruList_Done( FTC_MruList  list )
+  {
+    FTC_MruList_Reset( list );
+  }
+
+
+#ifndef FTC_INLINE
+  FT_LOCAL_DEF( FTC_MruNode )
+  FTC_MruList_Find( FTC_MruList  list,
+                    FT_Pointer   key )
+  {
+    FTC_MruNode_CompareFunc  compare = list->clazz.node_compare;
+    FTC_MruNode              first, node;
+
+
+    first = list->nodes;
+    node  = NULL;
+
+    if ( first )
+    {
+      node = first;
+      do
+      {
+        if ( compare( node, key ) )
+        {
+          if ( node != first )
+            FTC_MruNode_Up( &list->nodes, node );
+
+          return node;
+        }
+
+        node = node->next;
+
+      } while ( node != first);
+    }
+
+    return NULL;
+  }
+#endif
+
+  FT_LOCAL_DEF( FT_Error )
+  FTC_MruList_New( FTC_MruList   list,
+                   FT_Pointer    key,
+                   FTC_MruNode  *anode )
+  {
+    FT_Error     error;
+    FTC_MruNode  node   = NULL;
+    FT_Memory    memory = list->memory;
+
+
+    if ( list->num_nodes >= list->max_nodes && list->max_nodes > 0 )
+    {
+      node = list->nodes->prev;
+
+      FT_ASSERT( node );
+
+      if ( list->clazz.node_reset )
+      {
+        FTC_MruNode_Up( &list->nodes, node );
+
+        error = list->clazz.node_reset( node, key, list->data );
+        if ( !error )
+          goto Exit;
+      }
+
+      FTC_MruNode_Remove( &list->nodes, node );
+      list->num_nodes--;
+
+      if ( list->clazz.node_done )
+        list->clazz.node_done( node, list->data );
+    }
+    else if ( FT_ALLOC( node, list->clazz.node_size ) )
+      goto Exit;
+
+    error = list->clazz.node_init( node, key, list->data );
+    if ( error )
+      goto Fail;
+
+    FTC_MruNode_Prepend( &list->nodes, node );
+    list->num_nodes++;
+
+  Exit:
+    *anode = node;
+    return error;
+
+  Fail:
+    if ( list->clazz.node_done )
+      list->clazz.node_done( node, list->data );
+
+    FT_FREE( node );
+    goto Exit;
+  }
+
+
+#ifndef FTC_INLINE
+  FT_LOCAL_DEF( FT_Error )
+  FTC_MruList_Lookup( FTC_MruList   list,
+                      FT_Pointer    key,
+                      FTC_MruNode  *anode )
+  {
+    FTC_MruNode  node;
+
+
+    node = FTC_MruList_Find( list, key );
+    if ( !node )
+      return FTC_MruList_New( list, key, anode );
+
+    *anode = node;
+    return 0;
+  }
+#endif /* FTC_INLINE */
+
+  FT_LOCAL_DEF( void )
+  FTC_MruList_Remove( FTC_MruList  list,
+                      FTC_MruNode  node )
+  {
+    FTC_MruNode_Remove( &list->nodes, node );
+    list->num_nodes--;
+
+    {
+      FT_Memory  memory = list->memory;
+
+
+      if ( list->clazz.node_done )
+        list->clazz.node_done( node, list->data );
+
+      FT_FREE( node );
+    }
+  }
+
+
+  FT_LOCAL_DEF( void )
+  FTC_MruList_RemoveSelection( FTC_MruList              list,
+                               FTC_MruNode_CompareFunc  selection,
+                               FT_Pointer               key )
+  {
+    FTC_MruNode  first, node, next;
+
+
+    first = list->nodes;
+    while ( first && ( !selection || selection( first, key ) ) )
+    {
+      FTC_MruList_Remove( list, first );
+      first = list->nodes;
+    }
+
+    if ( first )
+    {
+      node = first->next;
+      while ( node != first )
+      {
+        next = node->next;
+
+        if ( selection( node, key ) )
+          FTC_MruList_Remove( list, node );
+
+        node = next;
+      }
+    }
+  }
+
+
+/* END */
+@
+
+
+1.3
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2006, 2009 by                                    */
+d79 1
+a79 1
+    FT_ASSERT( first != NULL );
+d129 1
+a129 1
+    FT_ASSERT( first != NULL );
+d164 1
+a164 1
+        *plist = next;
+d241 1
+a241 1
+    FTC_MruNode  node;
+d267 1
+a267 1
+        goto Exit;
+d273 2
+a274 2
+      FTC_MruNode_Prepend( &list->nodes, node );
+      list->num_nodes++;
+d299 1
+a299 1
+    if ( node == NULL )
+d319 1
+a319 1
+       list->clazz.node_done( node, list->data );
+d335 1
+a335 1
+    while ( first && ( selection == NULL || selection( first, key ) ) )
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2006 by                                          */
+d49 1
+a49 1
+            fprintf( stderr, "FTC_MruNode_Prepend: invalid action!\n" );
+d97 1
+a97 1
+        fprintf( stderr, "FTC_MruNode_Up: invalid action!\n" );
+d144 1
+a144 1
+        fprintf( stderr, "FTC_MruNode_Remove: invalid action!\n" );
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004 by                                                */
+d21 1
+a21 1
+#include FT_CACHE_INTERNAL_MRU_H
+d28 1
+a28 1
+  FT_EXPORT_DEF( void )
+d72 1
+a72 1
+  FT_EXPORT_DEF( void )
+d121 1
+a121 1
+  FT_EXPORT_DEF( void )
+d168 1
+a168 1
+  FT_EXPORT_DEF( void )
+d184 1
+a184 1
+  FT_EXPORT( void )
+d194 1
+a194 1
+  FT_EXPORT( void )
+d201 2
+a202 1
+  FT_EXPORT_DEF( FTC_MruNode )
+d233 1
+d235 1
+a235 2
+
+  FT_EXPORT_DEF( FT_Error )
+d289 2
+a290 1
+  FT_EXPORT( FT_Error )
+d305 1
+d307 1
+a307 2
+
+  FT_EXPORT_DEF( void )
+d326 1
+a326 1
+  FT_EXPORT_DEF( void )
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2006 by                                          */
+d21 1
+a21 1
+#include "ftcmru.h"
+d28 1
+a28 1
+  FT_LOCAL_DEF( void )
+d72 1
+a72 1
+  FT_LOCAL_DEF( void )
+d121 1
+a121 1
+  FT_LOCAL_DEF( void )
+d168 1
+a168 1
+  FT_LOCAL_DEF( void )
+d184 1
+a184 1
+  FT_LOCAL_DEF( void )
+d194 1
+a194 1
+  FT_LOCAL_DEF( void )
+d201 1
+a201 2
+#ifndef FTC_INLINE
+  FT_LOCAL_DEF( FTC_MruNode )
+a231 1
+#endif
+d233 2
+a234 1
+  FT_LOCAL_DEF( FT_Error )
+d288 1
+a288 2
+#ifndef FTC_INLINE
+  FT_LOCAL_DEF( FT_Error )
+a302 1
+#endif /* FTC_INLINE */
+d304 2
+a305 1
+  FT_LOCAL_DEF( void )
+d324 1
+a324 1
+  FT_LOCAL_DEF( void )
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2006 by                                          */
+d21 1
+a21 1
+#include "ftcmru.h"
+d28 1
+a28 1
+  FT_LOCAL_DEF( void )
+d72 1
+a72 1
+  FT_LOCAL_DEF( void )
+d121 1
+a121 1
+  FT_LOCAL_DEF( void )
+d168 1
+a168 1
+  FT_LOCAL_DEF( void )
+d184 1
+a184 1
+  FT_LOCAL_DEF( void )
+d194 1
+a194 1
+  FT_LOCAL_DEF( void )
+d201 1
+a201 2
+#ifndef FTC_INLINE
+  FT_LOCAL_DEF( FTC_MruNode )
+a231 1
+#endif
+d233 2
+a234 1
+  FT_LOCAL_DEF( FT_Error )
+d288 1
+a288 2
+#ifndef FTC_INLINE
+  FT_LOCAL_DEF( FT_Error )
+a302 1
+#endif /* FTC_INLINE */
+d304 2
+a305 1
+  FT_LOCAL_DEF( void )
+d324 1
+a324 1
+  FT_LOCAL_DEF( void )
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003, 2004, 2006, 2009 by                                    */
+d49 1
+a49 1
+            fprintf( stderr, "FTC_MruNode_Prepend: invalid action\n" );
+d97 1
+a97 1
+        fprintf( stderr, "FTC_MruNode_Up: invalid action\n" );
+d144 1
+a144 1
+        fprintf( stderr, "FTC_MruNode_Remove: invalid action\n" );
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2003-2016 by                                                 */
+d79 1
+a79 1
+    FT_ASSERT( first );
+d129 1
+a129 1
+    FT_ASSERT( first );
+d164 1
+a164 1
+      *plist = next;
+d241 1
+a241 1
+    FTC_MruNode  node   = NULL;
+d267 1
+a267 1
+      goto Exit;
+d273 2
+a274 2
+    FTC_MruNode_Prepend( &list->nodes, node );
+    list->num_nodes++;
+d299 1
+a299 1
+    if ( !node )
+d319 1
+a319 1
+        list->clazz.node_done( node, list->data );
+d335 1
+a335 1
+    while ( first && ( !selection || selection( first, key ) ) )
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

@@ -1,0 +1,178 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2012.01.15.13.47.47;	author tg;	state dead;
+branches;
+next	1.2;
+commitid	1004F12D919735D2719;
+
+1.2
+date	2009.11.22.19.32.32;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004B0991C1317436F4;
+
+1.1
+date	2009.11.14.22.22.59;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004AFF2DBF68BB7737;
+
+
+desc
+@@
+
+
+1.3
+log
+@update
+@
+text
+@$MirOS: ports/security/ekeyd/patches/patch-daemon_connection_c,v 1.2 2009/11/22 19:32:32 tg Exp $
+--- daemon/connection.c.orig	Tue Nov 17 11:57:46 2009
++++ daemon/connection.c	Sun Nov 22 19:22:22 2009
+@@@@ -220,14 +220,11 @@@@ keyreq_pkt_handler(econ_state_t *state, 
+     
+     if (!fill_nonce(state->nonce + sizeof(uint32_t), 
+                     state->nonce_len - sizeof(uint32_t))) {
+-        char serialnumber[32];
+-        
+-        if (econ_getsnum(state, serialnumber))
+-            serialnumber[12] = 0;
+-        else
+-            strcpy(serialnumber, "UnknownKey");
+-    
++        char *serialnumber;
++
++        serialnumber = econ_getsnum(state);
+         syslog(LOG_ERR, "%s: Unable to prepare nonce for keying.  Key no longer trusted.", serialnumber);
++        free(serialnumber);
+         return ESTATE_UNTRUSTED;
+     }
+     *(uint32_t *)state->nonce = state->con_nonces;
+@@@@ -259,20 +256,17 @@@@ keyreq_pkt_handler(econ_state_t *state, 
+ static ekey_state_t
+ keyreq_count_pkt_handler(econ_state_t *state, uint8_t *buf, size_t count)
+ {
+-    char serialnumber[32];
+-    
+-    if (econ_getsnum(state, serialnumber))
+-        serialnumber[12] = 0;
+-    else
+-        strcpy(serialnumber, "UnknownKey");
+-    
++    char *serialnumber;
++
++    serialnumber = econ_getsnum(state);
+     if (state->keyreq_counter++ < MAX_PACKETS_BEFORE_RESET) {
+         syslog(LOG_WARNING, "%s: Repeated key request (ignored)", serialnumber);
++        free(serialnumber);
+         return ESTATE_SESSION_SENT;
+     }
+     
+     syslog(LOG_WARNING, "%s: Too many key requests in a row. Resetting state machine and device.", serialnumber);
+-    
++    free(serialnumber);
+     return reset_pkt_handler(state, buf, count);
+ }
+ 
+@@@@ -595,14 +589,20 @@@@ econ_setsnum(econ_state_t *state, const 
+  * @@param snum The serial number to set.
+  * @@return True if the seral number buffer was updated.
+  */
+-bool
+-econ_getsnum(econ_state_t *state, char *snum)
++char *
++econ_getsnum(econ_state_t *state)
+ {
++    char *snum;
++    size_t snumlen;
++
+     if (state->snum == NULL)
+-        return false;
++        return (strdup("UnknownKey"));
+ 
++    snumlen = ((state->snum_len + 2) / 3) * 4;
++    snum = malloc(snumlen + 1);
+     pem64_encode_bytes(state->snum, state->snum_len, snum);
+-    return true;
++    snum[snumlen] = '\0';
++    return (snum);
+ }
+ 
+ /** Shutdown a connection and free its context. 
+@
+
+
+1.2
+log
+@update (most of our patches have been accepted, but ekey-rekey is
+really FUBAR’d now in upstream, couldn’t work, and the rest are to
+fix some really bad programming practice leading to a strcpy
+@
+text
+@d1 1
+a1 1
+$MirOS$
+@
+
+
+1.1
+log
+@use arc4random(3) for nonces, it's MUCH cheaper and saves us one fd
+(and, in the future (after checking with Simtec), we can raise nonce size)
+@
+text
+@d2 33
+a34 9
+--- daemon/connection.c.orig	Mon Sep 21 11:20:31 2009
++++ daemon/connection.c	Sat Nov 14 23:19:22 2009
+@@@@ -29,6 +29,10 @@@@
+ #include "connection.h"
+ #include "failmodes.h"
+ 
++#if defined(EKEY_OS_OPENBSD) || defined(EKEY_OS_MIRBSD)
++#define ARC4RANDOM_NONCE
++#endif
+d36 12
+a47 2
+ /* The minimum number of bytes in a shannon info frame to allow updates */
+ #define MIN_SHANNON_SIZE 100
+d49 3
+a51 3
+@@@@ -45,6 +49,9 @@@@ uint8_t default_session_key[32];
+  * @@param buff The buffer to fill.
+  * @@param count The length of \a buff.
+d53 4
+a56 5
++#ifdef ARC4RANDOM_NONCE
++#define fill_random arc4random_buf
++#else
+ static void 
+ fill_random(uint8_t *buff, size_t count)
+d58 13
+a70 3
+@@@@ -68,6 +75,7 @@@@ fill_random(uint8_t *buff, size_t count)
+         syslog(LOG_ERR, "Short read of nonce data (%d/%zd)", rd, count);
+     }
+a71 1
++#endif
+d73 1
+a73 10
+ /** Null packet handler 
+  *
+@@@@ -243,6 +251,7 @@@@ keyreq_pkt_handler(econ_state_t *state, 
+ 
+     /* fill nonce with apropriate data */
+     if (state->nonce == NULL) {
++        /* XXX we can use MUCH more than 12 with VERY cheap ARC4RANDOM_NONCE */
+         state->nonce_len = 12;
+         state->nonce = malloc(state->nonce_len);
+     }
+@
+

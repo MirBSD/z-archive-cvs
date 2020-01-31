@@ -1,0 +1,530 @@
+head	1.6;
+access;
+symbols
+	MIRBSD_10:1.5.0.2
+	MIRBSD_10_BASE:1.5
+	cvs-200705162100:1.1.3.1
+	netbsd:1.1.3
+	MIRBSD_9_BASE:1.3
+	MIRBSD_8:1.3.0.2
+	MIRBSD_8_BASE:1.3
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2016.01.02.21.33.19;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10056884200442406AA;
+
+1.5
+date	2007.07.05.23.09.44;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100468D7A224CDB6D5A;
+
+1.4
+date	2007.05.16.21.30.09;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100464B77D54E78B834;
+
+1.3
+date	2005.09.12.22.04.52;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	65564325fb96f92e;
+
+1.2
+date	2005.03.13.18.33.50;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.30.04;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.3.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.30.04;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.3.1
+date	2007.05.16.21.07.51;	author tg;	state Exp;
+branches;
+next	;
+commitid	100464B72AF1C07AF17;
+
+
+desc
+@@
+
+
+1.6
+log
+@remove #ifndef __MirBSD__ before setlocale(); related changes
+@
+text
+@/*
+ * Copyright (c) 1994 Winning Strategies, Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Winning Strategies, Inc.
+ * 4. The name of Winning Strategies, Inc. may not be used to endorse or
+ *    promote products derived from this software without specific prior
+ *    written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <sys/cdefs.h>
+__RCSID("$MirOS: src/usr.bin/uname/uname.c,v 1.5 2007/07/05 23:09:44 tg Exp $");
+__RCSID("$NetBSD: uname.c,v 1.10 1998/11/09 13:24:05 kleink Exp $");
+
+#include <sys/param.h>
+#include <limits.h>
+#include <locale.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <err.h>
+
+#include <sys/sysctl.h>
+#include <sys/utsname.h>
+
+int main(int, char **);
+static void usage(void) __dead;
+
+/* Note that PRINT_MACHINE_ARCH is excluded from PRINT_ALL! */
+#define	PRINT_SYSNAME		0x01
+#define	PRINT_NODENAME		0x02
+#define	PRINT_RELEASE		0x04
+#define	PRINT_VERSION		0x08
+#define	PRINT_MACHINE		0x10
+#define	PRINT_MACHINE_ARCH	0x20
+#define	PRINT_PATCHLEVEL	0x40
+#define	PRINT_ALL		\
+	    (PRINT_SYSNAME | PRINT_NODENAME | PRINT_RELEASE | \
+	    PRINT_VERSION | PRINT_MACHINE | PRINT_PATCHLEVEL)
+
+int
+main(int argc, char *argv[])
+{
+	struct utsname u;
+	char machine_arch[SYS_NMLN];
+	char ospatchlevel[SYS_NMLN];
+	int c;
+	int space = 0;
+	int print_mask = 0;
+
+	(void)setlocale(LC_ALL, "");
+
+	while ((c = getopt(argc,argv,"almnprsv")) != -1) {
+		switch (c) {
+		case 'a':
+			print_mask |= PRINT_ALL;
+			break;
+		case 'l':
+			print_mask |= PRINT_PATCHLEVEL;
+			break;
+		case 'm':
+			print_mask |= PRINT_MACHINE;
+			break;
+		case 'n':
+			print_mask |= PRINT_NODENAME;
+			break;
+		case 'p':
+			print_mask |= PRINT_MACHINE_ARCH;
+			break;
+		case 'r':
+			print_mask |= PRINT_RELEASE;
+			break;
+		case 's':
+			print_mask |= PRINT_SYSNAME;
+			break;
+		case 'v':
+			print_mask |= PRINT_VERSION;
+			break;
+		default:
+			usage();
+			/* NOTREACHED */
+		}
+	}
+
+	if (optind != argc) {
+		usage();
+		/* NOTREACHED */
+	}
+
+	if (!print_mask) {
+		print_mask = PRINT_SYSNAME;
+	}
+
+	if (uname(&u) != 0) {
+		err(EXIT_FAILURE, "uname");
+		/* NOTREACHED */
+	}
+	if (print_mask & PRINT_MACHINE_ARCH) {
+		int mib[2] = { CTL_HW, HW_MACHINE_ARCH };
+		size_t len = sizeof (machine_arch);
+
+		if (sysctl(mib, sizeof (mib) / sizeof (mib[0]), machine_arch,
+		    &len, NULL, 0) < 0)
+			err(EXIT_FAILURE, "sysctl");
+	}
+	if (print_mask & PRINT_PATCHLEVEL) {
+		int mib[2] = { CTL_KERN, KERN_OSPATCHLEVEL };
+		size_t len = sizeof (ospatchlevel);
+
+		if (sysctl(mib, sizeof (mib) / sizeof (mib[0]), ospatchlevel,
+		    &len, NULL, 0) < 0)
+			err(EXIT_FAILURE, "sysctl");
+	}
+
+	if (print_mask & PRINT_SYSNAME) {
+		space++;
+		fputs(u.sysname, stdout);
+	}
+	if (print_mask & PRINT_NODENAME) {
+		if (space++) putchar(' ');
+		fputs(u.nodename, stdout);
+	}
+	if (print_mask & PRINT_RELEASE) {
+		if (space++) putchar(' ');
+		fputs(u.release, stdout);
+	}
+	if (print_mask & PRINT_PATCHLEVEL) {
+		if (space++) putchar(' ');
+		if (print_mask != PRINT_PATCHLEVEL) fputs("Kv", stdout);
+		fputs(ospatchlevel, stdout);
+	}
+	if (print_mask & PRINT_VERSION) {
+		if (space++) putchar(' ');
+		fputs(u.version, stdout);
+	}
+	if (print_mask & PRINT_MACHINE) {
+		if (space++) putchar(' ');
+		fputs(u.machine, stdout);
+	}
+	if (print_mask & PRINT_MACHINE_ARCH) {
+		if (space++) putchar(' ');
+		fputs(machine_arch, stdout);
+	}
+	putchar('\n');
+
+	exit(EXIT_SUCCESS);
+	/* NOTREACHED */
+}
+
+static void
+usage(void)
+{
+	fprintf(stderr, "usage: uname [-almnprsv]\n");
+	exit(EXIT_FAILURE);
+}
+@
+
+
+1.5
+log
+@• #ifdef __MirBSD__
+  do not use setlocale() and nl_langinfo(), hardcode it
+  #endif
+• rcs ids
+
+should greatly reduce space usage of ramdisc
+@
+text
+@d33 1
+a33 1
+__RCSID("$MirOS: src/usr.bin/uname/uname.c,v 1.4 2007/05/16 21:30:09 tg Exp $");
+a71 1
+#ifndef __MirBSD__
+a72 1
+#endif
+@
+
+
+1.4
+log
+@• switch to TNF-based uname(1) tool
+• use sysctl to get the os patchlevel instead of a non-standard extension
+  to the utsname structure
+@
+text
+@d33 1
+a33 2
+#ifndef lint
+__RCSID("$MirOS$");
+a34 1
+#endif /* not lint */
+d72 1
+d74 1
+@
+
+
+1.3
+log
+@remove -M from usage()
+@
+text
+@a0 3
+/**	$MirOS: src/usr.bin/uname/uname.c,v 1.2 2005/03/13 18:33:50 tg Exp $ */
+/*	$OpenBSD: uname.c,v 1.8 2003/07/10 00:06:51 david Exp $	*/
+
+d16 1
+a16 1
+ * 4. The name of Winning Strategies, Inc. may not be used to endorse or 
+d32 6
+d39 2
+a42 1
+#include <locale.h>
+a43 2
+#include <sys/utsname.h>
+#include <sys/sysctl.h>
+d46 2
+a47 1
+__RCSID("$MirOS: src/usr.bin/uname/uname.c,v 1.2 2005/03/13 18:33:50 tg Exp $");
+d49 2
+a50 1
+static void usage(void);
+d52 11
+a62 8
+#define	PRINT_SYSNAME	0x01
+#define	PRINT_NODENAME	0x02
+#define	PRINT_RELEASE	0x04
+#define	PRINT_VERSION	0x08
+#define	PRINT_MACHINE	0x10
+#define	PRINT_ALL	0x5f
+#define PRINT_PROCESSOR	0x20
+#define	PRINT_PATCHLEV	0x40
+d68 2
+d74 1
+a74 1
+	setlocale(LC_ALL, "");
+d76 2
+a77 2
+	while ((c = getopt(argc,argv,"almnprsv")) != -1 ) {
+		switch ( c ) {
+d82 1
+a82 1
+			print_mask |= PRINT_PATCHLEV;
+d91 1
+a91 1
+			print_mask |= PRINT_PROCESSOR;
+d93 1
+a93 1
+		case 'r': 
+d96 1
+a96 1
+		case 's': 
+d107 1
+a107 1
+	
+d117 2
+a118 2
+	if (uname(&u)) {
+		err(1, NULL);
+d121 16
+d150 4
+a153 7
+	if ((print_mask & PRINT_PATCHLEV) &&
+	    (u.patchlevel[0] != '\0')) {
+		if (print_mask & PRINT_RELEASE)
+			fputs(" Kv", stdout);
+		  else if (space++)
+			putchar(' ');
+		fputs(u.patchlevel, stdout);
+d163 1
+a163 5
+	if (print_mask & PRINT_PROCESSOR) {
+		char buf[1024];
+		size_t len;
+		int mib[2];
+
+d165 2
+a166 7
+		mib[0] = CTL_HW;
+		mib[1] = HW_MODEL;
+		len = sizeof(buf);
+		if (sysctl(mib, 2, &buf, &len, NULL, 0) == -1)
+			err(1, "sysctl");
+		printf("%.*s", (int)len, buf);
+	}		
+d169 1
+a169 1
+	exit(0);
+d176 2
+a177 2
+	fprintf(stderr, "usage: uname [-amnplrsv]\n");
+	exit(1);
+@
+
+
+1.2
+log
+@merge src/usr.bin
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d44 1
+a44 1
+__RCSID("$MirOS$");
+d163 1
+a163 1
+	fprintf(stderr, "usage: uname [-amnplrsvM]\n");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a34 4
+#ifndef lint
+static char rcsid[] = "$OpenBSD: uname.c,v 1.8 2003/07/10 00:06:51 david Exp $";
+#endif /* not lint */
+
+d44 2
+d53 1
+a53 1
+#define	PRINT_ALL	0x1f
+d55 1
+d67 1
+a67 1
+	while ((c = getopt(argc,argv,"amnrsvp")) != -1 ) {
+d72 3
+d81 3
+a92 3
+		case 'p':
+			print_mask |= PRINT_PROCESSOR;
+			break;
+d125 8
+d163 1
+a163 1
+	fprintf(stderr, "usage: uname [-amnprsv]\n");
+@
+
+
+1.1.3.1
+log
+@Import uname(1) from TNF, to improve compatibility
+@
+text
+@d1 1
+a1 1
+/*	$NetBSD: uname.c,v 1.10 1998/11/09 13:24:05 kleink Exp $	*/
+a33 1
+#include <sys/cdefs.h>
+d35 1
+a35 1
+__RCSID("$NetBSD: uname.c,v 1.10 1998/11/09 13:24:05 kleink Exp $");
+a38 2
+#include <limits.h>
+#include <locale.h>
+d41 1
+d43 2
+d47 1
+a47 5
+#include <sys/sysctl.h>
+#include <sys/utsname.h>
+
+int	main __P((int, char **));
+static void usage __P((void));
+d49 7
+a55 9
+/* Note that PRINT_MACHINE_ARCH is excluded from PRINT_ALL! */
+#define	PRINT_SYSNAME		0x01
+#define	PRINT_NODENAME		0x02
+#define	PRINT_RELEASE		0x04
+#define	PRINT_VERSION		0x08
+#define	PRINT_MACHINE		0x10
+#define	PRINT_MACHINE_ARCH	0x20
+#define	PRINT_ALL		\
+    (PRINT_SYSNAME|PRINT_NODENAME|PRINT_RELEASE|PRINT_VERSION|PRINT_MACHINE)
+d58 1
+a58 3
+main(argc, argv) 
+	int argc;
+	char **argv;
+a60 1
+	char machine_arch[SYS_NMLN];
+d65 1
+a65 1
+	(void)setlocale(LC_ALL, "");
+d67 2
+a68 2
+	while ((c = getopt(argc,argv,"amnprsv")) != -1) {
+		switch (c) {
+a77 3
+		case 'p':
+			print_mask |= PRINT_MACHINE_ARCH;
+			break;
+d87 3
+d105 2
+a106 2
+	if (uname(&u) != 0) {
+		err(EXIT_FAILURE, "uname");
+a108 8
+	if (print_mask & PRINT_MACHINE_ARCH) {
+		int mib[2] = { CTL_HW, HW_MACHINE_ARCH };
+		size_t len = sizeof (machine_arch);
+
+		if (sysctl(mib, sizeof (mib) / sizeof (mib[0]), machine_arch,
+		    &len, NULL, 0) < 0)
+			err(EXIT_FAILURE, "sysctl");
+	}
+d130 5
+a134 1
+	if (print_mask & PRINT_MACHINE_ARCH) {
+d136 7
+a142 2
+		fputs(machine_arch, stdout);
+	}
+d145 1
+a145 1
+	exit(EXIT_SUCCESS);
+d150 1
+a150 1
+usage()
+d153 1
+a153 1
+	exit(EXIT_FAILURE);
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@

@@ -1,0 +1,375 @@
+head	1.13;
+access;
+symbols
+	FWCF_1_06:1.13
+	FWCF_1_05:1.13
+	FWCF_1_04:1.13
+	FWCF_1_03:1.13
+	FWCF_1_01:1.12
+	FWCF_1_00:1.12;
+locks; strict;
+comment	@ * @;
+
+
+1.13
+date	2007.03.09.21.10.29;	author tg;	state Exp;
+branches;
+next	1.12;
+commitid	10045F1CCB44F1E7E4F;
+
+1.12
+date	2006.09.26.10.25.03;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	1004518FFF55AB578D0;
+
+1.11
+date	2006.09.24.20.34.59;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1004516EBC4399F582B;
+
+1.10
+date	2006.09.23.19.47.39;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	10045158F5D2C01880F;
+
+1.9
+date	2006.09.23.18.41.15;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10045157FCE33E13363;
+
+1.8
+date	2006.09.16.07.35.37;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	100450BA94D3353BC7D;
+
+1.7
+date	2006.09.16.07.09.49;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100450BA34B6AE3B0F3;
+
+1.6
+date	2006.09.16.06.44.25;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100450B9D56301DA2D4;
+
+1.5
+date	2006.09.16.06.18.58;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100450B975E603852FA;
+
+1.4
+date	2006.09.16.04.40.25;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100450B800C0C9AC337;
+
+1.3
+date	2006.09.16.03.52.04;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100450B74F3168B15F9;
+
+1.2
+date	2006.09.16.03.51.06;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100450B74B35ACD016A;
+
+1.1
+date	2006.09.16.03.50.25;	author tg;	state Exp;
+branches;
+next	;
+commitid	100450B748F4FA4FB0E;
+
+
+desc
+@@
+
+
+1.13
+log
+@as per dnehring@@ request, we'll use .tar.LZO-1X.asz as dump format,
+instead of .tar.gz, to not pull in a 50+ KiB gzip binary as required
+dependency – the “asz” encoding is necessary because LZO itself has
+no framing information.
+• document that
+• document the “asz” encoding – which we already use in storing the
+  dump “fwcf inner filesystem” data itself
+• move routines for asz en-/decoding into a new file, minilzop.c
+• prepare for adding the LZO-1X file compression helper command mode
+• fix a few minor glitches
+@
+text
+@/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.12 2006/09/26 10:25:03 tg Exp $ */
+
+/*
+ * This file is part of the FreeWRT project. FreeWRT is copyrighted
+ * material, please see the LICENCE file in the top-level directory
+ * or at http://www.freewrt.org/licence for details.
+ */
+
+#ifndef PACK_H
+#define PACK_H
+
+struct FTSF_ENTRY;
+#ifndef FTS_SUBS_H
+typedef struct FTSF_ENTRY ftsf_entry;
+#endif
+
+/* XXX use macros from minilzop.h */
+
+#define STOREB(x) do {				\
+		if (hdrleft < 1)		\
+			return (NULL);		\
+		*hdrptr++ = (x) & 0xFF;		\
+		--hdrleft;			\
+	} while (0)
+
+#define STOREW(x) do {				\
+		if (hdrleft < 2)		\
+			return (NULL);		\
+		*hdrptr++ = (x) & 0xFF;		\
+		*hdrptr++ = ((x) >> 8) & 0xFF;	\
+		hdrleft -= 2;			\
+	} while (0)
+
+#define STORET(x) do {				\
+		if (hdrleft < 3)		\
+			return (NULL);		\
+		*hdrptr++ = (x) & 0xFF;		\
+		*hdrptr++ = ((x) >> 8) & 0xFF;	\
+		*hdrptr++ = ((x) >> 16) & 0xFF;	\
+		hdrleft -= 3;			\
+	} while (0)
+
+#define STORED(x) do {				\
+		if (hdrleft < 4)		\
+			return (NULL);		\
+		*hdrptr++ = (x) & 0xFF;		\
+		*hdrptr++ = ((x) >> 8) & 0xFF;	\
+		*hdrptr++ = ((x) >> 16) & 0xFF;	\
+		*hdrptr++ = ((x) >> 24) & 0xFF;	\
+		hdrleft -= 4;			\
+	} while (0)
+
+#define LOADW(x) __extension__({		\
+		uint8_t *lwbf = (uint8_t *)(x);	\
+		uint32_t res = 0;		\
+		res = (res << 8) | lwbf[1];	\
+		res = (res << 8) | lwbf[0];	\
+		res;				\
+	})
+
+#define LOADT(x) __extension__({		\
+		uint8_t *lwbf = (uint8_t *)(x);	\
+		uint32_t res = 0;		\
+		res = (res << 8) | lwbf[2];	\
+		res = (res << 8) | lwbf[1];	\
+		res = (res << 8) | lwbf[0];	\
+		res;				\
+	})
+
+#define LOADD(x) __extension__({		\
+		uint8_t *lwbf = (uint8_t *)(x);	\
+		uint32_t res = 0;		\
+		res = (res << 8) | lwbf[3];	\
+		res = (res << 8) | lwbf[2];	\
+		res = (res << 8) | lwbf[1];	\
+		res = (res << 8) | lwbf[0];	\
+		res;				\
+	})
+
+__BEGIN_DECLS
+char *ft_pack(ftsf_entry *);
+char *ft_packm(void);
+
+char *mkheader(char *, size_t, uint32_t, uint32_t, uint8_t);
+char *mktrailer(char *, size_t);
+
+void ft_dump(char *);
+void ft_creatm(char *, const char *);
+
+char *fwcf_unpack(int, size_t *);
+char *fwcf_pack(char *, size_t, int, size_t *);
+char *fwcf_packm(const char *, int, size_t *);
+__END_DECLS
+
+#endif
+@
+
+
+1.12
+log
+@* fix missing includes
+* cast a little more, for systems other than MirOS #9-current
+* spelling
+* build fwcf.helper correctly without libz
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.11 2006/09/24 20:34:59 tg Exp $ */
+d17 2
+@
+
+
+1.11
+log
+@* join mkfwcf.c, unfwcf.c, fwcf.helper.c into a single file tool.c
+  which builds a combinded mkfwcf+unfwcf for the host normally, and
+  a stripped-down tool for the target #ifdef SMALL (code sharing ;)
+* enhance the tool by recompress functionality
+
+Note: mkfwcf and unfwcf are kept for now
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.10 2006/09/23 19:47:39 tg Exp $ */
+d6 1
+a6 1
+ * or at http://www.freewrt.org/license for details.
+@
+
+
+1.10
+log
+@extraction function for unfwcf, whose development
+is about finished with that
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.9 2006/09/23 18:41:15 tg Exp $ */
+d88 3
+a90 2
+char *fwcf_unpack(int);
+char *fwcf_pack(const char *, int, size_t *);
+@
+
+
+1.9
+log
+@don't store information about symlinks that we cannot restore anyway
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.8 2006/09/16 07:35:37 tg Exp $ */
+d86 1
+a86 2
+void ft_creatm(char *);
+size_t ft_creat(char *);
+@
+
+
+1.8
+log
+@split the code into smaller units to reduce final executables' sizes
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.7 2006/09/16 07:09:49 tg Exp $ */
+d86 2
+@
+
+
+1.7
+log
+@more code-sharing
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.6 2006/09/16 06:44:25 tg Exp $ */
+d12 4
+a15 1
+#include "fts_subs.h"
+@
+
+
+1.6
+log
+@parse the fwcf inner filesystem structure
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.5 2006/09/16 06:18:58 tg Exp $ */
+d12 2
+d83 3
+@
+
+
+1.5
+log
+@code sharing and cleanup
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.4 2006/09/16 04:40:25 tg Exp $ */
+d63 10
+d79 2
+@
+
+
+1.4
+log
+@* fix prototype for compression functions: must use 'char *' for consistency
+* add my own small adler32 implementation, after src/bin/md5/ad32-x86.S
+* implement full enclosure with sanity checks
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.3 2006/09/16 03:52:04 tg Exp $ */
+d46 17
+@
+
+
+1.3
+log
+@be c++ friendly
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.2 2006/09/16 03:51:06 tg Exp $ */
+d49 3
+@
+
+
+1.2
+log
+@put the STORE* macros into pack.h
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/pack.h,v 1.1 2006/09/16 03:50:25 tg Exp $ */
+d46 1
+d49 1
+@
+
+
+1.1
+log
+@rename ft_pack.h to pack.h
+@
+text
+@d1 1
+a1 1
+/* $MirOS: contrib/hosted/fwcf/ft_pack.h,v 1.2 2006/09/16 03:17:03 tg Exp $ */
+d12 34
+@
+

@@ -1,0 +1,435 @@
+head	1.12;
+access;
+symbols
+	MIRBSD_10:1.9.0.2
+	MIRBSD_10_BASE:1.9
+	MIRBSD_9_BASE:1.4
+	MIRBSD_8:1.4.0.2
+	MIRBSD_8_BASE:1.4;
+locks; strict;
+comment	@# @;
+
+
+1.12
+date	2009.09.15.15.42.48;	author tg;	state Exp;
+branches;
+next	1.11;
+commitid	1004AAFB5F13EED43EB;
+
+1.11
+date	2009.08.08.14.14.36;	author tg;	state Exp;
+branches;
+next	1.10;
+commitid	1004A7D884F37AF542D;
+
+1.10
+date	2008.10.05.16.26.19;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	10048E8EA7D6EAD401E;
+
+1.9
+date	2007.06.16.21.12.41;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	1004674526079B07DE1;
+
+1.8
+date	2007.06.15.16.07.08;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	1004672B92D73BA07C0;
+
+1.7
+date	2007.06.10.11.05.11;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100466BDADD299EBB0F;
+
+1.6
+date	2006.10.29.12.24.03;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10045449D731D03F280;
+
+1.5
+date	2006.10.15.00.16.49;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10045317E073EC69753;
+
+1.4
+date	2005.12.17.05.46.23;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10043A3A3E65E20A413;
+
+1.3
+date	2005.06.05.15.22.56;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	663a42a318e15dac;
+
+1.2
+date	2005.05.06.16.48.23;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	e02427b9fae8996;
+
+1.1
+date	2005.03.06.16.08.16;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.12
+log
+@allow setting TSCOMPRESS to the compression level (1‥9), for if
+uncompressed takes up too much space, but compressed too much time
+@
+text
+@#!/bin/mksh
+# $MirOS: src/scripts/tarsets,v 1.11 2009/08/08 14:14:36 tg Exp $
+#-
+# Copyright (c) 2004, 2006, 2007, 2009
+#	Thorsten Glaser <tg@@mirbsd.org>
+#
+# Provided that these terms and disclaimer and all copyright notices
+# are retained or reproduced in an accompanying document, permission
+# is granted to deal in this work without restriction, including un-
+# limited rights to use, publicly perform, distribute, sell, modify,
+# merge, give away, or sublicence.
+#
+# This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+# the utmost extent permitted by applicable law, neither express nor
+# implied; without malicious intent or gross negligence. In no event
+# may a licensor, author or contributor be held liable for indirect,
+# direct, other damage, loss, or other issues arising in any way out
+# of dealing in the work, even if advised of the possibility of such
+# damage or existence of a defect, except proven that it results out
+# of said person's immediate fault when using the work as intended.
+
+me=${0##*/}
+cwd=$(realpath .)
+arch=${MACHINE:-$(uname -m)}
+
+function tarsets {
+	set=${1##*/}
+	[[ -e $cwd/$set/mi && -e $cwd/$set/md.$arch ]] || return 0
+	cat "$cwd/$set/mi" "$cwd/$set/md.$arch" 2>/dev/null | sort $2
+}
+
+function usage {
+	print -u2 "Syntax: $me [check | make <release>]"
+	exit 1
+}
+
+if [[ -z $DESTDIR ]]; then
+	print "Must set DESTDIR before calling ${0##*/}!"
+	exit 1
+fi
+
+if [[ $doz = [Nn]?([Oo]) ]]; then
+	compressor=cat
+	extension=newc
+	zt=uncompressed
+else
+	[[ $doz = [1-9] ]] || doz=9
+	compressor="gzip -n$doz"
+	extension=ngz
+	zt="gzip'd"
+fi
+
+case $1 {
+(c*)
+	T=$(mktemp /tmp/_tmp.XXXXXXXXXX) || exit 1
+	trap 'rm -f $T ; exit 0' 0
+	trap 'rm -f $T ; exit 1' 1 2 3 5 13 15
+
+	for set in */mi; do
+		tarsets "${set%/mi}"
+	done | cat - ignfiles 2>/dev/null | sort >$T
+
+	( cd "$DESTDIR"; find . \( -type d -o -type f -o -type l \) ) \
+	    | grep -v -e '^\./snapshot' -e '^.$' | sort | diff -du $T -
+	;;
+(m*)
+	rel=$2
+	[[ -n $rel ]] || usage
+
+	if [[ -z $RELEASEDIR ]]; then
+		print -u2 "Must set RELEASEDIR before calling $me!"
+		exit 1
+	fi
+
+	print "Generating $zt release tarballs for MirOS #${rel}/${arch}"
+
+	cd "$DESTDIR"
+	for set in $cwd/*/mi; do
+		set=${set%/mi}
+		[[ -e $set/md.$arch ]] || continue
+		print -n "${set##*/}..."
+		tarsets "$set" -u | \
+		    sed -n 's!^\.//*!!p' | \
+		    cpio -oC512 -Hsv4cpio -Mset | \
+		    $compressor >"$RELEASEDIR/${set##*/}$rel.$extension"
+		print done.
+	done
+	cd "$cwd"
+	;;
+(*)
+	usage
+	;;
+}
+@
+
+
+1.11
+log
+@new “make dist-q” variable TSCOMPRESS?=Yes (compress dist sets-p)
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/scripts/tarsets,v 1.10 2008/10/05 16:26:19 tg Exp $
+d47 2
+a48 1
+	compressor="gzip -n9"
+@
+
+
+1.10
+log
+@use mksh realpath builtin instead of readlink -f for canonicalisation
+
+note: there’s still a readlink(1) call left in, for instance, mirmake;
+this does not hurt because we initially assumed that readlink(1) does
+exist anyway and bundled ours just because some do not have the ‘-f’
+option for realpath(2)isation
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/scripts/tarsets,v 1.9 2007/06/16 21:12:41 tg Exp $
+d4 2
+a5 2
+# Copyright (c) 2004, 2006, 2007
+#	Thorsten Glaser <tg@@mirbsd.de>
+d42 10
+d74 1
+a74 1
+	print "Generating release tarballs for MirOS #${rel}/${arch}"
+d81 4
+a84 4
+		tarsets "$set" -u \
+		    | sed -n 's!^\.//*!!p' \
+		    | cpio -oC512 -Hsv4cpio -Mset \
+		    | gzip -n9 >"$RELEASEDIR/${set##*/}$rel.ngz"
+@
+
+
+1.9
+log
+@forgot to remove this part of the script
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/scripts/tarsets,v 1.8 2007/06/15 16:07:08 tg Exp $
+d23 1
+a23 1
+cwd=$(readlink -nf .)
+@
+
+
+1.8
+log
+@ensure sets are only packaged if the mi _and_ md files exist,
+even if one of them is zero bytes; if only one exists, it isn't an error
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.20 2006/12/11 21:04:56 tg Rel $
+a63 5
+	if [[ -z $lists ]]; then
+		print -u2 "Error, LISTS are empty!"
+		exit 2
+	fi
+
+@
+
+
+1.7
+log
+@• xbuild-*.sh: fix host-tools/bin ./. host-tools/$TARGET/bin issue,
+  add host-tools/bin to $PATH
+• all: sync licence with current template
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/scripts/tarsets,v 1.6 2006/10/29 12:24:03 tg Exp $
+d4 1
+a4 1
+# Copyright (c) 2004, 2006
+a20 1
+#-
+d27 3
+a29 1
+	cat "$cwd/$1/mi" "$cwd/$1/md.$arch" 2>/dev/null | sort $2
+d48 2
+a49 2
+	for set in $(for i in */mi; do basename "${i%/mi}"; done); do
+		tarsets "$set"
+a57 1
+	lists=$(for i in */mi; do basename "${i%/mi}"; done)
+d72 4
+a75 2
+	for set in $lists; do
+		print -n "${set}..."
+d79 1
+a79 1
+		    | gzip -n9 >"$RELEASEDIR/$set$rel.ngz"
+@
+
+
+1.6
+log
+@consolidate tar* scripts into one
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.14 2006/08/09 19:35:23 tg Rel $
+d7 5
+a11 6
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+d13 8
+a20 8
+# Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+# express, or implied, to the maximum extent permitted by applicable
+# law, without malicious intent or gross negligence; in no event may
+# licensor, an author or contributor be held liable for any indirect
+# or other damage, or direct damage except proven a consequence of a
+# direct error of said person and intended use of this work, loss or
+# other issues arising in any way out of its use, even if advised of
+# the possibility of such damage or existence of a defect.
+d27 1
+a27 2
+function tarsets
+{
+d31 1
+a31 2
+function usage
+{
+@
+
+
+1.5
+log
+@sync licences
+@
+text
+@d2 21
+a22 1
+# $MirOS: src/scripts/tarsets,v 1.4 2005/12/17 05:46:23 tg Exp $
+d24 3
+a26 3
+subdir="$(readlink -nf .)"
+set="$1"
+arch="${MACHINE:-$(uname -m)}"
+d28 61
+a88 1
+cat "$subdir/$set/mi" "$subdir/$set/md.$arch" 2>/dev/null | sort $2
+@
+
+
+1.4
+log
+@big fat licence update (I left some which are bsiegert@@'s alone though)
+also, remove licence boilerplate from some .h files who don't deserve it
+and remove and add some advertising clauses because I say so
+@
+text
+@d2 1
+a2 20
+# $MirOS: src/scripts/tarsets,v 1.3 2005/06/05 15:22:56 tg Exp $
+#-
+# Copyright (c) 2004
+#	Thorsten "mirabile" Glaser <tg@@66h.42h.de>
+#
+# Licensee is hereby permitted to deal in this work without restric-
+# tion, including unlimited rights to use, publicly perform, modify,
+# merge, distribute, sell, give away or sublicence, provided all co-
+# pyright notices above, these terms and the disclaimer are retained
+# in all redistributions or reproduced in accompanying documentation
+# or other materials provided with binary redistributions.
+#
+# Licensor offers the work "AS IS" and WITHOUT WARRANTY of any kind,
+# express, or implied, to the maximum extent permitted by applicable
+# law, without malicious intent or gross negligence; in no event may
+# licensor, an author or contributor be held liable for any indirect
+# or other damage, or direct damage except proven a consequence of a
+# direct error of said person and intended use of this work, loss or
+# other issues arising in any way out of its use, even if advised of
+# the possibility of such damage or existence of a nontrivial bug.
+@
+
+
+1.3
+log
+@mksh sweep
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/scripts/tarsets,v 1.2 2005/05/06 16:48:23 tg Exp $
+d14 8
+a21 7
+# Licensor hereby provides this work "AS IS" and WITHOUT WARRANTY of
+# any kind, expressed or implied, to the maximum extent permitted by
+# applicable law, but with the warranty of being written without ma-
+# licious intent or gross negligence; in no event shall licensor, an
+# author or contributor be held liable for any damage, direct, indi-
+# rect or other, however caused, arising in any way out of the usage
+# of this work, even if advised of the possibility of such damage.
+@
+
+
+1.2
+log
+@in shell, readlink(2) is "readlink -f $something", and
+MUCH better than "(cd $something;pwd)" in all respects
+including trimming trailing /.// stuff
+@
+text
+@d1 2
+a2 2
+#!/bin/ksh
+# $MirOS: src/scripts/tarsets,v 1.1 2005/03/06 16:08:16 tg Exp $
+@
+
+
+1.1
+log
+@ye good olde tools
+@
+text
+@d2 1
+a2 1
+# $MirOS: src/share/misc/licence.template,v 1.2 2005/03/03 19:43:30 tg Rel $
+d22 1
+a22 1
+subdir="$(pwd)"
+@
+

@@ -1,0 +1,608 @@
+head	1.11;
+access;
+symbols
+	MIRBSD_10:1.10.0.2
+	MIRBSD_10_BASE:1.10
+	MIRBSD_9_BASE:1.6
+	MIRBSD_8:1.4.0.2
+	MIRBSD_8_BASE:1.4
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.11
+date	2008.08.01.15.47.55;	author tg;	state dead;
+branches;
+next	1.10;
+commitid	100489330387BEFF349;
+
+1.10
+date	2007.04.17.22.10.58;	author tg;	state Exp;
+branches;
+next	1.9;
+commitid	100462545D61E1C51F9;
+
+1.9
+date	2007.04.17.21.59.26;	author tg;	state Exp;
+branches;
+next	1.8;
+commitid	10046254347481F16EE;
+
+1.8
+date	2006.08.19.13.02.52;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	10044E70BFC378C869E;
+
+1.7
+date	2006.08.19.12.59.52;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	10044E70B533B58C0BB;
+
+1.6
+date	2006.06.12.22.04.15;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100448DE4C2686CBB41;
+
+1.5
+date	2006.06.08.19.02.56;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100448873FE537168BE;
+
+1.4
+date	2005.07.24.22.50.03;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	123b42e4199c7c05;
+
+1.3
+date	2005.07.07.12.27.24;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	63f442cd1fb827f1;
+
+1.2
+date	2005.03.14.21.58.16;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.26.16;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.26.16;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.56.31;	author tg;	state Exp;
+branches;
+next	;
+commitid	560042e0092f571e;
+
+
+desc
+@@
+
+
+1.11
+log
+@get rid of the second copy of zlib, finally, after… ages or so
+@
+text
+@/**	$MirOS: src/lib/libz/adler32.c,v 1.10 2007/04/17 22:10:58 tg Exp $ */
+/*	$OpenBSD: adler32.c,v 1.6 2005/07/20 15:56:40 millert Exp $	*/
+/* adler32.c -- compute the Adler-32 checksum of a data stream
+ * Copyright (C) 1995-2004 Mark Adler
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ *
+ * An implementation of adler32() in i386 assembly, optimised for small
+ * size, can be found in src/sys/arch/i386/stand/libz/adler32.S
+ */
+
+#include "zutil.h"
+
+#ifndef ZLIB_HAS_ADLERPUSH
+#define ZLIB_NO_ADLERPUSH
+#endif
+
+zRCSID("$MirOS: src/lib/libz/adler32.c,v 1.10 2007/04/17 22:10:58 tg Exp $")
+
+#define BASE 65521UL    /* largest prime smaller than 65536 */
+#define NMAX 5552
+/* NMAX is the largest n such that 255n(n+1)/2 + (n+1)(BASE-1) <= 2^32-1 */
+
+#define DO1(buf,i)  {adler += (buf)[i]; sum2 += adler;}
+#define DO2(buf,i)  DO1(buf,i); DO1(buf,i+1);
+#define DO4(buf,i)  DO2(buf,i); DO2(buf,i+2);
+#define DO8(buf,i)  DO4(buf,i); DO4(buf,i+4);
+#define DO16(buf)   DO8(buf,0); DO8(buf,8);
+
+/* use NO_DIVIDE if your processor does not do division in hardware */
+#ifdef NO_DIVIDE
+#  define MOD(a) \
+    do { \
+        if (a >= (BASE << 16)) a -= (BASE << 16); \
+        if (a >= (BASE << 15)) a -= (BASE << 15); \
+        if (a >= (BASE << 14)) a -= (BASE << 14); \
+        if (a >= (BASE << 13)) a -= (BASE << 13); \
+        if (a >= (BASE << 12)) a -= (BASE << 12); \
+        if (a >= (BASE << 11)) a -= (BASE << 11); \
+        if (a >= (BASE << 10)) a -= (BASE << 10); \
+        if (a >= (BASE << 9)) a -= (BASE << 9); \
+        if (a >= (BASE << 8)) a -= (BASE << 8); \
+        if (a >= (BASE << 7)) a -= (BASE << 7); \
+        if (a >= (BASE << 6)) a -= (BASE << 6); \
+        if (a >= (BASE << 5)) a -= (BASE << 5); \
+        if (a >= (BASE << 4)) a -= (BASE << 4); \
+        if (a >= (BASE << 3)) a -= (BASE << 3); \
+        if (a >= (BASE << 2)) a -= (BASE << 2); \
+        if (a >= (BASE << 1)) a -= (BASE << 1); \
+        if (a >= BASE) a -= BASE; \
+    } while (0)
+#  define MOD4(a) \
+    do { \
+        if (a >= (BASE << 4)) a -= (BASE << 4); \
+        if (a >= (BASE << 3)) a -= (BASE << 3); \
+        if (a >= (BASE << 2)) a -= (BASE << 2); \
+        if (a >= (BASE << 1)) a -= (BASE << 1); \
+        if (a >= BASE) a -= BASE; \
+    } while (0)
+#else
+#  define MOD(a) a %= BASE
+#  define MOD4(a) a %= BASE
+#endif
+
+/* ========================================================================= */
+uLong ZEXPORT adler32(adler, buf, len)
+    uLong adler;
+    const Bytef *buf;
+    uInt len;
+{
+    unsigned long sum2;
+    unsigned n;
+
+    /* split Adler-32 into component sums */
+    sum2 = (adler >> 16) & 0xffff;
+    adler &= 0xffff;
+
+    /* in case user likes doing a byte at a time, keep it fast */
+    if (len == 1) {
+        adler += buf[0];
+        if (adler >= BASE)
+            adler -= BASE;
+        sum2 += adler;
+        if (sum2 >= BASE)
+            sum2 -= BASE;
+        return adler | (sum2 << 16);
+    }
+
+    /* initial Adler-32 value (deferred check for len == 1 speed) */
+    if (buf == Z_NULL)
+        return 1L;
+
+    /* in case short lengths are provided, keep it somewhat fast */
+    if (len < 16) {
+        while (len--) {
+            adler += *buf++;
+            sum2 += adler;
+        }
+	zADDRND(adler);
+	zADDRND(sum2);
+        if (adler >= BASE)
+            adler -= BASE;
+        MOD4(sum2);             /* only added so many BASE's */
+        return adler | (sum2 << 16);
+    }
+
+    /* do length NMAX blocks -- requires just one modulo operation */
+    while (len >= NMAX) {
+        len -= NMAX;
+        n = NMAX / 16;          /* NMAX is divisible by 16 */
+        do {
+            DO16(buf);          /* 16 sums unrolled */
+            buf += 16;
+        } while (--n);
+        MOD(adler);
+        MOD(sum2);
+    }
+
+    /* do remaining bytes (less than NMAX, still just one modulo) */
+    if (len) {                  /* avoid modulos if none remaining */
+        while (len >= 16) {
+            len -= 16;
+            DO16(buf);
+            buf += 16;
+        }
+        while (len--) {
+            adler += *buf++;
+            sum2 += adler;
+        }
+        MOD(adler);
+        MOD(sum2);
+    }
+
+    zADDRND(adler | (sum2 << 16));
+    /* return recombined sums */
+    return adler | (sum2 << 16);
+}
+
+/* ========================================================================= */
+uLong ZEXPORT adler32_combine(adler1, adler2, len2)
+    uLong adler1;
+    uLong adler2;
+    z_off_t len2;
+{
+    unsigned long sum1;
+    unsigned long sum2;
+    unsigned rem;
+
+    zADDRND(adler2);
+    zADDRND(adler1);
+    /* the derivation of this formula is left as an exercise for the reader */
+    rem = (unsigned)(len2 % BASE);
+    sum1 = adler1 & 0xffff;
+    sum2 = rem * sum1;
+    MOD(sum2);
+    sum1 += (adler2 & 0xffff) + BASE - 1;
+    sum2 += ((adler1 >> 16) & 0xffff) + ((adler2 >> 16) & 0xffff) + BASE - rem;
+    if (sum1 > BASE) sum1 -= BASE;
+    if (sum1 > BASE) sum1 -= BASE;
+    if (sum2 > (BASE << 1)) sum2 -= (BASE << 1);
+    if (sum2 > BASE) sum2 -= BASE;
+    zADDRND(sum1 | (sum2 << 16));
+    return sum1 | (sum2 << 16);
+}
+@
+
+
+1.10
+log
+@gzip (compress(1) tool) uses crc32() which now does adlerpush-alike too
+(zutil.h: if either ZLIB_NO_{ADLER,CRC32}PUSH are defined, zADDRND() is
+expanded to empty)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libz/adler32.c,v 1.9 2007/04/17 21:59:26 tg Exp $ */
+d17 1
+a17 1
+zRCSID("$MirOS: src/lib/libz/adler32.c,v 1.9 2007/04/17 21:59:26 tg Exp $")
+@
+
+
+1.9
+log
+@move the zADDRND() macro to "zutil.h" (not installed in /usr/include)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libz/adler32.c,v 1.8 2006/08/19 13:02:52 tg Exp $ */
+d17 1
+a17 1
+zRCSID("$MirOS: src/lib/libz/adler32.c,v 1.8 2006/08/19 13:02:52 tg Exp $")
+d148 2
+d161 1
+@
+
+
+1.8
+log
+@with the recent libc changes (arc4random_pushb(3) and make the
+normal arc4random_push(3) use it) there's no need to call time(3)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libz/adler32.c,v 1.7 2006/08/19 12:59:52 tg Exp $ */
+d17 1
+a17 13
+#if defined(_STANDALONE)
+#define zADDRND(x)	/* nothing */
+#elif defined(_KERNEL)
+#include <sys/kernel.h>	/* for time */
+#include <dev/rndvar.h>
+#define zADDRND(x)	rnd_addpool_add((x) ^ (uint32_t)time.tv_sec)
+#elif defined(ZLIB_NO_ADLERPUSH)
+#define zADDRND(x)	/* nothing */
+#else
+#define zADDRND(x)	arc4random_push(x)
+#endif
+
+zRCSID("$MirOS: src/lib/libz/adler32.c,v 1.7 2006/08/19 12:59:52 tg Exp $")
+@
+
+
+1.7
+log
+@shrink even more by using my own assembly version of adler32(3)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libz/adler32.c,v 1.6 2006/06/12 22:04:15 tg Exp $ */
+d26 1
+a26 1
+#define zADDRND(x)	arc4random_push((x) ^ (uint32_t)time(NULL))
+d29 1
+a29 1
+zRCSID("$MirOS: src/lib/libz/adler32.c,v 1.6 2006/06/12 22:04:15 tg Exp $")
+@
+
+
+1.6
+log
+@* make an option to don't use the adlerpush
+* use it for the depends
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libz/adler32.c,v 1.5 2006/06/08 19:02:56 tg Exp $ */
+d6 3
+d29 1
+a29 1
+zRCSID("$MirOS: src/lib/libz/adler32.c,v 1.5 2006/06/08 19:02:56 tg Exp $")
+@
+
+
+1.5
+log
+@make adler32(3) an additional "low-trust" entropy source,
+both in kernel and userland, but not in libstand, and use
+it in cksum(1) to post-process digests except in time and
+testsuite trials (modulated by time(NULL) or time.tv_sec,
+respectively, in libz, and arc4random() in cksum too); no
+change in behaviour (one-byte-at-a-time mode not affected
+for speed reasons) visible
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libz/adler32.c,v 1.4 2005/07/24 22:50:03 tg Exp $ */
+d10 4
+d20 2
+d26 1
+a26 1
+zRCSID("$MirOS: src/lib/libz/adler32.c,v 1.4 2005/07/24 22:50:03 tg Exp $")
+@
+
+
+1.4
+log
+@* merge OpenBSD import #SECURITY FIX#, bump minor
+* fold inffast.h into inflate.h
+* add -Wall
+* make __CRAZY clean (with 2 exceptions)
+* this yields printf format string checking for gzprintf, yay!
+* shrink by removing MSDOS, VMS, OS/2, WINCE, etc. crap
+* make use of <sys/cdefs.h> macros
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libz/adler32.c,v 1.3 2005/07/07 12:27:24 tg Exp $ */
+d10 11
+a20 1
+zRCSID("$MirOS: src/lib/libz/adler32.c,v 1.3 2005/07/07 12:27:24 tg Exp $")
+d101 2
+d136 1
+@
+
+
+1.3
+log
+@unify libz use (make bootloader use base libz sources)
+simplify defines
+add more RCS IDs
+shrink code
+@
+text
+@d1 2
+a2 2
+/**	$MirOS: src/lib/libz/adler32.c,v 1.2 2005/03/14 21:58:16 tg Exp $ */
+/*	$OpenBSD: adler32.c,v 1.5 2003/12/16 22:33:02 henning Exp $	*/
+d4 1
+a4 1
+ * Copyright (C) 1995-2003 Mark Adler
+d10 1
+a10 1
+zRCSID("$MirOS$")
+d16 1
+a16 1
+#define DO1(buf,i)  {s1 += buf[i]; s2 += s1;}
+d22 1
+d44 8
+d54 1
+d63 50
+a112 10
+    unsigned long s1 = adler & 0xffff;
+    unsigned long s2 = (adler >> 16) & 0xffff;
+    int k;
+
+    if (buf == Z_NULL) return 1L;
+
+    while (len > 0) {
+        k = len < NMAX ? (int)len : NMAX;
+        len -= k;
+        while (k >= 16) {
+a114 1
+            k -= 16;
+d116 6
+a121 6
+        if (k != 0) do {
+            s1 += *buf++;
+            s2 += s1;
+        } while (--k);
+        MOD(s1);
+        MOD(s2);
+d123 27
+a149 1
+    return (s2 << 16) | s1;
+@
+
+
+1.2
+log
+@tack on RCS IDs to everything
+enable generation of autogen'd headers (only manually)
+@
+text
+@d1 1
+a1 1
+/**	$MirOS$ */
+d8 3
+a10 2
+#define ZLIB_INTERNAL
+#include "zlib.h"
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: adler32.c,v 1.6 2005/07/20 15:56:40 millert Exp $	*/
+d3 1
+a3 1
+ * Copyright (C) 1995-2004 Mark Adler
+d14 1
+a14 1
+#define DO1(buf,i)  {adler += (buf)[i]; sum2 += adler;}
+a19 1
+/* use NO_DIVIDE if your processor does not do division in hardware */
+a40 8
+#  define MOD4(a) \
+    do { \
+        if (a >= (BASE << 4)) a -= (BASE << 4); \
+        if (a >= (BASE << 3)) a -= (BASE << 3); \
+        if (a >= (BASE << 2)) a -= (BASE << 2); \
+        if (a >= (BASE << 1)) a -= (BASE << 1); \
+        if (a >= BASE) a -= BASE; \
+    } while (0)
+a42 1
+#  define MOD4(a) a %= BASE
+d51 10
+a60 50
+    unsigned long sum2;
+    unsigned n;
+
+    /* split Adler-32 into component sums */
+    sum2 = (adler >> 16) & 0xffff;
+    adler &= 0xffff;
+
+    /* in case user likes doing a byte at a time, keep it fast */
+    if (len == 1) {
+        adler += buf[0];
+        if (adler >= BASE)
+            adler -= BASE;
+        sum2 += adler;
+        if (sum2 >= BASE)
+            sum2 -= BASE;
+        return adler | (sum2 << 16);
+    }
+
+    /* initial Adler-32 value (deferred check for len == 1 speed) */
+    if (buf == Z_NULL)
+        return 1L;
+
+    /* in case short lengths are provided, keep it somewhat fast */
+    if (len < 16) {
+        while (len--) {
+            adler += *buf++;
+            sum2 += adler;
+        }
+        if (adler >= BASE)
+            adler -= BASE;
+        MOD4(sum2);             /* only added so many BASE's */
+        return adler | (sum2 << 16);
+    }
+
+    /* do length NMAX blocks -- requires just one modulo operation */
+    while (len >= NMAX) {
+        len -= NMAX;
+        n = NMAX / 16;          /* NMAX is divisible by 16 */
+        do {
+            DO16(buf);          /* 16 sums unrolled */
+            buf += 16;
+        } while (--n);
+        MOD(adler);
+        MOD(sum2);
+    }
+
+    /* do remaining bytes (less than NMAX, still just one modulo) */
+    if (len) {                  /* avoid modulos if none remaining */
+        while (len >= 16) {
+            len -= 16;
+d63 1
+d65 6
+a70 6
+        while (len--) {
+            adler += *buf++;
+            sum2 += adler;
+        }
+        MOD(adler);
+        MOD(sum2);
+d72 1
+a72 27
+
+    /* return recombined sums */
+    return adler | (sum2 << 16);
+}
+
+/* ========================================================================= */
+uLong ZEXPORT adler32_combine(adler1, adler2, len2)
+    uLong adler1;
+    uLong adler2;
+    z_off_t len2;
+{
+    unsigned long sum1;
+    unsigned long sum2;
+    unsigned rem;
+
+    /* the derivation of this formula is left as an exercise for the reader */
+    rem = (unsigned)(len2 % BASE);
+    sum1 = adler1 & 0xffff;
+    sum2 = rem * sum1;
+    MOD(sum2);
+    sum1 += (adler2 & 0xffff) + BASE - 1;
+    sum2 += ((adler1 >> 16) & 0xffff) + ((adler2 >> 16) & 0xffff) + BASE - rem;
+    if (sum1 > BASE) sum1 -= BASE;
+    if (sum1 > BASE) sum1 -= BASE;
+    if (sum2 > (BASE << 1)) sum2 -= (BASE << 1);
+    if (sum2 > BASE) sum2 -= BASE;
+    return sum1 | (sum2 << 16);
+@
+

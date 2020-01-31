@@ -1,0 +1,292 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	cvs-200910041320:1.1.1.4
+	cvs-200903221200:1.1.1.4
+	cvs-200812162015:1.1.1.4
+	cvs-200804031830:1.1.1.4
+	MIRBSD_10:1.1.1.4.0.2
+	MIRBSD_10_BASE:1.1.1.4
+	cvs-200803022030:1.1.1.4
+	cvs-200709131337:1.1.1.4
+	cvs-200709021830:1.1.1.4
+	cvs-200708201200:1.1.1.4
+	cvs-200706161500:1.1.1.4
+	cvs-200705192215:1.1.1.4
+	cvs-200704292000:1.1.1.4
+	cvs-200703080900:1.1.1.4
+	cvs-200701251600:1.1.1.4
+	cvs-200612111600:1.1.1.4
+	cvs-200611090230:1.1.1.4
+	OPENBSD_4_0:1.1.1.3
+	MIRBSD_9_BASE:1.1.1.2
+	cvs-200606162342:1.1.1.2
+	cvs-200606022000:1.1.1.2
+	cvs-200604191000:1.1.1.2
+	cvs-200602220045:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200512201942:1.1.1.1
+	cvs-200511231930:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200506221550:1.1.1.1
+	cvs-200505050030:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	cvs-200504261445:1.1.1.1
+	cvs-200504141900:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.02.05.17.29.52;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.52;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.04.19.10.15.04;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	10044460DB21E1F715C;
+
+1.1.1.3
+date	2006.09.20.19.06.49;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	10045119150397FC669;
+
+1.1.1.4
+date	2006.11.09.02.38.01;	author tg;	state Exp;
+branches;
+next	;
+commitid	100455294981A6201C8;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*
+ * Author: Tatu Ylonen <ylo@@cs.hut.fi>
+ * Copyright (c) 1995 Tatu Ylonen <ylo@@cs.hut.fi>, Espoo, Finland
+ *                    All rights reserved
+ *
+ * As far as I am concerned, the code I have written for this software
+ * can be used freely for any purpose.  Any derived versions of this
+ * software must be clearly marked as such, and if the derived work is
+ * incompatible with the protocol description in the RFC file, it must be
+ * called by a name other than "ssh" or "Secure Shell".
+ *
+ *
+ * Copyright (c) 1999 Niels Provos.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ *
+ * Description of the RSA algorithm can be found e.g. from the following
+ * sources:
+ *
+ *   Bruce Schneier: Applied Cryptography.  John Wiley & Sons, 1994.
+ *
+ *   Jennifer Seberry and Josed Pieprzyk: Cryptography: An Introduction to
+ *   Computer Security.  Prentice-Hall, 1989.
+ *
+ *   Man Young Rhee: Cryptography and Secure Data Communications.  McGraw-Hill,
+ *   1994.
+ *
+ *   R. Rivest, A. Shamir, and L. M. Adleman: Cryptographic Communications
+ *   System and Method.  US Patent 4,405,829, 1983.
+ *
+ *   Hans Riesel: Prime Numbers and Computer Methods for Factorization.
+ *   Birkhauser, 1994.
+ *
+ *   The RSA Frequently Asked Questions document by RSA Data Security,
+ *   Inc., 1995.
+ *
+ *   RSA in 3 lines of perl by Adam Back <aba@@atlax.ex.ac.uk>, 1995, as
+ * included below:
+ *
+ *     [gone - had to be deleted - what a pity]
+ */
+
+#include "includes.h"
+RCSID("$OpenBSD: rsa.c,v 1.24 2001/12/27 18:22:16 markus Exp $");
+
+#include "rsa.h"
+#include "log.h"
+#include "xmalloc.h"
+
+void
+rsa_public_encrypt(BIGNUM *out, BIGNUM *in, RSA *key)
+{
+	u_char *inbuf, *outbuf;
+	int len, ilen, olen;
+
+	if (BN_num_bits(key->e) < 2 || !BN_is_odd(key->e))
+		fatal("rsa_public_encrypt() exponent too small or not odd");
+
+	olen = BN_num_bytes(key->n);
+	outbuf = xmalloc(olen);
+
+	ilen = BN_num_bytes(in);
+	inbuf = xmalloc(ilen);
+	BN_bn2bin(in, inbuf);
+
+	if ((len = RSA_public_encrypt(ilen, inbuf, outbuf, key,
+	    RSA_PKCS1_PADDING)) <= 0)
+		fatal("rsa_public_encrypt() failed");
+
+	BN_bin2bn(outbuf, len, out);
+
+	memset(outbuf, 0, olen);
+	memset(inbuf, 0, ilen);
+	xfree(outbuf);
+	xfree(inbuf);
+}
+
+int
+rsa_private_decrypt(BIGNUM *out, BIGNUM *in, RSA *key)
+{
+	u_char *inbuf, *outbuf;
+	int len, ilen, olen;
+
+	olen = BN_num_bytes(key->n);
+	outbuf = xmalloc(olen);
+
+	ilen = BN_num_bytes(in);
+	inbuf = xmalloc(ilen);
+	BN_bn2bin(in, inbuf);
+
+	if ((len = RSA_private_decrypt(ilen, inbuf, outbuf, key,
+	    RSA_PKCS1_PADDING)) <= 0) {
+		error("rsa_private_decrypt() failed");
+	} else {
+		BN_bin2bn(outbuf, len, out);
+	}
+	memset(outbuf, 0, olen);
+	memset(inbuf, 0, ilen);
+	xfree(outbuf);
+	xfree(inbuf);
+	return len;
+}
+
+/* calculate p-1 and q-1 */
+void
+rsa_generate_additional_parameters(RSA *rsa)
+{
+	BIGNUM *aux;
+	BN_CTX *ctx;
+
+	if ((aux = BN_new()) == NULL)
+		fatal("rsa_generate_additional_parameters: BN_new failed");
+	if ((ctx = BN_CTX_new()) == NULL)
+		fatal("rsa_generate_additional_parameters: BN_CTX_new failed");
+
+	BN_sub(aux, rsa->q, BN_value_one());
+	BN_mod(rsa->dmq1, rsa->d, aux, ctx);
+
+	BN_sub(aux, rsa->p, BN_value_one());
+	BN_mod(rsa->dmp1, rsa->d, aux, ctx);
+
+	BN_clear_free(aux);
+	BN_CTX_free(ctx);
+}
+
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@I decided we'd better upgrade OpenSSH before releasing to the general public
+@
+text
+@a0 1
+/* $OpenBSD: rsa.c,v 1.26 2006/03/25 13:17:02 djm Exp $ */
+d63 1
+@
+
+
+1.1.1.3
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: rsa.c,v 1.28 2006/08/03 03:34:42 deraadt Exp $ */
+d63 1
+a63 1
+#include <sys/types.h>
+a64 3
+#include <string.h>
+
+#include "xmalloc.h"
+d67 1
+@
+
+
+1.1.1.4
+log
+@OpenSSH 4.5 (security)
+@
+text
+@d1 1
+a1 1
+/* $OpenBSD: rsa.c,v 1.29 2006/11/06 21:25:28 markus Exp $ */
+d91 1
+a91 2
+	if (BN_bin2bn(outbuf, len, out) == NULL)
+		fatal("rsa_public_encrypt: BN_bin2bn failed");
+d116 1
+a116 2
+		if (BN_bin2bn(outbuf, len, out) == NULL)
+			fatal("rsa_private_decrypt: BN_bin2bn failed");
+d137 5
+a141 5
+	if ((BN_sub(aux, rsa->q, BN_value_one()) == 0) ||
+	    (BN_mod(rsa->dmq1, rsa->d, aux, ctx) == 0) ||
+	    (BN_sub(aux, rsa->p, BN_value_one()) == 0) ||
+	    (BN_mod(rsa->dmp1, rsa->d, aux, ctx) == 0))
+		fatal("rsa_generate_additional_parameters: BN_sub/mod failed");
+@
+
+

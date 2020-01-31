@@ -1,0 +1,950 @@
+head	1.3;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.3.4.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.4
+	cvs-20101220:1.1.1.4
+	mbsd-20101220:1.1.1.3.0.4
+	cvs-201012191730:1.1.1.3
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.3
+	cvs-200805071200:1.1.1.3
+	MIRBSD_10:1.1.1.3.0.2
+	MIRBSD_10_BASE:1.1.1.3
+	cvs-200803022030:1.1.1.3
+	cvs-200707152000:1.1.1.3
+	cvs-200704292000:1.1.1.3
+	cvs-200702051700:1.1.1.2
+	cvs-200609121900:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200606151800:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	cvs-200603231300:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2014.06.09.15.17.28;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005395CFC65E5646F1;
+
+1.2
+date	2011.07.02.15.03.54;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E0F31C5496AB95F;
+
+1.1
+date	2006.03.23.13.09.35;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+commitid	10044229DEA33D36552;
+
+1.1.1.1
+date	2006.03.23.13.09.35;	author tg;	state Exp;
+branches
+	1.1.1.1.2.1;
+next	1.1.1.2;
+commitid	10044229DEA33D36552;
+
+1.1.1.2
+date	2007.02.05.17.06.07;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	10045C763C551AABAF7;
+
+1.1.1.3
+date	2007.04.29.20.07.09;	author tg;	state Exp;
+branches
+	1.1.1.3.4.1;
+next	1.1.1.4;
+commitid	1004634FAED5BC54DF0;
+
+1.1.1.4
+date	2011.07.02.15.00.11;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.1.2.1
+date	2006.03.23.13.09.35;	author tg;	state dead;
+branches;
+next	1.1.1.1.2.2;
+commitid	100442C309C7183FA09;
+
+1.1.1.1.2.2
+date	2006.03.30.19.27.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	100442C309C7183FA09;
+
+1.1.1.3.4.1
+date	2011.07.02.15.02.34;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.127.1
+date	2010.12.19.14.45.49;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2014.06.09.14.29.21;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@/*
+ * Copyright (c) 2005-2007 Proofpoint, Inc. and its suppliers.
+ *      All rights reserved.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: memstat.c,v 1.7 2013-11-22 20:51:43 ca Exp $")
+
+#include <errno.h>
+#include <sm/misc.h>
+
+#if USESWAPCTL
+#include <sys/stat.h>
+#include <sys/swap.h>
+
+static long sc_page_size;
+
+/*
+**  SM_MEMSTAT_OPEN -- open memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_open()
+{
+	sc_page_size = sysconf(_SC_PAGE_SIZE);
+	if (sc_page_size == -1)
+		return (errno != 0) ? errno : -1;
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_CLOSE -- close memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_close()
+{
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_GET -- get memory statistics
+**
+**	Parameters:
+**		resource -- resource to look up
+**		pvalue -- (pointer to) memory statistics value (output)
+**
+**	Results:
+**		0: success
+**		!=0: error
+*/
+
+int
+sm_memstat_get(resource, pvalue)
+	char *resource;
+	long *pvalue;
+{
+	int r;
+	struct anoninfo ai;
+
+	r = swapctl(SC_AINFO, &ai);
+	if (r == -1)
+		return (errno != 0) ? errno : -1;
+	r = ai.ani_max - ai.ani_resv;
+	r *= sc_page_size >> 10;
+   	*pvalue = r;
+	return 0;
+}
+
+#elif USEKSTAT
+
+#include <kstat.h>
+#include <sys/sysinfo.h>
+
+static kstat_ctl_t *kc;
+static kstat_t *kst;
+
+/*
+**  SM_MEMSTAT_OPEN -- open memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_open()
+{
+	kstat_named_t *kn;
+
+	kc = kstat_open();
+	if (kc == NULL)
+		return (errno != 0) ? errno : -1;
+	kst = kstat_lookup(kc, "unix", 0,
+		(name != NULL) ? name : "system_pages");
+	if (kst == 0)
+		return (errno != 0) ? errno : -2;
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_CLOSE -- close memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_close()
+{
+	int r;
+
+	if (kc == NULL)
+		return 0;
+	r = kstat_close(kc);
+	if (r != 0)
+		return (errno != 0) ? errno : -1;
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_GET -- get memory statistics
+**
+**	Parameters:
+**		resource -- resource to look up
+**		pvalue -- (pointer to) memory statistics value (output)
+**
+**	Results:
+**		0: success
+**		!=0: error
+*/
+
+int
+sm_memstat_get(resource, pvalue)
+	char *resource;
+	long *pvalue;
+{
+	int r;
+	kstat_named_t *kn;
+
+	if (kc == NULL || kst == NULL)
+		return -1;
+	if (kstat_read(kc, kst, NULL) == -1)
+		return (errno != 0) ? errno : -2;
+	kn = kstat_data_lookup(kst,
+			(resource != NULL) ? resource: "freemem");
+	if (kn == NULL)
+		return (errno != 0) ? errno : -3;
+   	*pvalue = kn->value.ul;
+	return 0;
+}
+
+#elif USEPROCMEMINFO
+
+/*
+/proc/meminfo?
+        total:    used:    free:  shared: buffers:  cached:
+Mem:  261468160 252149760  9318400        0  3854336 109813760
+Swap: 1052794880 62185472 990609408
+MemTotal:       255340 kB
+MemFree:          9100 kB
+MemShared:           0 kB
+Buffers:          3764 kB
+Cached:         107240 kB
+Active:         104340 kB
+Inact_dirty:      4220 kB
+Inact_clean:      2444 kB
+Inact_target:     4092 kB
+HighTotal:           0 kB
+HighFree:            0 kB
+LowTotal:       255340 kB
+LowFree:          9100 kB
+SwapTotal:     1028120 kB
+SwapFree:       967392 kB
+*/
+
+#include <stdio.h>
+#include <string.h>
+static FILE *fp;
+
+/*
+**  SM_MEMSTAT_OPEN -- open memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_open()
+{
+	fp = fopen("/proc/meminfo", "r");
+	return (fp != NULL) ? 0 : errno;
+}
+
+/*
+**  SM_MEMSTAT_CLOSE -- close memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_close()
+{
+	if (fp != NULL)
+	{
+		fclose(fp);
+		fp = NULL;
+	}
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_GET -- get memory statistics
+**
+**	Parameters:
+**		resource -- resource to look up
+**		pvalue -- (pointer to) memory statistics value (output)
+**
+**	Results:
+**		0: success
+**		!=0: error
+*/
+
+int
+sm_memstat_get(resource, pvalue)
+	char *resource;
+	long *pvalue;
+{
+	int r;
+	size_t l;
+	char buf[80];
+
+	if (resource == NULL)
+		return EINVAL;
+	if (pvalue == NULL)
+		return EINVAL;
+	if (fp == NULL)
+		return -1;	/* try to reopen? */
+	rewind(fp);
+	l = strlen(resource);
+	if (l >= sizeof(buf))
+		return EINVAL;
+	while (fgets(buf, sizeof(buf), fp) != NULL)
+	{
+		if (strncmp(buf, resource, l) == 0 && buf[l] == ':')
+		{
+			r = sscanf(buf + l + 1, "%ld", pvalue);
+			return (r > 0) ? 0 : -1;
+		}
+	}
+	return 0;
+}
+
+#else /* USEPROCMEMINFO */
+
+/*
+**  SM_MEMSTAT_OPEN -- open memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_open()
+{
+	return -1;
+}
+
+/*
+**  SM_MEMSTAT_CLOSE -- close memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_close()
+{
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_GET -- get memory statistics
+**
+**	Parameters:
+**		resource -- resource to look up
+**		pvalue -- (pointer to) memory statistics value (output)
+**
+**	Results:
+**		0: success
+**		!=0: error
+*/
+
+int
+sm_memstat_get(resource, pvalue)
+	char *resource;
+	long *pvalue;
+{
+	return -1;
+}
+
+#endif /* USEKSTAT */
+@
+
+
+1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2005-2007 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Id: memstat.c,v 1.6 2007/03/20 23:26:12 ca Exp $")
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2005 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Sendmail: memstat.c,v 1.4 2005/12/10 00:38:48 ca Exp $")
+d14 1
+d269 2
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2005-2007 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Id: memstat.c,v 1.6 2007/03/20 23:26:12 ca Exp $")
+a13 1
+#include <sm/misc.h>
+a267 2
+	if (l >= sizeof(buf))
+		return EINVAL;
+@
+
+
+1.1.127.2
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2005-2007 Proofpoint, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Id: memstat.c,v 1.7 2013-11-22 20:51:43 ca Exp $")
+@
+
+
+1.1.1.1
+log
+@Update to Sendmail 8.13.6
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import Sendmail 8.14.0 via OpenBSD
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2005, 2006 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Sendmail: memstat.c,v 1.5 2006/06/28 23:57:59 ca Exp $")
+a13 1
+#include <sm/misc.h>
+@
+
+
+1.1.1.3
+log
+@import openbsd compress, ssh, perl, sendmail for minor bugfixes
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2005-2007 Sendmail, Inc. and its suppliers.
+d11 1
+a11 1
+SM_RCSID("@@(#)$Sendmail: memstat.c,v 1.6 2007/03/20 23:26:12 ca Exp $")
+a268 2
+	if (l >= sizeof(buf))
+		return EINVAL;
+@
+
+
+1.1.1.3.4.1
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Id: memstat.c,v 1.6 2007/03/20 23:26:12 ca Exp $")
+@
+
+
+1.1.1.4
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d11 1
+a11 1
+SM_RCSID("@@(#)$Id: memstat.c,v 1.6 2007/03/20 23:26:12 ca Exp $")
+@
+
+
+1.1.1.1.2.1
+log
+@file memstat.c was added on branch MIRBSD_8 on 2006-03-30 19:27:47 +0000
+@
+text
+@d1 333
+@
+
+
+1.1.1.1.2.2
+log
+@MFC most of the recent sendmail updates to MirOS #8-stable
+agreed bsiegert@@
+
+This also changes the LOCALBASE stuff, links libmilter not
+against LDAP, etc. but doesn't install the FreeBSD 6 confs
+nor a shared libmilter in order to pass a no-files-diff:
+
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo find / -ls | sort -k11 >~/x1
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail $ sudo make install
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo make distribution
+tg@@maou:/usr/src/gnu/usr.sbin/sendmail/cf/cf $ sudo find / -ls | sort -k11 | diff -u ~/x1 - | less
+
+Note: files in /etc/mail/ are also changed, this affects the etc8.ngz set
+on fresh installs and cannot(!) be automatically upgraded!
+@
+text
+@a0 333
+/*
+ * Copyright (c) 2005 Sendmail, Inc. and its suppliers.
+ *      All rights reserved.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Sendmail: memstat.c,v 1.4 2005/12/10 00:38:48 ca Exp $")
+
+#include <errno.h>
+
+#if USESWAPCTL
+#include <sys/stat.h>
+#include <sys/swap.h>
+
+static long sc_page_size;
+
+/*
+**  SM_MEMSTAT_OPEN -- open memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_open()
+{
+	sc_page_size = sysconf(_SC_PAGE_SIZE);
+	if (sc_page_size == -1)
+		return (errno != 0) ? errno : -1;
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_CLOSE -- close memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_close()
+{
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_GET -- get memory statistics
+**
+**	Parameters:
+**		resource -- resource to look up
+**		pvalue -- (pointer to) memory statistics value (output)
+**
+**	Results:
+**		0: success
+**		!=0: error
+*/
+
+int
+sm_memstat_get(resource, pvalue)
+	char *resource;
+	long *pvalue;
+{
+	int r;
+	struct anoninfo ai;
+
+	r = swapctl(SC_AINFO, &ai);
+	if (r == -1)
+		return (errno != 0) ? errno : -1;
+	r = ai.ani_max - ai.ani_resv;
+	r *= sc_page_size >> 10;
+   	*pvalue = r;
+	return 0;
+}
+
+#elif USEKSTAT
+
+#include <kstat.h>
+#include <sys/sysinfo.h>
+
+static kstat_ctl_t *kc;
+static kstat_t *kst;
+
+/*
+**  SM_MEMSTAT_OPEN -- open memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_open()
+{
+	kstat_named_t *kn;
+
+	kc = kstat_open();
+	if (kc == NULL)
+		return (errno != 0) ? errno : -1;
+	kst = kstat_lookup(kc, "unix", 0,
+		(name != NULL) ? name : "system_pages");
+	if (kst == 0)
+		return (errno != 0) ? errno : -2;
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_CLOSE -- close memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_close()
+{
+	int r;
+
+	if (kc == NULL)
+		return 0;
+	r = kstat_close(kc);
+	if (r != 0)
+		return (errno != 0) ? errno : -1;
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_GET -- get memory statistics
+**
+**	Parameters:
+**		resource -- resource to look up
+**		pvalue -- (pointer to) memory statistics value (output)
+**
+**	Results:
+**		0: success
+**		!=0: error
+*/
+
+int
+sm_memstat_get(resource, pvalue)
+	char *resource;
+	long *pvalue;
+{
+	int r;
+	kstat_named_t *kn;
+
+	if (kc == NULL || kst == NULL)
+		return -1;
+	if (kstat_read(kc, kst, NULL) == -1)
+		return (errno != 0) ? errno : -2;
+	kn = kstat_data_lookup(kst,
+			(resource != NULL) ? resource: "freemem");
+	if (kn == NULL)
+		return (errno != 0) ? errno : -3;
+   	*pvalue = kn->value.ul;
+	return 0;
+}
+
+#elif USEPROCMEMINFO
+
+/*
+/proc/meminfo?
+        total:    used:    free:  shared: buffers:  cached:
+Mem:  261468160 252149760  9318400        0  3854336 109813760
+Swap: 1052794880 62185472 990609408
+MemTotal:       255340 kB
+MemFree:          9100 kB
+MemShared:           0 kB
+Buffers:          3764 kB
+Cached:         107240 kB
+Active:         104340 kB
+Inact_dirty:      4220 kB
+Inact_clean:      2444 kB
+Inact_target:     4092 kB
+HighTotal:           0 kB
+HighFree:            0 kB
+LowTotal:       255340 kB
+LowFree:          9100 kB
+SwapTotal:     1028120 kB
+SwapFree:       967392 kB
+*/
+
+#include <stdio.h>
+#include <string.h>
+static FILE *fp;
+
+/*
+**  SM_MEMSTAT_OPEN -- open memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_open()
+{
+	fp = fopen("/proc/meminfo", "r");
+	return (fp != NULL) ? 0 : errno;
+}
+
+/*
+**  SM_MEMSTAT_CLOSE -- close memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_close()
+{
+	if (fp != NULL)
+	{
+		fclose(fp);
+		fp = NULL;
+	}
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_GET -- get memory statistics
+**
+**	Parameters:
+**		resource -- resource to look up
+**		pvalue -- (pointer to) memory statistics value (output)
+**
+**	Results:
+**		0: success
+**		!=0: error
+*/
+
+int
+sm_memstat_get(resource, pvalue)
+	char *resource;
+	long *pvalue;
+{
+	int r;
+	size_t l;
+	char buf[80];
+
+	if (resource == NULL)
+		return EINVAL;
+	if (pvalue == NULL)
+		return EINVAL;
+	if (fp == NULL)
+		return -1;	/* try to reopen? */
+	rewind(fp);
+	l = strlen(resource);
+	while (fgets(buf, sizeof(buf), fp) != NULL)
+	{
+		if (strncmp(buf, resource, l) == 0 && buf[l] == ':')
+		{
+			r = sscanf(buf + l + 1, "%ld", pvalue);
+			return (r > 0) ? 0 : -1;
+		}
+	}
+	return 0;
+}
+
+#else /* USEPROCMEMINFO */
+
+/*
+**  SM_MEMSTAT_OPEN -- open memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_open()
+{
+	return -1;
+}
+
+/*
+**  SM_MEMSTAT_CLOSE -- close memory statistics
+**
+**	Parameters:
+**		none
+**
+**	Results:
+**		errno as error code, 0: ok
+*/
+
+int
+sm_memstat_close()
+{
+	return 0;
+}
+
+/*
+**  SM_MEMSTAT_GET -- get memory statistics
+**
+**	Parameters:
+**		resource -- resource to look up
+**		pvalue -- (pointer to) memory statistics value (output)
+**
+**	Results:
+**		0: success
+**		!=0: error
+*/
+
+int
+sm_memstat_get(resource, pvalue)
+	char *resource;
+	long *pvalue;
+{
+	return -1;
+}
+
+#endif /* USEKSTAT */
+@
+
+

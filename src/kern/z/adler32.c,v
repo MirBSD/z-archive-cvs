@@ -1,0 +1,529 @@
+head	1.8;
+access;
+symbols
+	zlib-1_2_8:1.1.117.2
+	MIRBSD_10:1.3.0.2
+	MIRBSD_10_BASE:1.3
+	zlib-1_2_3:1.1.117.1
+	libz:1.1.117;
+locks; strict;
+comment	@ * @;
+
+
+1.8
+date	2013.08.05.21.27.30;	author tg;	state Exp;
+branches;
+next	1.7;
+commitid	100520018AA4F2BDEB7;
+
+1.7
+date	2010.09.12.17.25.11;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	1004C8D0CFC67848FA7;
+
+1.6
+date	2010.01.14.10.32.07;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	1004B4EF3714CE901BC;
+
+1.5
+date	2008.08.01.14.59.56;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100489324F4472E9C7F;
+
+1.4
+date	2008.08.01.13.46.08;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100489313B0766D4103;
+
+1.3
+date	2007.04.17.21.56.10;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100462542876F688F71;
+
+1.2
+date	2007.02.06.20.29.45;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10045C8E53D4D1920E8;
+
+1.1
+date	2007.02.06.20.09.46;	author tg;	state Exp;
+branches
+	1.1.117.1;
+next	;
+commitid	10045C8E09012013E61;
+
+1.1.117.1
+date	2007.02.06.20.09.46;	author tg;	state Exp;
+branches;
+next	1.1.117.2;
+commitid	10045C8E09012013E61;
+
+1.1.117.2
+date	2013.08.05.19.24.23;	author tg;	state Exp;
+branches;
+next	;
+commitid	10051FFFBFC7B2E5803;
+
+
+desc
+@@
+
+
+1.8
+log
+@begin updating zlib
+
+XXX ZCONST is gone, check the tree for it
+XXX textproc/libxml* need updates, says zlib upstream
+@
+text
+@/* adler32.c -- compute the Adler-32 checksum of a data stream
+ * Copyright (C) 1995-2011 Mark Adler
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ */
+
+/* @@(#) $Id$ */
+
+#include "zutil.h"
+
+zRCSID("$MirOS: src/kern/z/adler32.c,v 1.7 2010/09/12 17:25:11 tg Exp $")
+
+#define BASE 65521      /* largest prime smaller than 65536 */
+#define NMAX 5552
+/* NMAX is the largest n such that 255n(n+1)/2 + (n+1)(BASE-1) <= 2^32-1 */
+
+#define DO1(buf,i)  {adler += (buf)[i]; sum2 += adler;}
+#define DO2(buf,i)  DO1(buf,i); DO1(buf,i+1);
+#define DO4(buf,i)  DO2(buf,i); DO2(buf,i+2);
+#define DO8(buf,i)  DO4(buf,i); DO4(buf,i+4);
+#define DO16(buf)   DO8(buf,0); DO8(buf,8);
+
+/* use NO_DIVIDE if your processor does not do division in hardware --
+   try it both ways to see which is faster */
+#ifdef NO_DIVIDE
+/* note that this assumes BASE is 65521, where 65536 % 65521 == 15
+   (thank you to John Reiser for pointing this out) */
+#  define CHOP(a) \
+    do { \
+        unsigned long tmp = a >> 16; \
+        a &= 0xffffUL; \
+        a += (tmp << 4) - tmp; \
+    } while (0)
+#  define MOD28(a) \
+    do { \
+        CHOP(a); \
+        if (a >= BASE) a -= BASE; \
+    } while (0)
+#  define MOD(a) \
+    do { \
+        CHOP(a); \
+        MOD28(a); \
+    } while (0)
+#  define MOD63(a) \
+    do { /* this assumes a is not negative */ \
+        z_off64_t tmp = a >> 32; \
+        a &= 0xffffffffL; \
+        a += (tmp << 8) - (tmp << 5) + tmp; \
+        tmp = a >> 16; \
+        a &= 0xffffL; \
+        a += (tmp << 4) - tmp; \
+        tmp = a >> 16; \
+        a &= 0xffffL; \
+        a += (tmp << 4) - tmp; \
+        if (a >= BASE) a -= BASE; \
+    } while (0)
+#else
+#  define MOD(a) a %= BASE
+#  define MOD28(a) a %= BASE
+#  define MOD63(a) a %= BASE
+#endif
+
+/* ========================================================================= */
+uLong ZEXPORT adler32(adler, buf, len)
+    uLong adler;
+    const Bytef *buf;
+    uInt len;
+{
+    unsigned long sum2;
+    unsigned n;
+
+    /* split Adler-32 into component sums */
+    sum2 = (adler >> 16) & 0xffff;
+    adler &= 0xffff;
+
+    /* in case user likes doing a byte at a time, keep it fast */
+    if (len == 1) {
+        adler += buf[0];
+        if (adler >= BASE)
+            adler -= BASE;
+        sum2 += adler;
+        if (sum2 >= BASE)
+            sum2 -= BASE;
+        return adler | (sum2 << 16);
+    }
+
+    /* initial Adler-32 value (deferred check for len == 1 speed) */
+    if (buf == Z_NULL)
+        return 1L;
+
+    /* in case short lengths are provided, keep it somewhat fast */
+    if (len < 16) {
+	struct {
+		uLong a, b;
+		uInt c;
+	} x;
+
+	x.c = len;
+
+        while (len--) {
+            adler += *buf++;
+            sum2 += adler;
+        }
+
+	x.a = adler;
+	x.b = sum2;
+	zADDRND(x);
+
+        if (adler >= BASE)
+            adler -= BASE;
+        MOD28(sum2);            /* only added so many BASE's */
+        return adler | (sum2 << 16);
+    }
+
+    /* do length NMAX blocks -- requires just one modulo operation */
+    while (len >= NMAX) {
+        len -= NMAX;
+        n = NMAX / 16;          /* NMAX is divisible by 16 */
+        do {
+            DO16(buf);          /* 16 sums unrolled */
+            buf += 16;
+        } while (--n);
+        MOD(adler);
+        MOD(sum2);
+    }
+
+    /* do remaining bytes (less than NMAX, still just one modulo) */
+    if (len) {                  /* avoid modulos if none remaining */
+        while (len >= 16) {
+            len -= 16;
+            DO16(buf);
+            buf += 16;
+        }
+        while (len--) {
+            adler += *buf++;
+            sum2 += adler;
+        }
+        MOD(adler);
+        MOD(sum2);
+    }
+
+    /* return recombined sums */
+    adler |= sum2 << 16;
+    zADDRND(adler);
+    return (adler);
+}
+@
+
+
+1.7
+log
+@now that we have arc4random_pushb_fast, bring back but optimise zADDRND()
+@
+text
+@d2 1
+a2 1
+ * Copyright (C) 1995-2004 Mark Adler
+d10 1
+a10 1
+zRCSID("$MirOS: src/kern/z/adler32.c,v 1.5 2008/08/01 14:59:56 tg Exp $")
+d12 1
+a12 1
+#define BASE 65521UL    /* largest prime smaller than 65536 */
+d22 2
+a23 1
+/* use NO_DIVIDE if your processor does not do division in hardware */
+d25 9
+a33 1
+#  define MOD(a) \
+d35 1
+a35 16
+        if (a >= (BASE << 16)) a -= (BASE << 16); \
+        if (a >= (BASE << 15)) a -= (BASE << 15); \
+        if (a >= (BASE << 14)) a -= (BASE << 14); \
+        if (a >= (BASE << 13)) a -= (BASE << 13); \
+        if (a >= (BASE << 12)) a -= (BASE << 12); \
+        if (a >= (BASE << 11)) a -= (BASE << 11); \
+        if (a >= (BASE << 10)) a -= (BASE << 10); \
+        if (a >= (BASE << 9)) a -= (BASE << 9); \
+        if (a >= (BASE << 8)) a -= (BASE << 8); \
+        if (a >= (BASE << 7)) a -= (BASE << 7); \
+        if (a >= (BASE << 6)) a -= (BASE << 6); \
+        if (a >= (BASE << 5)) a -= (BASE << 5); \
+        if (a >= (BASE << 4)) a -= (BASE << 4); \
+        if (a >= (BASE << 3)) a -= (BASE << 3); \
+        if (a >= (BASE << 2)) a -= (BASE << 2); \
+        if (a >= (BASE << 1)) a -= (BASE << 1); \
+d38 1
+a38 1
+#  define MOD4(a) \
+d40 14
+a53 4
+        if (a >= (BASE << 4)) a -= (BASE << 4); \
+        if (a >= (BASE << 3)) a -= (BASE << 3); \
+        if (a >= (BASE << 2)) a -= (BASE << 2); \
+        if (a >= (BASE << 1)) a -= (BASE << 1); \
+d58 2
+a59 1
+#  define MOD4(a) a %= BASE
+d110 1
+a110 1
+        MOD4(sum2);             /* only added so many BASE's */
+@
+
+
+1.6
+log
+@Remove zADDRND() – this cuts down 'zgrep -F sshd messages.0.gz' time for
+the following file on an IBM X40 (1.4 GHz Pentium-M) dramatically:
+    0m7.24s real     0m4.01s user     0m3.23s system
+    0m0.10s real     0m0.10s user     0m0.00s system
+method  crc      date   time  compressed  uncompressed  ratio  uncompressed_name
+deflate e87edc2a Jan 14 09:00      57182        446614  87.2%  messages.0
+
+I don’t know why this is so critical a code path, but the sheer amount
+of saved CPU time (both user and system) is worth the loss.
+@
+text
+@d87 7
+d98 5
+d137 3
+a139 1
+    return adler | (sum2 << 16);
+@
+
+
+1.5
+log
+@merge functionality from src/lib/libz/ and __CRAZY cleanliness; fix build
+@
+text
+@d10 1
+a10 1
+zRCSID("$MirOS: src/kern/z/adler32.c,v 1.4 2008/08/01 13:46:08 tg Exp $")
+a90 2
+	zADDRND(adler);
+	zADDRND(sum2);
+d125 1
+a125 3
+    adler |= sum2 << 16;
+    zADDRND(adler);
+    return (adler);
+@
+
+
+1.4
+log
+@RCS ID and include police
+@
+text
+@d10 1
+a10 5
+zRCSID("$MirOS: src/kern/z/adler32.c,v 1.3 2007/04/17 21:56:10 tg Exp $")
+
+#if !defined(L_adler32) && !defined(L_adler32_combine)
+#error usage error, tell tg@@ to fix this
+#endif
+a57 1
+#ifdef L_adler32
+d91 2
+d127 3
+a129 27
+    return adler | (sum2 << 16);
+}
+#endif /* L_adler32 */
+
+/* ========================================================================= */
+#ifdef L_adler32_combine
+uLong ZEXPORT adler32_combine(adler1, adler2, len2)
+    uLong adler1;
+    uLong adler2;
+    z_off_t len2;
+{
+    unsigned long sum1;
+    unsigned long sum2;
+    unsigned rem;
+
+    /* the derivation of this formula is left as an exercise for the reader */
+    rem = (unsigned)(len2 % BASE);
+    sum1 = adler1 & 0xffff;
+    sum2 = rem * sum1;
+    MOD(sum2);
+    sum1 += (adler2 & 0xffff) + BASE - 1;
+    sum2 += ((adler1 >> 16) & 0xffff) + ((adler2 >> 16) & 0xffff) + BASE - rem;
+    if (sum1 > BASE) sum1 -= BASE;
+    if (sum1 > BASE) sum1 -= BASE;
+    if (sum2 > (BASE << 1)) sum2 -= (BASE << 1);
+    if (sum2 > BASE) sum2 -= BASE;
+    return sum1 | (sum2 << 16);
+a130 1
+#endif /* L_adler32_combine */
+@
+
+
+1.3
+log
+@this file is (probably) not used YET, prevent its use
+@
+text
+@d8 1
+a8 2
+#define ZLIB_INTERNAL
+#include "zlib.h"
+d10 1
+a10 1
+__RCSID("$MirOS: src/kern/z/adler32.c,v 1.2 2007/02/06 20:29:45 tg Exp $");
+@
+
+
+1.2
+log
+@make conditional compilation of the adler32 routines possible
+@
+text
+@d11 5
+a15 1
+__RCSID("$MirOS$");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d11 2
+d59 1
+d129 1
+d132 1
+d155 1
+@
+
+
+1.1.117.1
+log
+@Import the necessary parts of current zlib distribution and some of their docs
+@
+text
+@@
+
+
+1.1.117.2
+log
+@update zlib
+@
+text
+@d2 1
+a2 1
+ * Copyright (C) 1995-2011 Mark Adler
+d8 2
+a9 1
+#include "zutil.h"
+d11 1
+a11 5
+#define local static
+
+local uLong adler32_combine_ OF((uLong adler1, uLong adler2, z_off64_t len2));
+
+#define BASE 65521      /* largest prime smaller than 65536 */
+d21 1
+a21 2
+/* use NO_DIVIDE if your processor does not do division in hardware --
+   try it both ways to see which is faster */
+d23 1
+a23 3
+/* note that this assumes BASE is 65521, where 65536 % 65521 == 15
+   (thank you to John Reiser for pointing this out) */
+#  define CHOP(a) \
+d25 16
+a40 7
+        unsigned long tmp = a >> 16; \
+        a &= 0xffffUL; \
+        a += (tmp << 4) - tmp; \
+    } while (0)
+#  define MOD28(a) \
+    do { \
+        CHOP(a); \
+d43 1
+a43 1
+#  define MOD(a) \
+d45 4
+a48 14
+        CHOP(a); \
+        MOD28(a); \
+    } while (0)
+#  define MOD63(a) \
+    do { /* this assumes a is not negative */ \
+        z_off64_t tmp = a >> 32; \
+        a &= 0xffffffffL; \
+        a += (tmp << 8) - (tmp << 5) + tmp; \
+        tmp = a >> 16; \
+        a &= 0xffffL; \
+        a += (tmp << 4) - tmp; \
+        tmp = a >> 16; \
+        a &= 0xffffL; \
+        a += (tmp << 4) - tmp; \
+d53 1
+a53 2
+#  define MOD28(a) a %= BASE
+#  define MOD63(a) a %= BASE
+d92 1
+a92 1
+        MOD28(sum2);            /* only added so many BASE's */
+d128 1
+a128 1
+local uLong adler32_combine_(adler1, adler2, len2)
+d131 1
+a131 1
+    z_off64_t len2;
+a136 4
+    /* for negative len, return invalid adler32 as a clue for debugging */
+    if (len2 < 0)
+        return 0xffffffffUL;
+
+d138 1
+a138 2
+    MOD63(len2);                /* assumes len2 >= 0 */
+    rem = (unsigned)len2;
+d144 4
+a147 4
+    if (sum1 >= BASE) sum1 -= BASE;
+    if (sum1 >= BASE) sum1 -= BASE;
+    if (sum2 >= (BASE << 1)) sum2 -= (BASE << 1);
+    if (sum2 >= BASE) sum2 -= BASE;
+a149 17
+
+/* ========================================================================= */
+uLong ZEXPORT adler32_combine(adler1, adler2, len2)
+    uLong adler1;
+    uLong adler2;
+    z_off_t len2;
+{
+    return adler32_combine_(adler1, adler2, len2);
+}
+
+uLong ZEXPORT adler32_combine64(adler1, adler2, len2)
+    uLong adler1;
+    uLong adler2;
+    z_off64_t len2;
+{
+    return adler32_combine_(adler1, adler2, len2);
+}
+@
+

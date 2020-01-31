@@ -1,0 +1,433 @@
+head	1.7;
+access;
+symbols
+	MIRBSD_10:1.6.0.2
+	MIRBSD_10_BASE:1.6
+	MIRBSD_9_BASE:1.4
+	MIRBSD_8:1.3.0.2
+	MIRBSD_8_BASE:1.3
+	cvs-200509212000:1.1.1.3
+	cvs-200507211800:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.7
+date	2016.01.05.17.07.35;	author tg;	state Exp;
+branches;
+next	1.6;
+commitid	100568BF70414C190EB;
+
+1.6
+date	2006.07.04.21.43.02;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10044AAE0F52475FA22;
+
+1.5
+date	2006.07.04.21.38.13;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	10044AADFD122F51E6C;
+
+1.4
+date	2006.06.02.02.29.55;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100447FA28346FF91C0;
+
+1.3
+date	2005.09.22.20.15.31;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	4a6b433310f7356b;
+
+1.2
+date	2005.03.06.20.28.47;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.24.55;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.55;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.53.07;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2005.09.21.20.34.27;	author tg;	state Exp;
+branches;
+next	;
+commitid	20cd4331c3c732a2;
+
+
+desc
+@@
+
+
+1.7
+log
+@make getenv(3) return the last, not the first, match;
+make setenv(3) and putenv(3) change the last occurrence;
+keep unsetenv(3) removing all occurrences;
+mark setenv(3) to remove duplicates as TODO (code’s ugly anyway)
+@
+text
+@/*	$OpenBSD: setenv.c,v 1.9 2005/08/08 08:05:37 espie Exp $ */
+/*
+ * Copyright (c) 1987 Regents of the University of California.
+ * Copyright (c) 2003, 2005, 2006 mirabilos <m@@mirbsd.org>
+ * Copyright (c) 2006 Frank Denis
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+
+__RCSID("$MirOS: src/lib/libc/stdlib/setenv.c,v 1.6 2006/07/04 21:43:02 tg Exp $");
+
+extern char *__findenv(const char *name, int *offset);
+
+extern char **environ;
+
+/*
+ * setenv --
+ *	Set the value of the environmental variable "name" to be
+ *	"value".  If rewrite is set, replace any current value.
+ */
+int
+setenv(const char *name, const char *value, int rewrite)
+{
+	static char **lastenv;			/* last value of environ */
+	char *C;
+	const char *CC;
+	int l_value, offset;
+
+	if (*value == '=')			/* no `=' in value */
+		++value;
+	l_value = strlen(value);
+	if ((C = __findenv(name, &offset))) {	/* find if already exists */
+		if (!rewrite)
+			return (0);
+		/*XXX should remove all duplicates here */
+		if (strlen(C) >= (size_t)l_value) {	/* old larger; copy over */
+			while ((*C++ = *value++))
+				;
+			return (0);
+		}
+	} else {					/* create new slot */
+		size_t cnt;
+		char **P;
+
+		for (P = environ; *P != NULL; P++)
+			;
+		cnt = P - environ;
+		P = (char **)realloc(lastenv, sizeof(char *) * (cnt + 2));
+		if (!P)
+			return (-1);
+		if (lastenv != environ)
+			memcpy(P, environ, cnt * sizeof(char *));
+		lastenv = environ = P;
+		offset = cnt;
+		environ[cnt + 1] = NULL;
+	}
+	for (CC = name; *CC && *CC != '='; ++CC)
+		;				/* no `=' in name */
+	if (!(environ[offset] =			/* name + `=' + value */
+	    malloc((size_t)((int)(CC - name) + l_value + 2))))
+		return (-1);
+	for (C = environ[offset]; (*C = *name++) && *C != '='; ++C)
+		;
+	for (*C++ = '='; (*C++ = *value++); )
+		;
+	return (0);
+}
+
+/*
+ * unsetenv(name) --
+ *	Delete environmental variable "name".
+ */
+int
+unsetenv(const char *name)
+{
+	char **P;
+	int offset;
+
+	if ((name == NULL) || (*name == '\0') || strchr(name, '=')) {
+		errno = EINVAL;
+		return (-1);
+	}
+
+	while (__findenv(name, &offset))	/* if set multiple times */
+		for (P = &environ[offset];; ++P)
+			if (!(*P = *(P + 1)))
+				break;
+	return (0);
+}
+@
+
+
+1.6
+log
+@compile before commit, damnit myself!
+@
+text
+@a0 1
+/**	$MirOS: src/lib/libc/stdlib/setenv.c,v 1.5 2006/07/04 21:38:13 tg Exp $ */
+d4 2
+d37 1
+a37 1
+__RCSID("$MirOS: src/lib/libc/stdlib/setenv.c,v 1.5 2006/07/04 21:38:13 tg Exp $");
+d39 1
+a39 1
+char *__findenv(const char *name, int *offset);
+d62 1
+@
+
+
+1.5
+log
+@make unsetenv(3) SUSv3-conforming
+found by Frank Denis
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/stdlib/setenv.c,v 1.4 2006/06/02 02:29:55 tg Exp $ */
+d32 1
+d36 1
+a36 1
+__RCSID("$MirOS$");
+@
+
+
+1.4
+log
+@__CRAZY cleanliness for most of libc
+not: net/rpc/etc., time, thread, sys
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/stdlib/setenv.c,v 1.3 2005/09/22 20:15:31 tg Exp $ */
+d35 2
+d97 1
+a97 1
+void
+d103 5
+d112 1
+@
+
+
+1.3
+log
+@merge
+@
+text
+@d1 1
+a1 1
+/**	$MirOS: src/lib/libc/stdlib/setenv.c,v 1.2 2005/03/06 20:28:47 tg Exp $ */
+d49 1
+d58 1
+a58 1
+		if (strlen(C) >= l_value) {	/* old larger; copy over */
+d79 1
+a79 1
+	for (C = (char *)name; *C && *C != '='; ++C)
+d82 1
+a82 1
+	    malloc((size_t)((int)(C - name) + l_value + 2))))
+@
+
+
+1.2
+log
+@merge src/lib
+@
+text
+@d1 2
+a2 1
+/* $MirOS$ */
+a31 4
+#if defined(LIBC_SCCS) && !defined(lint)
+static char *rcsid = "$OpenBSD: setenv.c,v 1.6 2003/06/02 20:18:38 millert Exp $";
+#endif /* LIBC_SCCS and not lint */
+
+d37 2
+d45 1
+a45 4
+setenv(name, value, rewrite)
+	register const char *name;
+	register const char *value;
+	int rewrite;
+d47 2
+a48 3
+	extern char **environ;
+	static int alloced;			/* if allocated space before */
+	register char *C;
+d63 2
+a64 2
+		register int	cnt;
+		register char	**P;
+d66 10
+a75 17
+		for (P = environ, cnt = 0; *P; ++P, ++cnt);
+		if (alloced) {			/* just increase size */
+			P = (char **)realloc((void *)environ,
+			    (size_t)(sizeof(char *) * (cnt + 2)));
+			if (!P)
+				return (-1);
+			environ = P;
+		}
+		else {				/* get new space */
+			alloced = 1;		/* copy old entries into it */
+			P = (char **)malloc((size_t)(sizeof(char *) *
+			    (cnt + 2)));
+			if (!P)
+				return (-1);
+			memmove(P, environ, cnt * sizeof(char *));
+			environ = P;
+		}
+a76 1
+		offset = cnt;
+d78 2
+a79 1
+	for (C = (char *)name; *C && *C != '='; ++C);	/* no `=' in name */
+d95 1
+a95 2
+unsetenv(name)
+	const char	*name;
+d97 1
+a97 2
+	extern char **environ;
+	register char **P;
+a98 1
+	char *__findenv();
+d100 1
+a100 1
+	while (__findenv(name, &offset))		/* if set multiple times */
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d85 1
+a85 1
+			bcopy(environ, P, cnt * sizeof(char *));
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d31 1
+a31 1
+static char *rcsid = "$OpenBSD: setenv.c,v 1.8 2005/03/30 18:51:49 pat Exp $";
+a38 2
+extern char **environ;
+
+d45 4
+a48 1
+setenv(const char *name, const char *value, int rewrite)
+d50 3
+a52 2
+	static char **lastenv;			/* last value of environ */
+	char *C;
+d67 2
+a68 2
+		size_t cnt;
+		char **P;
+d70 18
+a87 9
+		for (P = environ; *P != NULL; P++)
+			;
+		cnt = P - environ;
+		P = (char **)realloc(lastenv, sizeof(char *) * (cnt + 2));
+		if (!P)
+			return (-1);
+		if (lastenv != environ)
+			memcpy(P, environ, cnt * sizeof(char *));
+		lastenv = environ = P;
+a88 1
+		environ[cnt + 1] = NULL;
+d90 1
+a90 2
+	for (C = (char *)name; *C && *C != '='; ++C)
+		;				/* no `=' in name */
+d106 2
+a107 1
+unsetenv(const char *name)
+d109 2
+a110 1
+	char **P;
+d112 1
+d114 1
+a114 1
+	while (__findenv(name, &offset))	/* if set multiple times */
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD's libc as of today, minus some of the locale stuff,
+and with brk malloc instead of mmap malloc
+@
+text
+@a0 1
+/*	$OpenBSD: setenv.c,v 1.9 2005/08/08 08:05:37 espie Exp $ */
+d30 4
+@
+
+

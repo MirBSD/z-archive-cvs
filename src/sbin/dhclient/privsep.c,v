@@ -1,0 +1,399 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	MIRBSD_10:1.1.1.4.0.2
+	MIRBSD_10_BASE:1.1.1.4
+	cvs-200702170300:1.1.1.4
+	OPENBSD_4_0:1.1.1.3
+	MIRBSD_9_BASE:1.1.1.2
+	MIRBSD_8:1.1.1.2.0.2
+	MIRBSD_8_BASE:1.1.1.2
+	cvs-200507211800:1.1.1.2
+	cvs-200504291700:1.1.1.1
+	cvs-200504170300:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.1
+date	2005.02.05.17.26.30;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.26.30;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.07.21.20.56.53;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	560042e0092f571e;
+
+1.1.1.3
+date	2006.09.20.19.06.47;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	10045119150397FC669;
+
+1.1.1.4
+date	2007.02.17.03.06.20;	author tg;	state Exp;
+branches;
+next	;
+commitid	10045D67134732A8703;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/*	$OpenBSD: privsep.c,v 1.7 2004/05/10 18:34:42 deraadt Exp $ */
+
+/*
+ * Copyright (c) 2004 Henning Brauer <henning@@openbsd.org>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF MIND, USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+ * OF OR IN CONNECTION WITH THE USE, ABUSE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include "dhcpd.h"
+#include "privsep.h"
+
+struct buf *
+buf_open(size_t len)
+{
+	struct buf	*buf;
+
+	if ((buf = calloc(1, sizeof(struct buf))) == NULL)
+		return (NULL);
+	if ((buf->buf = malloc(len)) == NULL) {
+		free(buf);
+		return (NULL);
+	}
+	buf->size = len;
+
+	return (buf);
+}
+
+int
+buf_add(struct buf *buf, void *data, size_t len)
+{
+	if (buf->wpos + len > buf->size)
+		return (-1);
+
+	memcpy(buf->buf + buf->wpos, data, len);
+	buf->wpos += len;
+	return (0);
+}
+
+int
+buf_close(int sock, struct buf *buf)
+{
+	ssize_t	n;
+
+	do {
+		n = write(sock, buf->buf + buf->rpos, buf->size - buf->rpos);
+		if (n != -1)
+			buf->rpos += n;
+		if (n == 0) {			/* connection closed */
+			errno = 0;
+			return (-1);
+		}
+	} while (n == -1 && (errno == EAGAIN || errno == EINTR));
+
+	if (buf->rpos < buf->size)
+		error("short write: wanted %lu got %ld bytes",
+		    (unsigned long)buf->size, (long)buf->rpos);
+
+	free(buf->buf);
+	free(buf);
+	return (n);
+}
+
+ssize_t
+buf_read(int sock, void *buf, size_t nbytes)
+{
+	ssize_t	n, r = 0;
+	char *p = buf;
+
+	do {
+		n = read(sock, p, nbytes);
+		if (n == 0)
+			error("connection closed");
+		if (n != -1) {
+			r += n;
+			p += n;
+			nbytes -= n;
+		}
+	} while (n == -1 && (errno == EINTR || errno == EAGAIN));
+
+	if (n == -1)
+		error("buf_read: %m");
+
+	if (r < nbytes)
+		error("short read: wanted %lu got %ld bytes",
+		    (unsigned long)nbytes, (long)r);
+
+	return (r);
+}
+
+void
+dispatch_imsg(int fd)
+{
+	struct imsg_hdr		 hdr;
+	char			*medium, *reason, *filename,
+				*servername, *prefix;
+	size_t			 medium_len, reason_len, filename_len,
+				 servername_len, prefix_len, totlen;
+	struct client_lease	 lease;
+	int			 ret, i, optlen;
+	struct buf		*buf;
+
+	buf_read(fd, &hdr, sizeof(hdr));
+
+	switch (hdr.code) {
+	case IMSG_SCRIPT_INIT:
+		if (hdr.len < sizeof(hdr) + sizeof(size_t))
+			error("corrupted message received");
+		buf_read(fd, &medium_len, sizeof(medium_len));
+		if (hdr.len < medium_len + sizeof(size_t) + sizeof(hdr)
+		    + sizeof(size_t) || medium_len == SIZE_T_MAX)
+			error("corrupted message received");
+		if (medium_len > 0) {
+			if ((medium = calloc(1, medium_len + 1)) == NULL)
+				error("%m");
+			buf_read(fd, medium, medium_len);
+		} else
+			medium = NULL;
+
+		buf_read(fd, &reason_len, sizeof(reason_len));
+		if (hdr.len < medium_len + reason_len + sizeof(hdr) ||
+		    reason_len == SIZE_T_MAX)
+			error("corrupted message received");
+		if (reason_len > 0) {
+			if ((reason = calloc(1, reason_len + 1)) == NULL)
+				error("%m");
+			buf_read(fd, reason, reason_len);
+		} else
+			reason = NULL;
+
+		priv_script_init(reason, medium);
+		free(reason);
+		free(medium);
+		break;
+	case IMSG_SCRIPT_WRITE_PARAMS:
+		bzero(&lease, sizeof lease);
+		totlen = sizeof(hdr) + sizeof(lease) + sizeof(size_t);
+		if (hdr.len < totlen)
+			error("corrupted message received");
+		buf_read(fd, &lease, sizeof(lease));
+
+		buf_read(fd, &filename_len, sizeof(filename_len));
+		totlen += filename_len + sizeof(size_t);
+		if (hdr.len < totlen || filename_len == SIZE_T_MAX)
+			error("corrupted message received");
+		if (filename_len > 0) {
+			if ((filename = calloc(1, filename_len + 1)) == NULL)
+				error("%m");
+			buf_read(fd, filename, filename_len);
+		} else
+			filename = NULL;
+
+		buf_read(fd, &servername_len, sizeof(servername_len));
+		totlen += servername_len + sizeof(size_t);
+		if (hdr.len < totlen || servername_len == SIZE_T_MAX)
+			error("corrupted message received");
+		if (servername_len > 0) {
+			if ((servername =
+			    calloc(1, servername_len + 1)) == NULL)
+				error("%m");
+			buf_read(fd, servername, servername_len);
+		} else
+			servername = NULL;
+
+		buf_read(fd, &prefix_len, sizeof(prefix_len));
+		totlen += prefix_len;
+		if (hdr.len < totlen || prefix_len == SIZE_T_MAX)
+			error("corrupted message received");
+		if (prefix_len > 0) {
+			if ((prefix = calloc(1, prefix_len + 1)) == NULL)
+				error("%m");
+			buf_read(fd, prefix, prefix_len);
+		} else
+			prefix = NULL;
+
+		for (i = 0; i < 256; i++) {
+			totlen += sizeof(optlen);
+			if (hdr.len < totlen)
+				error("corrupted message received");
+			buf_read(fd, &optlen, sizeof(optlen));
+			lease.options[i].data = NULL;
+			lease.options[i].len = optlen;
+			if (optlen > 0) {
+				totlen += optlen;
+				if (hdr.len < totlen || optlen == SIZE_T_MAX)
+					error("corrupted message received");
+				lease.options[i].data =
+				    calloc(1, optlen + 1);
+				if (lease.options[i].data == NULL)
+				    error("%m");
+				buf_read(fd, lease.options[i].data, optlen);
+			}
+		}
+		lease.server_name = servername;
+		lease.filename = filename;
+
+		priv_script_write_params(prefix, &lease);
+
+		free(servername);
+		free(filename);
+		free(prefix);
+		for (i = 0; i < 256; i++)
+			if (lease.options[i].len > 0)
+				free(lease.options[i].data);
+		break;
+	case IMSG_SCRIPT_GO:
+		if (hdr.len != sizeof(hdr))
+			error("corrupted message received");
+
+		ret = priv_script_go();
+
+		hdr.code = IMSG_SCRIPT_GO_RET;
+		hdr.len = sizeof(struct imsg_hdr) + sizeof(int);
+		if ((buf = buf_open(hdr.len)) == NULL)
+			error("buf_open: %m");
+		if (buf_add(buf, &hdr, sizeof(hdr)))
+			error("buf_add: %m");
+		if (buf_add(buf, &ret, sizeof(ret)))
+			error("buf_add: %m");
+		if (buf_close(fd, buf) == -1)
+			error("buf_close: %m");
+		break;
+	default:
+		error("received unknown message, code %d", hdr.code);
+	}
+}
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import almost everything (no ancontrol, ifconfig, pfctl, wicontrol)
+of (the undeleted parts of) OpenBSD-current's userland of about 3 hours ago.
+Warning: this introduces major breakage!
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: privsep.c,v 1.8 2005/06/02 15:04:25 cloder Exp $ */
+a40 3
+	if (len == 0)
+		return (0);
+
+@
+
+
+1.1.1.3
+log
+@import a few security-wise relevant changes right now
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: privsep.c,v 1.12 2005/10/07 13:19:40 pedro Exp $ */
+d28 1
+a28 1
+		error("buf_open: %m");
+d31 1
+a31 1
+		error("buf_open: %m");
+d38 1
+a38 1
+void
+d42 1
+a42 1
+		return;
+d45 1
+a45 1
+		error("buf_add: %m");
+d49 1
+d52 1
+a52 1
+void
+d59 6
+a64 5
+		if (n == 0)			/* connection closed */
+			error("buf_close (connection closed)");
+		if (n != -1 && n < buf->size - buf->rpos)
+			error("buf_close (short write): %m");
+
+d67 3
+a69 2
+	if (n == -1)
+		error("buf_close: %m");
+d73 1
+d76 1
+a76 1
+void
+d79 2
+a80 1
+	ssize_t	n;
+d83 8
+a90 5
+		n = read(sock, buf, nbytes);
+		if (n == 0) 			/* connection closed */
+			error("buf_read (connection closed)");
+		if (n != -1 && n < nbytes)
+			error("buf_read (short read): %m");
+d95 6
+d228 6
+a233 3
+		buf_add(buf, &hdr, sizeof(hdr));
+		buf_add(buf, &ret, sizeof(ret));
+		buf_close(fd, buf);
+@
+
+
+1.1.1.4
+log
+@Import spamd and dhclient from OpenBSD-current
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: privsep.c,v 1.14 2007/02/15 15:22:27 stevesk Exp $ */
+d79 2
+a80 4
+		if (n == 0) {			/* connection closed */
+			debug("buf_read (connection closed)");
+			exit(1);
+		}
+@
+
+

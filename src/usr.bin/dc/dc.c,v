@@ -1,0 +1,304 @@
+head	1.4;
+access;
+symbols
+	cvs-20140819:1.1.1.2
+	MIRBSD_10:1.2.0.4
+	MIRBSD_10_BASE:1.2
+	MIRBSD_9_BASE:1.2
+	MIRBSD_8:1.2.0.2
+	MIRBSD_8_BASE:1.2
+	cvs-200507211800:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.4
+date	2014.08.19.21.29.13;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	10053F3C1B62386D976;
+
+1.3
+date	2014.08.19.20.44.55;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	10053F3B75E4ADD80F6;
+
+1.2
+date	2005.03.13.18.32.51;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.29.28;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.28;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2014.08.19.20.22.48;	author tg;	state Exp;
+branches;
+next	;
+commitid	10053F3B22340A28086;
+
+
+desc
+@@
+
+
+1.4
+log
+@permit combining -e with -, the latter acting like /dev/stdin
+@
+text
+@/*	$OpenBSD: dc.c,v 1.12 2014/05/20 01:25:23 guenther Exp $	*/
+
+/*
+ * Copyright (c) 2003, Otto Moerbeek <otto@@drijf.net>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <sys/cdefs.h>
+#include <sys/stat.h>
+#include <err.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdarg.h>
+
+#include "extern.h"
+
+__RCSID("$MirOS: src/usr.bin/dc/dc.c,v 1.3 2014/08/19 20:44:55 tg Exp $");
+
+static __dead void	usage(void);
+
+extern char		*__progname;
+
+static __dead void
+usage(void)
+{
+	(void)fprintf(stderr, "usage: %s [-x] [-e expression] [file]\n",
+	    __progname);
+	exit(1);
+}
+
+int
+main(int argc, char *argv[])
+{
+	int		ch;
+	bool		extended_regs = false;
+	FILE		*file;
+	struct source	src;
+	char		*buf, *p;
+	struct stat	st;
+	bool		got_single_dash = false;
+
+	if ((buf = strdup("")) == NULL)
+		err(1, NULL);
+	/* accept and ignore a single dash to be 4.4BSD dc(1) compatible */
+	while ((ch = getopt(argc, argv, "e:x-")) != -1) {
+		switch (ch) {
+		case 'e':
+			p = buf;
+			if (asprintf(&buf, "%s %s", buf, optarg) == -1)
+				err(1, NULL);
+			free(p);
+			break;
+		case 'x':
+			extended_regs = true;
+			break;
+		case '-':
+			got_single_dash = true;
+			break;
+		default:
+			usage();
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	init_bmachine(extended_regs);
+	(void)setlinebuf(stdout);
+	(void)setlinebuf(stderr);
+
+	if (argc > 1)
+		usage();
+	if (buf[0] != '\0') {
+		src_setstring(&src, buf);
+		reset_bmachine(&src);
+		eval();
+		free(buf);
+		if (argc == 0 && !got_single_dash)
+			return (0);
+	}
+	if (argc == 1) {
+		file = fopen(argv[0], "r");
+		if (file == NULL)
+			err(1, "cannot open file %s", argv[0]);
+		if (fstat(fileno(file), &st) == -1)
+			err(1, "%s", argv[0]);
+		if (S_ISDIR(st.st_mode))
+			errc(1, EISDIR, "%s", argv[0]);
+		src_setstream(&src, file);
+		reset_bmachine(&src);
+		eval();
+		(void)fclose(file);
+		/*
+		 * BSD and Solaris dc(1) continue with stdin after processing
+		 * the file given as the argument. We follow GNU dc(1).
+		 */
+		 return (0);
+	}
+	src_setstream(&src, stdin);
+	reset_bmachine(&src);
+	eval();
+
+	return (0);
+}
+
+/* compatibility glue */
+
+__dead void
+errc(int evalue, int ecode, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	errno = ecode;
+	_verr(evalue, fmt, ap);
+	va_end(ap);
+}
+@
+
+
+1.3
+log
+@merge and make __CRAZY clean
+@
+text
+@d30 1
+a30 1
+__RCSID("$MirOS: src/usr.bin/dc/dc.c,v 1.2 2005/03/13 18:32:51 tg Exp $");
+d53 1
+a53 1
+
+d70 1
+d90 1
+a90 1
+		if (argc == 0)
+@
+
+
+1.2
+log
+@merge src/usr.bin
+@
+text
+@d1 1
+a1 2
+/**	$MirOS$ */
+/*	$OpenBSD: dc.c,v 1.6 2004/10/18 07:49:00 otto Exp $	*/
+d20 1
+d22 1
+d26 1
+a26 1
+#include <stdlib.h>
+d30 1
+a30 1
+__RCSID("$MirOS$");
+d39 2
+a40 1
+	fprintf(stderr, "usage: %s [-x] [-e expr] [file]\n", __progname);
+d52 2
+d79 2
+a80 2
+	setlinebuf(stdout);
+	setlinebuf(stderr);
+d96 4
+d103 1
+a103 1
+		fclose(file);
+d116 13
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+d20 1
+a20 4
+#ifndef lint
+static const char rcsid[] = "$OpenBSD: dc.c,v 1.6 2004/10/18 07:49:00 otto Exp $";
+#endif /* not lint */
+
+d25 1
+d29 2
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@get a dc that does
+	dc -e 16i -e 0.FFFF -e f
+right…
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: dc.c,v 1.12 2014/05/20 01:25:23 guenther Exp $	*/
+d19 4
+a22 1
+#include <sys/stat.h>
+a23 1
+#include <errno.h>
+d37 1
+a37 2
+	(void)fprintf(stderr, "usage: %s [-x] [-e expression] [file]\n",
+	    __progname);
+a48 2
+	struct stat	st;
+
+d74 2
+a75 2
+	(void)setlinebuf(stdout);
+	(void)setlinebuf(stderr);
+a90 4
+		if (fstat(fileno(file), &st) == -1)
+			err(1, "%s", argv[0]);
+		if (S_ISDIR(st.st_mode))
+			errc(1, EISDIR, "%s", argv[0]);
+d94 1
+a94 1
+		(void)fclose(file);
+@
+

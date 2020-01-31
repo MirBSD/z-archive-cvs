@@ -1,0 +1,106 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	2010.09.21.19.38.22;	author tg;	state dead;
+branches;
+next	1.1;
+commitid	1004C99098A59EF7F86;
+
+1.1
+date	2010.09.12.17.10.53;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004C8D0939027D8BE7;
+
+
+desc
+@@
+
+
+1.2
+log
+@* discourage arc4random_addrandom if arc4random_pushb_fast is faster but
+  doesn’t harm (i.e. for everything that doesn’t specifically require KSA)
+* discovered configure checks for symbols, not macros, so keep the older
+  push* API around
+@
+text
+@/*-
+ * Copyright (c) 2010
+ *	Thorsten Glaser <tg@@mirbsd.org>
+ *
+ * Provided that these terms and disclaimer and all copyright notices
+ * are retained or reproduced in an accompanying document, permission
+ * is granted to deal in this work without restriction, including un-
+ * limited rights to use, publicly perform, distribute, sell, modify,
+ * merge, give away, or sublicence.
+ *
+ * This work is provided "AS IS" and WITHOUT WARRANTY of any kind, to
+ * the utmost extent permitted by applicable law, neither express nor
+ * implied; without malicious intent or gross negligence. In no event
+ * may a licensor, author or contributor be held liable for indirect,
+ * direct, other damage, loss, or other issues arising in any way out
+ * of dealing in the work, even if advised of the possibility of such
+ * damage or existence of a defect, except proven that it results out
+ * of said person's immediate fault when using the work as intended.
+ */
+
+#include <sys/types.h>
+#include <sys/time.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include "arc4random.h"
+#include "thread_private.h"
+
+__RCSID("$MirOS: src/lib/libc/crypt/arc4random_pushb.c,v 1.1 2010/09/12 17:10:53 tg Exp $");
+
+void
+arc4random_pushb_fast(const void *buf, size_t len)
+{
+	struct {
+		struct timespec tp;
+		const void *dp, *sp;
+		size_t sz;
+	} pbuf;
+
+	clock_gettime(CLOCK_MONOTONIC, &pbuf.tp);
+	pbuf.dp = buf;
+	pbuf.sp = &pbuf;
+	pbuf.sz = len;
+
+	_ARC4_LOCK();
+	arc4random_roundhash(a4state.pool, &a4state.a4s_poolptr,
+	    &pbuf, sizeof(pbuf));
+	arc4random_roundhash(a4state.pool, &a4state.a4s_poolptr, buf, len);
+	_ARC4_UNLOCK();
+}
+@
+
+
+1.1
+log
+@new implementation of arc4random(3) API (except arc4random_uniform(3),
+which though has been split off earlier today)
+
+deprecate arc4random_push arc4random_pushb arc4random_pushk
+in favour of arc4random_pushb_fast as well
+
+hide internal symbols from user with a version script (only some,
+until the next major bump)
+
+make deprecated functions into macros already
+
+switch some kernel code to use the new shared code already; rewrite
+of kernel arc4random(9) will come next/later
+@
+text
+@d28 1
+a28 1
+__RCSID("$MirOS: src/share/misc/licence.template,v 1.28 2008/11/14 15:33:44 tg Rel $");
+@
+

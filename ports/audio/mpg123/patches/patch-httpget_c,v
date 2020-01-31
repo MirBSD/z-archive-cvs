@@ -1,0 +1,266 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2008.05.17.23.29.30;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	100482F6A6C6AACC09D;
+
+1.2
+date	2008.05.16.22.14.19;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	100482E074539FBFB0B;
+
+1.1
+date	2005.03.18.15.43.03;	author tg;	state Exp;
+branches
+	1.1.7.1;
+next	;
+
+1.1.7.1
+date	2005.03.18.15.43.03;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.3
+log
+@• convert to MirMake (now it should be *much* easier to add other OSes)
+• use wide character string output for ICY meta information from cp1252
+@
+text
+@$MirOS: ports/audio/mpg123/patches/patch-httpget_c,v 1.2 2008/05/16 22:14:19 tg Exp $
+$OpenBSD: patch-httpget_c,v 1.1 2003/11/13 20:51:50 margarida Exp $
+--- httpget.c.orig	Sat May 17 22:51:03 2008
++++ httpget.c	Sat May 17 23:14:45 2008
+@@@@ -55,11 +55,10 @@@@ void readstring (char *string, int maxle
+ #endif
+ 	int pos = 0;
+ 
+-	while(1) {
++	while(pos < maxlen) {
+ 		if( read(fileno(f),string+pos,1) == 1) {
+ 			pos++;
+ 			if(string[pos-1] == '\n') {
+-				string[pos] = 0;
+ 				break;
+ 			}
+ 		}
+@@@@ -68,6 +67,7 @@@@ void readstring (char *string, int maxle
+ 			exit(1);
+ 		}
+ 	}
++	string[pos] = 0;
+ #if 0
+ 	do {
+ 		result = fgets(string, maxlen, f);
+@@@@ -111,27 +111,29 @@@@ void encode64 (char *source,char *destin
+ }
+ 
+ /* VERY  simple auth-from-URL grabber */
+-int getauthfromURL(char *url,char *auth)
++int getauthfromURL(char *url,char *auth, size_t authlen)
+ {
+   char *pos;
+ 
++  if (!authlen || (url == NULL) || (auth == NULL))
++    return 0;
++
+   *auth = 0;
+ 
+   if (!(strncmp(url, "http://", 7)))
+     url += 7;
+ 
+-  if( (pos = strchr(url,'@@')) ) {
+-    int i;
+-    for(i=0;i<pos-url;i++) {
+-      if( url[i] == '/' )
+-         return 0;
+-    }
+-    strncpy(auth,url,pos-url);
+-    auth[pos-url] = 0;
+-    strcpy(url,pos+1);
+-    return 1;
++  if( (pos = strchr(url,'@@')) == NULL )
++    return 0;
++
++  *pos = 0;
++  if (strrchr(url, '/') != NULL) {
++    *pos = '@@';
++    return 0;
+   }
+-  return 0;
++  strlcpy(auth, url, authlen);
++  memmove(url, ++pos, 1 + strlen(pos));
++  return 1;
+ }
+ 
+ static const char *defaultportstr = "80";
+@@@@ -262,17 +264,16 @@@@ int http_open (char *url)
+ 		fprintf (stderr, "malloc() failed, out of memory.\n");
+ 		exit (1);
+ 	}
+-	strncpy (purl, url, 1023);
+-	purl[1023] = '\0';
++	strlcpy (purl, url, 1023);
+ 
+-        getauthfromURL(purl,httpauth1);
++        getauthfromURL(purl,httpauth1,256);
+ 
+ 	do {
+-		strcpy (request, "GET ");
++		strlcpy (request, "GET ", linelength);
+ 		if (proxyip != INADDR_NONE) {
+ 			if (strncmp(url, "http://", 7))
+-				strcat (request, "http://");
+-			strcat (request, purl);
++				strlcat (request, "http://", linelength);
++			strlcat (request, purl, linelength);
+ 			myport = proxyport;
+ 			myip = proxyip;
+ 		}
+@@@@ -290,19 +291,22 @@@@ int http_open (char *url)
+ 					host ? host : "");
+ 				exit (1);
+ 			}
+-			strcat (request, sptr);
++			strlcat (request, sptr, linelength);
+ 		}
+-		sprintf (request + strlen(request),
+-			" HTTP/1.0\r\nUser-Agent: %s/%s\r\n",
++		snprintf (request + strlen(request),
++			linelength - strlen(request),
++			" HTTP/1.0\r\nUser-Agent: %s/%s\r\n"
++			"icy-metadata:1\r\n",
+ 			prgName, prgVersion);
+ 		if (host) {
+-			sprintf(request + strlen(request),
++			snprintf(request + strlen(request),
++				linelength - strlen(request),
+ 				"Host: %s:%s\r\n", host, myport);
+ #if 0
+ 			free (host);
+ #endif
+ 		}
+-		strcat (request, ACCEPT_HEAD);
++		strlcat (request, ACCEPT_HEAD, linelength);
+ 
+ #ifdef INET6
+ 		memset(&hints, 0, sizeof(hints));
+@@@@ -359,15 +363,15 @@@@ fail:
+ 
+ 		if (strlen(httpauth1) || httpauth) {
+ 			char buf[1023];
+-			strcat (request,"Authorization: Basic ");
++			strlcat (request,"Authorization: Basic ", linelength);
+                         if(strlen(httpauth1))
+                           encode64(httpauth1,buf);
+                         else
+ 			  encode64(httpauth,buf);
+-			strcat (request,buf);
+-			strcat (request,"\r\n");
++			strlcat (request,buf, linelength);
++			strlcat (request,"\r\n", linelength);
+ 		}
+-		strcat (request, "\r\n");
++		strlcat (request, "\r\n", linelength);
+ 
+ 		writestring (sock, request);
+ 		if (!(myfile = fdopen(sock, "rb"))) {
+@@@@ -393,6 +397,32 @@@@ fail:
+ 			readstring (request, linelength-1, myfile);
+ 			if (!strncmp(request, "Location:", 9))
+ 				strncpy (purl, request+10, 1023);
++			else if (!strncmp(request, "icy-metaint", 11)) {
++				const char *cp = request + 11;
++				int icy_metaint;
++
++				while (*cp < '0' || *cp > '9')
++					if (*cp)
++						++cp;
++					else
++						break;
++				icy_metaint = *cp ? atoi(cp) : 0;
++				fprintf(stderr, "%sStream meta data ",
++				    "ICY metainfo: ");
++				if (icy_init(icy_metaint))
++					fprintf(stderr, "sent every %d bytes\n",
++					    icy_metaint);
++				else
++					fputs("not sent\n", stderr);
++			} else if (!strncmp(request, "icy-", 4)) {
++				char *cp = request + strlen(request) - 1;
++
++				while (*cp == '\r' || *cp == '\n' ||
++				    *cp == '\t' || *cp == ' ')
++					*cp-- = '\0';
++				fprintf(stderr, "%s%ls\n", "ICY metainfo: ",
++				    uniprint(request));
++			}
+ 		} while (request[0] != '\r' && request[0] != '\n');
+ 	} while (relocate && purl[0] && numrelocs++ < 5);
+ 	if (relocate) {
+@
+
+
+1.2
+log
+@add support for shoutcast metadata \o/
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/audio/mpg123/patches/patch-httpget_c,v 1.1.7.1 2005/03/18 15:43:03 tg Exp $
+d3 2
+a4 2
+--- httpget.c.orig	Fri May 16 21:00:49 2008
++++ httpget.c	Fri May 16 22:02:13 2008
+d166 2
+a167 2
++				fprintf(stderr, "%s%s\n", "ICY metainfo: ",
++				    request);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 1
+a1 1
+$MirOS$
+d3 2
+a4 2
+--- httpget.c.orig	2004-09-07 16:55:25.000000000 +0000
++++ httpget.c	2004-09-07 16:55:27.000000000 +0000
+d91 1
+a91 1
+@@@@ -290,19 +291,21 @@@@ int http_open (char *url)
+d99 1
+d102 2
+a103 1
+ 			" HTTP/1.0\r\nUser-Agent: %s/%s\r\n",
+d119 1
+a119 1
+@@@@ -359,15 +362,15 @@@@ fail:
+d139 33
+@
+
+
+1.1.7.1
+log
+@Import the MirPorts Framework, many files moved or renamed though, no KDE/QT
+@
+text
+@@

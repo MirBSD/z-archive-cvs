@@ -1,0 +1,365 @@
+head	1.3;
+access;
+symbols
+	cvs-201012271745:1.1.1.2
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504291700:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2010.12.27.18.11.31;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004D18D6D409C6F14C;
+
+1.2
+date	2008.12.29.23.54.08;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10049596324511F3F62;
+
+1.1
+date	2005.02.05.17.30.09;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.30.09;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2010.12.27.17.52.24;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004D18D2680A7ACEE9;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge and bring back documentation
+tested builds: with {o,n}curses, with{out} perl
+@
+text
+@/*	$OpenBSD: screen.c,v 1.8 2009/10/27 23:59:47 deraadt Exp $	*/
+
+/*-
+ * Copyright (c) 1993, 1994
+ *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1993, 1994, 1995, 1996
+ *	Keith Bostic.  All rights reserved.
+ *
+ * See the LICENSE file for redistribution information.
+ */
+
+#include "config.h"
+
+#include <sys/types.h>
+#include <sys/queue.h>
+#include <sys/time.h>
+
+#include <bitstring.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "common.h"
+#include "../vi/vi.h"
+#ifdef HAVE_PERL_INTERP
+#include "perl_extern.h"
+#endif
+
+/*
+ * screen_init --
+ *	Do the default initialization of an SCR structure.
+ *
+ * PUBLIC: int screen_init(GS *, SCR *, SCR **);
+ */
+int
+screen_init(gp, orig, spp)
+	GS *gp;
+	SCR *orig, **spp;
+{
+	SCR *sp;
+	size_t len;
+
+	*spp = NULL;
+	CALLOC_RET(orig, sp, SCR *, 1, sizeof(SCR));
+	*spp = sp;
+
+/* INITIALIZED AT SCREEN CREATE. */
+	sp->id = ++gp->id;
+	sp->refcnt = 1;
+
+	sp->gp = gp;				/* All ref the GS structure. */
+
+	sp->ccnt = 2;				/* Anything > 1 */
+
+	/*
+	 * XXX
+	 * sp->defscroll is initialized by the opts_init() code because
+	 * we don't have the option information yet.
+	 */
+
+	CIRCLEQ_INIT(&sp->tiq);
+
+/* PARTIALLY OR COMPLETELY COPIED FROM PREVIOUS SCREEN. */
+	if (orig == NULL) {
+		sp->searchdir = NOTSET;
+	} else {
+		/* Alternate file name. */
+		if (orig->alt_name != NULL &&
+		    (sp->alt_name = strdup(orig->alt_name)) == NULL)
+			goto mem;
+
+		/* Last executed at buffer. */
+		if (F_ISSET(orig, SC_AT_SET)) {
+			F_SET(sp, SC_AT_SET);
+			sp->at_lbuf = orig->at_lbuf;
+		}
+
+		/* Retain searching/substitution information. */
+		sp->searchdir = orig->searchdir == NOTSET ? NOTSET : FORWARD;
+		if (orig->re != NULL && (sp->re =
+		    v_strdup(sp, orig->re, orig->re_len)) == NULL)
+			goto mem;
+		sp->re_len = orig->re_len;
+		if (orig->subre != NULL && (sp->subre =
+		    v_strdup(sp, orig->subre, orig->subre_len)) == NULL)
+			goto mem;
+		sp->subre_len = orig->subre_len;
+		if (orig->repl != NULL && (sp->repl =
+		    v_strdup(sp, orig->repl, orig->repl_len)) == NULL)
+			goto mem;
+		sp->repl_len = orig->repl_len;
+		if (orig->newl_len) {
+			len = orig->newl_len * sizeof(size_t);
+			MALLOC(sp, sp->newl, size_t *, len);
+			if (sp->newl == NULL) {
+mem:				msgq(orig, M_SYSERR, NULL);
+				goto err;
+			}
+			sp->newl_len = orig->newl_len;
+			sp->newl_cnt = orig->newl_cnt;
+			memcpy(sp->newl, orig->newl, len);
+		}
+
+		if (opts_copy(orig, sp))
+			goto err;
+
+		F_SET(sp, F_ISSET(orig, SC_EX | SC_VI));
+	}
+
+	if (ex_screen_copy(orig, sp))		/* Ex. */
+		goto err;
+	if (v_screen_copy(orig, sp))		/* Vi. */
+		goto err;
+
+	*spp = sp;
+	return (0);
+
+err:	screen_end(sp);
+	return (1);
+}
+
+/*
+ * screen_end --
+ *	Release a screen, no matter what had (and had not) been
+ *	initialized.
+ *
+ * PUBLIC: int screen_end(SCR *);
+ */
+int
+screen_end(sp)
+	SCR *sp;
+{
+	int rval;
+
+	/* If multiply referenced, just decrement the count and return. */
+	 if (--sp->refcnt != 0)
+		 return (0);
+
+	/*
+	 * Remove the screen from the displayed queue.
+	 *
+	 * If a created screen failed during initialization, it may not
+	 * be linked into the chain.
+	 */
+	if (CIRCLEQ_NEXT(sp, q) != NULL)
+		CIRCLEQ_REMOVE(&sp->gp->dq, sp, q);
+
+	/* The screen is no longer real. */
+	F_CLR(sp, SC_SCR_EX | SC_SCR_VI);
+
+	rval = 0;
+#ifdef HAVE_PERL_INTERP
+	if (perl_screen_end(sp))		/* End perl. */
+		rval = 1;
+#endif
+	if (v_screen_end(sp))			/* End vi. */
+		rval = 1;
+	if (ex_screen_end(sp))			/* End ex. */
+		rval = 1;
+
+	/* Free file names. */
+	{ char **ap;
+		if (!F_ISSET(sp, SC_ARGNOFREE) && sp->argv != NULL) {
+			for (ap = sp->argv; *ap != NULL; ++ap)
+				free(*ap);
+			free(sp->argv);
+		}
+	}
+
+	/* Free any text input. */
+	if (CIRCLEQ_FIRST(&sp->tiq) != NULL)
+		text_lfree(&sp->tiq);
+
+	/* Free alternate file name. */
+	if (sp->alt_name != NULL)
+		free(sp->alt_name);
+
+	/* Free up search information. */
+	if (sp->re != NULL)
+		free(sp->re);
+	if (F_ISSET(sp, SC_RE_SEARCH))
+		regfree(&sp->re_c);
+	if (sp->subre != NULL)
+		free(sp->subre);
+	if (F_ISSET(sp, SC_RE_SUBST))
+		regfree(&sp->subre_c);
+	if (sp->repl != NULL)
+		free(sp->repl);
+	if (sp->newl != NULL)
+		free(sp->newl);
+
+	/* Free all the options */
+	opts_free(sp);
+
+	/* Free the screen itself. */
+	free(sp);
+
+	return (rval);
+}
+
+/*
+ * screen_next --
+ *	Return the next screen in the queue.
+ *
+ * PUBLIC: SCR *screen_next(SCR *);
+ */
+SCR *
+screen_next(sp)
+	SCR *sp;
+{
+	GS *gp;
+	SCR *next;
+
+	/* Try the display queue, without returning the current screen. */
+	gp = sp->gp;
+	CIRCLEQ_FOREACH(next, &gp->dq, q)
+		if (next != sp)
+			break;
+	if (next != (void *)&gp->dq)
+		return (next);
+
+	/* Try the hidden queue; if found, move screen to the display queue. */
+	if (CIRCLEQ_FIRST(&gp->hq) != CIRCLEQ_END(&gp->hq)) {
+		next = CIRCLEQ_FIRST(&gp->hq);
+		CIRCLEQ_REMOVE(&gp->hq, next, q);
+		CIRCLEQ_INSERT_HEAD(&gp->dq, next, q);
+		return (next);
+	}
+	return (NULL);
+}
+@
+
+
+1.2
+log
+@make ocurses and perlinterp (didn't test both together) build
+
+tested
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: screen.c,v 1.6 2002/02/16 21:27:57 millert Exp $	*/
+a13 4
+#ifndef lint
+static const char sccsid[] = "@@(#)screen.c	10.15 (Berkeley) 9/15/96";
+#endif /* not lint */
+
+d148 1
+a148 1
+	if (sp->q.cqe_next != NULL)
+d174 1
+a174 1
+	if (sp->tiq.cqh_first != NULL)
+d219 1
+a219 2
+	for (next = gp->dq.cqh_first;
+	    next != (void *)&gp->dq; next = next->q.cqe_next)
+d226 2
+a227 2
+	if (gp->hq.cqh_first != (void *)&gp->hq) {
+		next = gp->hq.cqh_first;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d32 3
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@newer nvi from Ogre, to fix benz’ segfaults
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: screen.c,v 1.8 2009/10/27 23:59:47 deraadt Exp $	*/
+d14 4
+d149 1
+a149 1
+	if (CIRCLEQ_NEXT(sp, q) != NULL)
+d175 1
+a175 1
+	if (CIRCLEQ_FIRST(&sp->tiq) != NULL)
+d220 2
+a221 1
+	CIRCLEQ_FOREACH(next, &gp->dq, q)
+d228 2
+a229 2
+	if (CIRCLEQ_FIRST(&gp->hq) != CIRCLEQ_END(&gp->hq)) {
+		next = CIRCLEQ_FIRST(&gp->hq);
+@
+

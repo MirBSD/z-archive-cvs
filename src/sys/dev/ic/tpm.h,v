@@ -1,0 +1,172 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2010.07.25.16.36.18;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1004C4C672D35F3668C;
+
+1.2
+date	2009.02.22.12.24.25;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10049A143E6107152AE;
+
+1.1
+date	2009.02.16.21.21.01;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004999D6C503898A56;
+
+
+desc
+@@
+
+
+1.3
+log
+@let the BIOS initialise the TPM and associated buses (also more failsafe)
+inspired by http://www.mail-archive.com/linux-kernel@@vger.kernel.org/msg82847.html
+@
+text
+@/* $MirOS: src/sys/dev/ic/tpm.h,v 1.2 2009/02/22 12:24:25 tg Exp $ */
+
+/*-
+ * Copyright (c) 2009 Thorsten Glaser <tg@@mirbsd.org>
+ * Copyright (c) 2003 Rick Wash <rwash@@citi.umich.edu>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#ifndef TPM_H
+#define TPM_H
+
+struct timeout;
+
+#define TPM_BUFFER_LEN	2048
+
+struct tpm_softc {
+	struct device 	sc_dev;			/* generic device info */
+	/* device specific information */
+	u_int8_t	buffer[TPM_BUFFER_LEN];	/* memory for requests and replies */
+	int		type;			/* chipset type */
+	int 		wait_timeout;		/* poll timeout counter */
+	int		retval;			/* return value (length or error) */
+	int		len;			/* size of data */
+	struct timeout	tmo;			/* for polling */
+	u_int16_t	base;			/* base address */
+	uint8_t		initialised;		/* flag - initialised chip */
+	uint8_t		open;			/* exclusive open flag */
+	unsigned char	version[4];		/* Version number */
+	unsigned char	vendor[5];		/* vendor name */
+	enum tpm_poll_state {
+		TPM_STATE_READY = 0,
+		TPM_STATE_READ_START,
+		TPM_STATE_WAIT_FOR_DATA,
+		TPM_STATE_READ_DONE,
+		TPM_STATE_WRITE_START,
+		TPM_STATE_WRITE_BUSY,
+		TPM_STATE_WRITE_WORKING,
+		TPM_STATE_WRITE_DONE,
+		TPM_STATE_ERROR,
+		TPM_STATE_MAX
+	}		state;			/* interrupt poll state */
+};
+
+enum tpm_chip_type {
+	TPM_INVALID_CHIP = 0,
+	ICH2LPC,
+	ICH3LPCM,
+	ICH4LPC,
+	ICH4LPCM
+};
+
+struct tpm_attach_args {
+	char *busname;
+	enum tpm_chip_type chiptype;
+};
+
+int tpm_match(struct device *, void *, void *);
+void tpm_attach(struct device *, struct device *, void *);
+
+int tpmopen(dev_t dev, int flag, int mode, struct proc *p);
+int tpmclose(dev_t dev, int flag, int mode, struct proc *p);
+int tpmwrite(dev_t dev, struct uio *uio, int flags);
+int tpmread(dev_t dev, struct uio *uio, int flags);
+int tpmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p);
+
+#endif
+@
+
+
+1.2
+log
+@use mkdev(major(crypto),1) for /dev/tpm, not mkdev(newmajor(),*)
+and restrict crypto to mkdev(major(crypto),0) instead of minor=*
+
+untested
+@
+text
+@d1 1
+a1 1
+/* $MirOS: src/sys/dev/ic/tpm.h,v 1.1 2009/02/16 21:21:01 tg Exp $ */
+a64 1
+	uint16_t base;
+@
+
+
+1.1
+log
+@functional TPM driver, from Joshua Stein’s efforts
+• tested with a slightly hacked user space library (GPL) from IBM:
+  RMD160 (tpm-3.2.0.tar.gz) = 80bae009bdfeaaba5d4f2ce371bde630cf6913d1
+  ‣ /dev/tpm not /dev/tpm0
+  ‣ comment out ioctl
+  ‣ for entropy testing of the RNG, slurp 768 bytes in each call
+    (more aren’t returned on my IBM Stinkpad X40)
+• TODO: make /dev/tpm available only if kern.usercrypto=1
+• TODO: similar to VIA C3 HW RNG, feed into kernel pool from TPM, unless
+  the device is already opened from user space
+  ‣ XXX do we want/need to do a full reset once it was opened?
+  ‣ XXX do we take it back once user space had addressed it?
+• TODO: write tpm(4) manual page, regen MAKEDEV(8)
+
+Think about it. (Hah, how bleu from me.) Why not let cprng(8) do the deed?
+(Of course, in-kernel operation is much cooler. But it may block, and in
+any case, it adds complexity. Plus, we only allow one user space programme
+to actually access the device.)
+
+Tests with mirports/math/ent on a 64 KiB sample looked good, although the
+TPM is a very slow HW RNG (about 1KB/s even at the largest block size my
+exemplar could do, which is not guaranteed by the standard anyway).
+
+*winks Theo* Every bit counts. Even if it may not be worth it for crypto.
+
+PS: someone with actual kernel coding experience might want to help me
+    to attach the tpm0 at ichpcib0, which I couldn’t get quite right…
+    for now, tpm0 attaches at mainbus0 or root, similar to powernowhack0…
+    the match function falses constantly unless manually called from the
+    ichpcib attach routine – but it is at least better than jsg’s trick
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d72 6
+@
+

@@ -1,0 +1,1167 @@
+head	1.6;
+access;
+symbols
+	freetype-2_7_1:1.1.115.4
+	freetype-2_3_12:1.1.115.3
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.3
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.2
+	freetype-2_1_8:1.1.115.1
+	freetype:1.1.115
+	MIRBSD_9_BASE:1.1.103.1
+	MIRBSD_8:1.1.103.1.0.2
+	MIRBSD_8_BASE:1.1.103.1
+	xf-4_5_0:1.1.103.1
+	xwindow:1.1.103;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.04.15.19.21.54;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.19.48.10;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520152445E05B912;
+
+1.4
+date	2008.06.12.20.54.43;	author bsiegert;	state Exp;
+branches;
+next	1.3;
+commitid	10048518C1E44F62885;
+
+1.3
+date	2008.02.26.20.05.03;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10047C470A72A1E13CE;
+
+1.2
+date	2006.06.29.20.25.00;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	10044A435A50E5F7C11;
+
+1.1
+date	2005.03.18.10.43.15;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.103.1
+	1.1.115.1;
+next	;
+
+1.1.1.1
+date	2008.02.26.19.52.56;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.38.18;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.103.1
+date	2005.03.18.10.43.15;	author tg;	state Exp;
+branches;
+next	;
+
+1.1.115.1
+date	2006.06.29.18.35.35;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41D276963C97B;
+
+1.1.115.2
+date	2006.06.29.18.37.15;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.3
+date	2013.08.06.19.12.24;	author tg;	state Exp;
+branches;
+next	1.1.115.4;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.4
+date	2017.04.15.15.42.05;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@/***************************************************************************/
+/*                                                                         */
+/*  t1cmap.c                                                               */
+/*                                                                         */
+/*    Type 1 character map support (body).                                 */
+/*                                                                         */
+/*  Copyright 2002-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include "t1cmap.h"
+
+#include FT_INTERNAL_DEBUG_H
+
+#include "psauxerr.h"
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****          TYPE1 STANDARD (AND EXPERT) ENCODING CMAPS           *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  static void
+  t1_cmap_std_init( T1_CMapStd  cmap,
+                    FT_Int      is_expert )
+  {
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( cmap );
+    FT_Service_PsCMaps  psnames = (FT_Service_PsCMaps)face->psnames;
+
+
+    cmap->num_glyphs    = (FT_UInt)face->type1.num_glyphs;
+    cmap->glyph_names   = (const char* const*)face->type1.glyph_names;
+    cmap->sid_to_string = psnames->adobe_std_strings;
+    cmap->code_to_sid   = is_expert ? psnames->adobe_expert_encoding
+                                    : psnames->adobe_std_encoding;
+
+    FT_ASSERT( cmap->code_to_sid );
+  }
+
+
+  FT_CALLBACK_DEF( void )
+  t1_cmap_std_done( T1_CMapStd  cmap )
+  {
+    cmap->num_glyphs    = 0;
+    cmap->glyph_names   = NULL;
+    cmap->sid_to_string = NULL;
+    cmap->code_to_sid   = NULL;
+  }
+
+
+  FT_CALLBACK_DEF( FT_UInt )
+  t1_cmap_std_char_index( T1_CMapStd  cmap,
+                          FT_UInt32   char_code )
+  {
+    FT_UInt  result = 0;
+
+
+    if ( char_code < 256 )
+    {
+      FT_UInt      code, n;
+      const char*  glyph_name;
+
+
+      /* convert character code to Adobe SID string */
+      code       = cmap->code_to_sid[char_code];
+      glyph_name = cmap->sid_to_string( code );
+
+      /* look for the corresponding glyph name */
+      for ( n = 0; n < cmap->num_glyphs; n++ )
+      {
+        const char* gname = cmap->glyph_names[n];
+
+
+        if ( gname && gname[0] == glyph_name[0]  &&
+             ft_strcmp( gname, glyph_name ) == 0 )
+        {
+          result = n;
+          break;
+        }
+      }
+    }
+
+    return result;
+  }
+
+
+  FT_CALLBACK_DEF( FT_UInt32 )
+  t1_cmap_std_char_next( T1_CMapStd   cmap,
+                         FT_UInt32   *pchar_code )
+  {
+    FT_UInt    result    = 0;
+    FT_UInt32  char_code = *pchar_code + 1;
+
+
+    while ( char_code < 256 )
+    {
+      result = t1_cmap_std_char_index( cmap, char_code );
+      if ( result != 0 )
+        goto Exit;
+
+      char_code++;
+    }
+    char_code = 0;
+
+  Exit:
+    *pchar_code = char_code;
+    return result;
+  }
+
+
+  FT_CALLBACK_DEF( FT_Error )
+  t1_cmap_standard_init( T1_CMapStd  cmap,
+                         FT_Pointer  pointer )
+  {
+    FT_UNUSED( pointer );
+
+
+    t1_cmap_std_init( cmap, 0 );
+    return 0;
+  }
+
+
+  FT_CALLBACK_TABLE_DEF const FT_CMap_ClassRec
+  t1_cmap_standard_class_rec =
+  {
+    sizeof ( T1_CMapStdRec ),
+
+    (FT_CMap_InitFunc)     t1_cmap_standard_init,   /* init       */
+    (FT_CMap_DoneFunc)     t1_cmap_std_done,        /* done       */
+    (FT_CMap_CharIndexFunc)t1_cmap_std_char_index,  /* char_index */
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,   /* char_next  */
+
+    (FT_CMap_CharVarIndexFunc)    NULL,  /* char_var_index   */
+    (FT_CMap_CharVarIsDefaultFunc)NULL,  /* char_var_default */
+    (FT_CMap_VariantListFunc)     NULL,  /* variant_list     */
+    (FT_CMap_CharVariantListFunc) NULL,  /* charvariant_list */
+    (FT_CMap_VariantCharListFunc) NULL   /* variantchar_list */
+  };
+
+
+  FT_CALLBACK_DEF( FT_Error )
+  t1_cmap_expert_init( T1_CMapStd  cmap,
+                       FT_Pointer  pointer )
+  {
+    FT_UNUSED( pointer );
+
+
+    t1_cmap_std_init( cmap, 1 );
+    return 0;
+  }
+
+  FT_CALLBACK_TABLE_DEF const FT_CMap_ClassRec
+  t1_cmap_expert_class_rec =
+  {
+    sizeof ( T1_CMapStdRec ),
+
+    (FT_CMap_InitFunc)     t1_cmap_expert_init,     /* init       */
+    (FT_CMap_DoneFunc)     t1_cmap_std_done,        /* done       */
+    (FT_CMap_CharIndexFunc)t1_cmap_std_char_index,  /* char_index */
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,   /* char_next  */
+
+    (FT_CMap_CharVarIndexFunc)    NULL,  /* char_var_index   */
+    (FT_CMap_CharVarIsDefaultFunc)NULL,  /* char_var_default */
+    (FT_CMap_VariantListFunc)     NULL,  /* variant_list     */
+    (FT_CMap_CharVariantListFunc) NULL,  /* charvariant_list */
+    (FT_CMap_VariantCharListFunc) NULL   /* variantchar_list */
+  };
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****                    TYPE1 CUSTOM ENCODING CMAP                 *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+
+  FT_CALLBACK_DEF( FT_Error )
+  t1_cmap_custom_init( T1_CMapCustom  cmap,
+                       FT_Pointer     pointer )
+  {
+    T1_Face      face     = (T1_Face)FT_CMAP_FACE( cmap );
+    T1_Encoding  encoding = &face->type1.encoding;
+
+    FT_UNUSED( pointer );
+
+
+    cmap->first   = (FT_UInt)encoding->code_first;
+    cmap->count   = (FT_UInt)encoding->code_last - cmap->first;
+    cmap->indices = encoding->char_index;
+
+    FT_ASSERT( cmap->indices );
+    FT_ASSERT( encoding->code_first <= encoding->code_last );
+
+    return 0;
+  }
+
+
+  FT_CALLBACK_DEF( void )
+  t1_cmap_custom_done( T1_CMapCustom  cmap )
+  {
+    cmap->indices = NULL;
+    cmap->first   = 0;
+    cmap->count   = 0;
+  }
+
+
+  FT_CALLBACK_DEF( FT_UInt )
+  t1_cmap_custom_char_index( T1_CMapCustom  cmap,
+                             FT_UInt32      char_code )
+  {
+    FT_UInt    result = 0;
+
+
+    if ( ( char_code >= cmap->first )                  &&
+         ( char_code < ( cmap->first + cmap->count ) ) )
+      result = cmap->indices[char_code];
+
+    return result;
+  }
+
+
+  FT_CALLBACK_DEF( FT_UInt32 )
+  t1_cmap_custom_char_next( T1_CMapCustom  cmap,
+                            FT_UInt32     *pchar_code )
+  {
+    FT_UInt    result = 0;
+    FT_UInt32  char_code = *pchar_code;
+
+
+    char_code++;
+
+    if ( char_code < cmap->first )
+      char_code = cmap->first;
+
+    for ( ; char_code < ( cmap->first + cmap->count ); char_code++ )
+    {
+      result = cmap->indices[char_code];
+      if ( result != 0 )
+        goto Exit;
+    }
+
+    char_code = 0;
+
+  Exit:
+    *pchar_code = char_code;
+    return result;
+  }
+
+
+  FT_CALLBACK_TABLE_DEF const FT_CMap_ClassRec
+  t1_cmap_custom_class_rec =
+  {
+    sizeof ( T1_CMapCustomRec ),
+
+    (FT_CMap_InitFunc)     t1_cmap_custom_init,        /* init       */
+    (FT_CMap_DoneFunc)     t1_cmap_custom_done,        /* done       */
+    (FT_CMap_CharIndexFunc)t1_cmap_custom_char_index,  /* char_index */
+    (FT_CMap_CharNextFunc) t1_cmap_custom_char_next,   /* char_next  */
+
+    (FT_CMap_CharVarIndexFunc)    NULL,  /* char_var_index   */
+    (FT_CMap_CharVarIsDefaultFunc)NULL,  /* char_var_default */
+    (FT_CMap_VariantListFunc)     NULL,  /* variant_list     */
+    (FT_CMap_CharVariantListFunc) NULL,  /* charvariant_list */
+    (FT_CMap_VariantCharListFunc) NULL   /* variantchar_list */
+  };
+
+
+  /*************************************************************************/
+  /*************************************************************************/
+  /*****                                                               *****/
+  /*****            TYPE1 SYNTHETIC UNICODE ENCODING CMAP              *****/
+  /*****                                                               *****/
+  /*************************************************************************/
+  /*************************************************************************/
+
+  FT_CALLBACK_DEF( const char * )
+  psaux_get_glyph_name( T1_Face  face,
+                        FT_UInt  idx )
+  {
+    return face->type1.glyph_names[idx];
+  }
+
+
+  FT_CALLBACK_DEF( FT_Error )
+  t1_cmap_unicode_init( PS_Unicodes  unicodes,
+                        FT_Pointer   pointer )
+  {
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( unicodes );
+    FT_Memory           memory  = FT_FACE_MEMORY( face );
+    FT_Service_PsCMaps  psnames = (FT_Service_PsCMaps)face->psnames;
+
+    FT_UNUSED( pointer );
+
+
+    return psnames->unicodes_init( memory,
+                                   unicodes,
+                                   (FT_UInt)face->type1.num_glyphs,
+                                   (PS_GetGlyphNameFunc)&psaux_get_glyph_name,
+                                   (PS_FreeGlyphNameFunc)NULL,
+                                   (FT_Pointer)face );
+  }
+
+
+  FT_CALLBACK_DEF( void )
+  t1_cmap_unicode_done( PS_Unicodes  unicodes )
+  {
+    FT_Face    face   = FT_CMAP_FACE( unicodes );
+    FT_Memory  memory = FT_FACE_MEMORY( face );
+
+
+    FT_FREE( unicodes->maps );
+    unicodes->num_maps = 0;
+  }
+
+
+  FT_CALLBACK_DEF( FT_UInt )
+  t1_cmap_unicode_char_index( PS_Unicodes  unicodes,
+                              FT_UInt32    char_code )
+  {
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( unicodes );
+    FT_Service_PsCMaps  psnames = (FT_Service_PsCMaps)face->psnames;
+
+
+    return psnames->unicodes_char_index( unicodes, char_code );
+  }
+
+
+  FT_CALLBACK_DEF( FT_UInt32 )
+  t1_cmap_unicode_char_next( PS_Unicodes  unicodes,
+                             FT_UInt32   *pchar_code )
+  {
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( unicodes );
+    FT_Service_PsCMaps  psnames = (FT_Service_PsCMaps)face->psnames;
+
+
+    return psnames->unicodes_char_next( unicodes, pchar_code );
+  }
+
+
+  FT_CALLBACK_TABLE_DEF const FT_CMap_ClassRec
+  t1_cmap_unicode_class_rec =
+  {
+    sizeof ( PS_UnicodesRec ),
+
+    (FT_CMap_InitFunc)     t1_cmap_unicode_init,        /* init       */
+    (FT_CMap_DoneFunc)     t1_cmap_unicode_done,        /* done       */
+    (FT_CMap_CharIndexFunc)t1_cmap_unicode_char_index,  /* char_index */
+    (FT_CMap_CharNextFunc) t1_cmap_unicode_char_next,   /* char_next  */
+
+    (FT_CMap_CharVarIndexFunc)    NULL,  /* char_var_index   */
+    (FT_CMap_CharVarIsDefaultFunc)NULL,  /* char_var_default */
+    (FT_CMap_VariantListFunc)     NULL,  /* variant_list     */
+    (FT_CMap_CharVariantListFunc) NULL,  /* charvariant_list */
+    (FT_CMap_VariantCharListFunc) NULL   /* variantchar_list */
+  };
+
+
+/* END */
+@
+
+
+1.5
+log
+@fastmerge
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2006, 2007 by                                    */
+d42 1
+a42 1
+    cmap->num_glyphs    = face->type1.num_glyphs;
+d48 1
+a48 1
+    FT_ASSERT( cmap->code_to_sid != NULL );
+d123 2
+a124 1
+  t1_cmap_standard_init( T1_CMapStd  cmap )
+d126 3
+d139 10
+a148 6
+    (FT_CMap_InitFunc)     t1_cmap_standard_init,
+    (FT_CMap_DoneFunc)     t1_cmap_std_done,
+    (FT_CMap_CharIndexFunc)t1_cmap_std_char_index,
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+d153 2
+a154 1
+  t1_cmap_expert_init( T1_CMapStd  cmap )
+d156 3
+d168 10
+a177 6
+    (FT_CMap_InitFunc)     t1_cmap_expert_init,
+    (FT_CMap_DoneFunc)     t1_cmap_std_done,
+    (FT_CMap_CharIndexFunc)t1_cmap_std_char_index,
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+d191 2
+a192 1
+  t1_cmap_custom_init( T1_CMapCustom  cmap )
+d197 2
+d200 2
+a201 2
+    cmap->first   = encoding->code_first;
+    cmap->count   = (FT_UInt)( encoding->code_last - cmap->first );
+d204 1
+a204 1
+    FT_ASSERT( cmap->indices != NULL );
+d243 1
+a243 1
+    ++char_code;
+d268 10
+a277 6
+    (FT_CMap_InitFunc)     t1_cmap_custom_init,
+    (FT_CMap_DoneFunc)     t1_cmap_custom_done,
+    (FT_CMap_CharIndexFunc)t1_cmap_custom_char_index,
+    (FT_CMap_CharNextFunc) t1_cmap_custom_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+d290 2
+a291 2
+  t1_get_glyph_name( T1_Face  face,
+                     FT_UInt  idx )
+d298 2
+a299 1
+  t1_cmap_unicode_init( PS_Unicodes  unicodes )
+d305 2
+d310 2
+a311 2
+                                   face->type1.num_glyphs,
+                                   (PS_GetGlyphNameFunc)&t1_get_glyph_name,
+d358 10
+a367 6
+    (FT_CMap_InitFunc)     t1_cmap_unicode_init,
+    (FT_CMap_DoneFunc)     t1_cmap_unicode_done,
+    (FT_CMap_CharIndexFunc)t1_cmap_unicode_char_index,
+    (FT_CMap_CharNextFunc) t1_cmap_unicode_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+@
+
+
+1.4
+log
+@Merge freetype 2.3.6
+@
+text
+@d98 1
+a98 1
+  FT_CALLBACK_DEF( FT_UInt )
+d182 1
+a182 1
+    cmap->count   = (FT_UInt)( encoding->code_last - cmap->first + 1 );
+d216 1
+a216 1
+  FT_CALLBACK_DEF( FT_UInt )
+d315 1
+a315 1
+  FT_CALLBACK_DEF( FT_UInt )
+@
+
+
+1.3
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2006 by                                          */
+d138 3
+a140 1
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next
+d159 3
+a161 1
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next
+d252 3
+a254 1
+    (FT_CMap_CharNextFunc) t1_cmap_custom_char_next
+d335 3
+a337 1
+    (FT_CMap_CharNextFunc) t1_cmap_unicode_char_next
+@
+
+
+1.2
+log
+@merge freetype 2.2.1, reduce diff against ft (rid some xf86 changes)
+@
+text
+@d279 2
+a280 1
+                                   (PS_Glyph_NameFunc)&t1_get_glyph_name,
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003 by                                                */
+d260 3
+a262 3
+  FT_CALLBACK_DEF( FT_Int )
+  t1_cmap_uni_pair_compare( const void*  pair1,
+                            const void*  pair2 )
+d264 1
+a264 11
+    FT_UInt32  u1 = ((T1_CMapUniPair)pair1)->unicode;
+    FT_UInt32  u2 = ((T1_CMapUniPair)pair2)->unicode;
+
+
+    if ( u1 < u2 )
+      return -1;
+
+    if ( u1 > u2 )
+      return +1;
+
+    return 0;
+d269 1
+a269 1
+  t1_cmap_unicode_init( T1_CMapUnicode  cmap )
+d271 1
+a271 3
+    FT_Error            error;
+    FT_UInt             count;
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( cmap );
+d276 5
+a280 60
+    cmap->num_pairs = 0;
+    cmap->pairs     = NULL;
+
+    count = face->type1.num_glyphs;
+
+    if ( !FT_NEW_ARRAY( cmap->pairs, count ) )
+    {
+      FT_UInt         n, new_count;
+      T1_CMapUniPair  pair;
+      FT_UInt32       uni_code;
+
+
+      pair = cmap->pairs;
+      for ( n = 0; n < count; n++ )
+      {
+        const char*  gname = face->type1.glyph_names[n];
+
+
+        /* build unsorted pair table by matching glyph names */
+        if ( gname )
+        {
+          uni_code = psnames->unicode_value( gname );
+
+          if ( uni_code != 0 )
+          {
+            pair->unicode = uni_code;
+            pair->gindex  = n;
+            pair++;
+          }
+        }
+      }
+
+      new_count = (FT_UInt)( pair - cmap->pairs );
+      if ( new_count == 0 )
+      {
+        /* there are no unicode characters in here! */
+        FT_FREE( cmap->pairs );
+        error = PSaux_Err_Invalid_Argument;
+      }
+      else
+      {
+        /* re-allocate if the new array is much smaller than the original */
+        /* one                                                            */
+        if ( new_count != count && new_count < count / 2 )
+        {
+          (void)FT_RENEW_ARRAY( cmap->pairs, count, new_count );
+          error = 0;
+        }
+
+        /* sort the pairs table to allow efficient binary searches */
+        ft_qsort( cmap->pairs,
+                  new_count,
+                  sizeof ( T1_CMapUniPairRec ),
+                  t1_cmap_uni_pair_compare );
+
+        cmap->num_pairs = new_count;
+      }
+    }
+
+    return error;
+d285 1
+a285 1
+  t1_cmap_unicode_done( T1_CMapUnicode  cmap )
+d287 2
+a288 2
+    FT_Face    face   = FT_CMAP_FACE(cmap);
+    FT_Memory  memory = FT_FACE_MEMORY(face);
+d290 3
+a292 2
+    FT_FREE( cmap->pairs );
+    cmap->num_pairs = 0;
+d297 2
+a298 2
+  t1_cmap_unicode_char_index( T1_CMapUnicode  cmap,
+                              FT_UInt32       char_code )
+d300 2
+a301 10
+    FT_UInt         min = 0;
+    FT_UInt         max = cmap->num_pairs;
+    FT_UInt         mid;
+    T1_CMapUniPair  pair;
+
+
+    while ( min < max )
+    {
+      mid  = min + ( max - min ) / 2;
+      pair = cmap->pairs + mid;
+a302 2
+      if ( pair->unicode == char_code )
+        return pair->gindex;
+d304 1
+a304 6
+      if ( pair->unicode < char_code )
+        min = mid + 1;
+      else
+        max = mid;
+    }
+    return 0;
+d309 2
+a310 2
+  t1_cmap_unicode_char_next( T1_CMapUnicode  cmap,
+                             FT_UInt32      *pchar_code )
+d312 2
+a313 2
+    FT_UInt    result    = 0;
+    FT_UInt32  char_code = *pchar_code + 1;
+d316 1
+a316 44
+  Restart:
+    {
+      FT_UInt         min = 0;
+      FT_UInt         max = cmap->num_pairs;
+      FT_UInt         mid;
+      T1_CMapUniPair  pair;
+
+
+      while ( min < max )
+      {
+        mid  = min + ( ( max - min ) >> 1 );
+        pair = cmap->pairs + mid;
+
+        if ( pair->unicode == char_code )
+        {
+          result = pair->gindex;
+          if ( result != 0 )
+            goto Exit;
+
+          char_code++;
+          goto Restart;
+        }
+
+        if ( pair->unicode < char_code )
+          min = mid+1;
+        else
+          max = mid;
+      }
+
+      /* we didn't find it, but we have a pair just above it */
+      char_code = 0;
+
+      if ( min < cmap->num_pairs )
+      {
+        pair   = cmap->pairs + min;
+        result = pair->gindex;
+        if ( result != 0 )
+          char_code = pair->unicode;
+      }
+    }
+
+  Exit:
+    *pchar_code = char_code;
+    return result;
+d323 1
+a323 1
+    sizeof ( T1_CMapUnicodeRec ),
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2006 by                                          */
+d260 3
+a262 3
+  FT_CALLBACK_DEF( const char * )
+  t1_get_glyph_name( T1_Face  face,
+                     FT_UInt  idx )
+d264 11
+a274 1
+    return face->type1.glyph_names[idx];
+d279 1
+a279 1
+  t1_cmap_unicode_init( PS_Unicodes  unicodes )
+d281 3
+a283 1
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( unicodes );
+d288 60
+a347 6
+    return psnames->unicodes_init( memory,
+                                   unicodes,
+                                   face->type1.num_glyphs,
+                                   (PS_GetGlyphNameFunc)&t1_get_glyph_name,
+                                   (PS_FreeGlyphNameFunc)NULL,
+                                   (FT_Pointer)face );
+d352 1
+a352 1
+  t1_cmap_unicode_done( PS_Unicodes  unicodes )
+d354 2
+a355 2
+    FT_Face    face   = FT_CMAP_FACE( unicodes );
+    FT_Memory  memory = FT_FACE_MEMORY( face );
+d357 2
+a358 3
+
+    FT_FREE( unicodes->maps );
+    unicodes->num_maps = 0;
+d363 2
+a364 2
+  t1_cmap_unicode_char_index( PS_Unicodes  unicodes,
+                              FT_UInt32    char_code )
+d366 10
+a375 2
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( unicodes );
+    FT_Service_PsCMaps  psnames = (FT_Service_PsCMaps)face->psnames;
+d377 2
+d380 6
+a385 1
+    return psnames->unicodes_char_index( unicodes, char_code );
+d390 2
+a391 2
+  t1_cmap_unicode_char_next( PS_Unicodes  unicodes,
+                             FT_UInt32   *pchar_code )
+d393 35
+a427 2
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( unicodes );
+    FT_Service_PsCMaps  psnames = (FT_Service_PsCMaps)face->psnames;
+d429 8
+d438 3
+a440 1
+    return psnames->unicodes_char_next( unicodes, pchar_code );
+d447 1
+a447 1
+    sizeof ( PS_UnicodesRec ),
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2006, 2007 by                                    */
+d138 1
+a138 3
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+d157 1
+a157 3
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+d248 1
+a248 3
+    (FT_CMap_CharNextFunc) t1_cmap_custom_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+d329 1
+a329 3
+    (FT_CMap_CharNextFunc) t1_cmap_unicode_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+@
+
+
+1.1.115.1
+log
+@re-base freetype 2.1.8
+@
+text
+@@
+
+
+1.1.115.2
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2006 by                                          */
+d260 3
+a262 3
+  FT_CALLBACK_DEF( const char * )
+  t1_get_glyph_name( T1_Face  face,
+                     FT_UInt  idx )
+d264 11
+a274 1
+    return face->type1.glyph_names[idx];
+d279 1
+a279 1
+  t1_cmap_unicode_init( PS_Unicodes  unicodes )
+d281 3
+a283 1
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( unicodes );
+d288 60
+a347 5
+    return psnames->unicodes_init( memory,
+                                   unicodes,
+                                   face->type1.num_glyphs,
+                                   (PS_Glyph_NameFunc)&t1_get_glyph_name,
+                                   (FT_Pointer)face );
+d352 1
+a352 1
+  t1_cmap_unicode_done( PS_Unicodes  unicodes )
+d354 2
+a355 2
+    FT_Face    face   = FT_CMAP_FACE( unicodes );
+    FT_Memory  memory = FT_FACE_MEMORY( face );
+d357 2
+a358 3
+
+    FT_FREE( unicodes->maps );
+    unicodes->num_maps = 0;
+d363 2
+a364 2
+  t1_cmap_unicode_char_index( PS_Unicodes  unicodes,
+                              FT_UInt32    char_code )
+d366 10
+a375 2
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( unicodes );
+    FT_Service_PsCMaps  psnames = (FT_Service_PsCMaps)face->psnames;
+d377 2
+d380 6
+a385 1
+    return psnames->unicodes_char_index( unicodes, char_code );
+d390 2
+a391 2
+  t1_cmap_unicode_char_next( PS_Unicodes  unicodes,
+                             FT_UInt32   *pchar_code )
+d393 35
+a427 2
+    T1_Face             face    = (T1_Face)FT_CMAP_FACE( unicodes );
+    FT_Service_PsCMaps  psnames = (FT_Service_PsCMaps)face->psnames;
+d429 8
+d438 3
+a440 1
+    return psnames->unicodes_char_next( unicodes, pchar_code );
+d447 1
+a447 1
+    sizeof ( PS_UnicodesRec ),
+@
+
+
+1.1.115.3
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002, 2003, 2006, 2007 by                                    */
+d98 1
+a98 1
+  FT_CALLBACK_DEF( FT_UInt32 )
+d138 1
+a138 3
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+d157 1
+a157 3
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+d178 1
+a178 1
+    cmap->count   = (FT_UInt)( encoding->code_last - cmap->first );
+d212 1
+a212 1
+  FT_CALLBACK_DEF( FT_UInt32 )
+d248 1
+a248 3
+    (FT_CMap_CharNextFunc) t1_cmap_custom_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+d279 1
+a279 2
+                                   (PS_GetGlyphNameFunc)&t1_get_glyph_name,
+                                   (PS_FreeGlyphNameFunc)NULL,
+d308 1
+a308 1
+  FT_CALLBACK_DEF( FT_UInt32 )
+d328 1
+a328 3
+    (FT_CMap_CharNextFunc) t1_cmap_unicode_char_next,
+
+    NULL, NULL, NULL, NULL, NULL
+@
+
+
+1.1.115.4
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2002-2016 by                                                 */
+d42 1
+a42 1
+    cmap->num_glyphs    = (FT_UInt)face->type1.num_glyphs;
+d48 1
+a48 1
+    FT_ASSERT( cmap->code_to_sid );
+d123 1
+a123 2
+  t1_cmap_standard_init( T1_CMapStd  cmap,
+                         FT_Pointer  pointer )
+a124 3
+    FT_UNUSED( pointer );
+
+
+d135 6
+a140 10
+    (FT_CMap_InitFunc)     t1_cmap_standard_init,   /* init       */
+    (FT_CMap_DoneFunc)     t1_cmap_std_done,        /* done       */
+    (FT_CMap_CharIndexFunc)t1_cmap_std_char_index,  /* char_index */
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,   /* char_next  */
+
+    (FT_CMap_CharVarIndexFunc)    NULL,  /* char_var_index   */
+    (FT_CMap_CharVarIsDefaultFunc)NULL,  /* char_var_default */
+    (FT_CMap_VariantListFunc)     NULL,  /* variant_list     */
+    (FT_CMap_CharVariantListFunc) NULL,  /* charvariant_list */
+    (FT_CMap_VariantCharListFunc) NULL   /* variantchar_list */
+d145 1
+a145 2
+  t1_cmap_expert_init( T1_CMapStd  cmap,
+                       FT_Pointer  pointer )
+a146 3
+    FT_UNUSED( pointer );
+
+
+d156 6
+a161 10
+    (FT_CMap_InitFunc)     t1_cmap_expert_init,     /* init       */
+    (FT_CMap_DoneFunc)     t1_cmap_std_done,        /* done       */
+    (FT_CMap_CharIndexFunc)t1_cmap_std_char_index,  /* char_index */
+    (FT_CMap_CharNextFunc) t1_cmap_std_char_next,   /* char_next  */
+
+    (FT_CMap_CharVarIndexFunc)    NULL,  /* char_var_index   */
+    (FT_CMap_CharVarIsDefaultFunc)NULL,  /* char_var_default */
+    (FT_CMap_VariantListFunc)     NULL,  /* variant_list     */
+    (FT_CMap_CharVariantListFunc) NULL,  /* charvariant_list */
+    (FT_CMap_VariantCharListFunc) NULL   /* variantchar_list */
+d175 1
+a175 2
+  t1_cmap_custom_init( T1_CMapCustom  cmap,
+                       FT_Pointer     pointer )
+a179 2
+    FT_UNUSED( pointer );
+
+d181 2
+a182 2
+    cmap->first   = (FT_UInt)encoding->code_first;
+    cmap->count   = (FT_UInt)encoding->code_last - cmap->first;
+d185 1
+a185 1
+    FT_ASSERT( cmap->indices );
+d224 1
+a224 1
+    char_code++;
+d249 6
+a254 10
+    (FT_CMap_InitFunc)     t1_cmap_custom_init,        /* init       */
+    (FT_CMap_DoneFunc)     t1_cmap_custom_done,        /* done       */
+    (FT_CMap_CharIndexFunc)t1_cmap_custom_char_index,  /* char_index */
+    (FT_CMap_CharNextFunc) t1_cmap_custom_char_next,   /* char_next  */
+
+    (FT_CMap_CharVarIndexFunc)    NULL,  /* char_var_index   */
+    (FT_CMap_CharVarIsDefaultFunc)NULL,  /* char_var_default */
+    (FT_CMap_VariantListFunc)     NULL,  /* variant_list     */
+    (FT_CMap_CharVariantListFunc) NULL,  /* charvariant_list */
+    (FT_CMap_VariantCharListFunc) NULL   /* variantchar_list */
+d267 2
+a268 2
+  psaux_get_glyph_name( T1_Face  face,
+                        FT_UInt  idx )
+d275 1
+a275 2
+  t1_cmap_unicode_init( PS_Unicodes  unicodes,
+                        FT_Pointer   pointer )
+a280 2
+    FT_UNUSED( pointer );
+
+d284 2
+a285 2
+                                   (FT_UInt)face->type1.num_glyphs,
+                                   (PS_GetGlyphNameFunc)&psaux_get_glyph_name,
+d332 6
+a337 10
+    (FT_CMap_InitFunc)     t1_cmap_unicode_init,        /* init       */
+    (FT_CMap_DoneFunc)     t1_cmap_unicode_done,        /* done       */
+    (FT_CMap_CharIndexFunc)t1_cmap_unicode_char_index,  /* char_index */
+    (FT_CMap_CharNextFunc) t1_cmap_unicode_char_next,   /* char_next  */
+
+    (FT_CMap_CharVarIndexFunc)    NULL,  /* char_var_index   */
+    (FT_CMap_CharVarIsDefaultFunc)NULL,  /* char_var_default */
+    (FT_CMap_VariantListFunc)     NULL,  /* variant_list     */
+    (FT_CMap_CharVariantListFunc) NULL,  /* charvariant_list */
+    (FT_CMap_VariantCharListFunc) NULL   /* variantchar_list */
+@
+
+
+1.1.103.1
+log
+@Import XFree86 4.5.0 directly from vendor anoncvs, -rxf-4_5_0 xc
+at anoncvs@@anoncvs.xfree86.org:/cvs (ssh)
+@
+text
+@@

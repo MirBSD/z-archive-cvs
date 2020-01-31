@@ -1,0 +1,785 @@
+head	1.6;
+access;
+symbols
+	freetype-2_7_1:1.1.115.3
+	freetype-2_3_12:1.1.115.2
+	freetype-2_3_6:1.1.1.2
+	MIRBSD_10_BASE:1.2
+	freetype-2_3_5:1.1.1.1
+	freetype-2_2_1:1.1.115.1
+	freetype:1.1.115;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2017.04.15.19.21.47;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	10058F2723111C7BEE2;
+
+1.5
+date	2013.08.06.20.16.15;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100520159A36461EFAD;
+
+1.4
+date	2013.08.06.19.48.02;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	100520152445E05B912;
+
+1.3
+date	2008.06.12.20.54.40;	author bsiegert;	state Exp;
+branches;
+next	1.2;
+commitid	10048518C1E44F62885;
+
+1.2
+date	2008.02.26.20.05.00;	author bsiegert;	state Exp;
+branches;
+next	1.1;
+commitid	10047C470A72A1E13CE;
+
+1.1
+date	2006.06.29.18.37.51;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.115.1;
+next	;
+commitid	10044A41DBD6368BED5;
+
+1.1.1.1
+date	2008.02.26.19.52.26;	author bsiegert;	state Exp;
+branches;
+next	1.1.1.2;
+commitid	10047C46DB5081DCD79;
+
+1.1.1.2
+date	2008.06.12.20.37.29;	author bsiegert;	state Exp;
+branches;
+next	;
+commitid	1004851887B4E012E38;
+
+1.1.115.1
+date	2006.06.29.18.37.51;	author tg;	state Exp;
+branches;
+next	1.1.115.2;
+commitid	10044A41DBD6368BED5;
+
+1.1.115.2
+date	2013.08.06.19.12.23;	author tg;	state Exp;
+branches;
+next	1.1.115.3;
+commitid	10052014A9975CEFD1D;
+
+1.1.115.3
+date	2017.04.15.15.42.07;	author tg;	state Exp;
+branches;
+next	;
+commitid	10058F23F4858079E1C;
+
+
+desc
+@@
+
+
+1.6
+log
+@first cut at a quickmerge
+@
+text
+@/* $MirOS: X11/xc/extras/freetype2/src/otvalid/otvmod.c,v 1.5 2013/08/06 20:16:15 tg Exp $ */
+
+/***************************************************************************/
+/*                                                                         */
+/*  otvmod.c                                                               */
+/*                                                                         */
+/*    FreeType's OpenType validation module implementation (body).         */
+/*                                                                         */
+/*  Copyright 2004-2016 by                                                 */
+/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
+/*                                                                         */
+/*  This file is part of the FreeType project, and may only be used,       */
+/*  modified, and distributed under the terms of the FreeType project      */
+/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
+/*  this file you indicate that you have read the license and              */
+/*  understand and accept it fully.                                        */
+/*                                                                         */
+/***************************************************************************/
+
+
+#include <ft2build.h>
+#include FT_TRUETYPE_TABLES_H
+#include FT_TRUETYPE_TAGS_H
+#include FT_OPENTYPE_VALIDATE_H
+#include FT_INTERNAL_OBJECTS_H
+#include FT_SERVICE_OPENTYPE_VALIDATE_H
+
+#include "otvmod.h"
+#include "otvalid.h"
+#include "otvcommn.h"
+
+
+  /*************************************************************************/
+  /*                                                                       */
+  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
+  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
+  /* messages during execution.                                            */
+  /*                                                                       */
+#undef  FT_COMPONENT
+#define FT_COMPONENT  trace_otvmodule
+
+
+  static FT_Error
+  otv_load_table( FT_Face             face,
+                  FT_Tag              tag,
+                  FT_Byte* volatile*  table,
+                  FT_ULong*           table_len )
+  {
+    FT_Error   error;
+    FT_Memory  memory = FT_FACE_MEMORY( face );
+
+
+    error = FT_Load_Sfnt_Table( face, tag, 0, NULL, table_len );
+    if ( FT_ERR_EQ( error, Table_Missing ) )
+      return FT_Err_Ok;
+    if ( error )
+      goto Exit;
+
+    if ( FT_ALLOC( *table, *table_len ) )
+      goto Exit;
+
+    error = FT_Load_Sfnt_Table( face, tag, 0, *table, table_len );
+
+  Exit:
+    return error;
+  }
+
+
+  static FT_Error
+  otv_validate( FT_Face volatile   face,
+                FT_UInt            ot_flags,
+                FT_Bytes          *ot_base,
+                FT_Bytes          *ot_gdef,
+                FT_Bytes          *ot_gpos,
+                FT_Bytes          *ot_gsub,
+                FT_Bytes          *ot_jstf )
+  {
+    FT_Error                  error = FT_Err_Ok;
+    FT_Byte* volatile         base;
+    FT_Byte* volatile         gdef;
+    FT_Byte* volatile         gpos;
+    FT_Byte* volatile         gsub;
+    FT_Byte* volatile         jstf;
+    FT_Byte* volatile         math;
+    FT_ULong                  len_base, len_gdef, len_gpos, len_gsub, len_jstf;
+    FT_ULong                  len_math;
+    FT_UInt  volatile         num_glyphs = (FT_UInt)face->num_glyphs;
+    FT_ValidatorRec volatile  valid;
+
+
+    base     = gdef     = gpos     = gsub     = jstf     = math     = NULL;
+    len_base = len_gdef = len_gpos = len_gsub = len_jstf = len_math = 0;
+
+    /*
+     * XXX: OpenType tables cannot handle 32-bit glyph index,
+     *      although broken TrueType can have 32-bit glyph index.
+     */
+    if ( face->num_glyphs > 0xFFFFL )
+    {
+      FT_TRACE1(( "otv_validate: Invalid glyphs index (0x0000FFFF - 0x%08x) ",
+                  face->num_glyphs ));
+      FT_TRACE1(( "are not handled by OpenType tables\n" ));
+      num_glyphs = 0xFFFF;
+    }
+
+    /* load tables */
+
+    if ( ot_flags & FT_VALIDATE_BASE )
+    {
+      error = otv_load_table( face, TTAG_BASE, &base, &len_base );
+      if ( error )
+        goto Exit;
+    }
+
+    if ( ot_flags & FT_VALIDATE_GDEF )
+    {
+      error = otv_load_table( face, TTAG_GDEF, &gdef, &len_gdef );
+      if ( error )
+        goto Exit;
+    }
+
+    if ( ot_flags & FT_VALIDATE_GPOS )
+    {
+      error = otv_load_table( face, TTAG_GPOS, &gpos, &len_gpos );
+      if ( error )
+        goto Exit;
+    }
+
+    if ( ot_flags & FT_VALIDATE_GSUB )
+    {
+      error = otv_load_table( face, TTAG_GSUB, &gsub, &len_gsub );
+      if ( error )
+        goto Exit;
+    }
+
+    if ( ot_flags & FT_VALIDATE_JSTF )
+    {
+      error = otv_load_table( face, TTAG_JSTF, &jstf, &len_jstf );
+      if ( error )
+        goto Exit;
+    }
+
+    if ( ot_flags & FT_VALIDATE_MATH )
+    {
+      error = otv_load_table( face, TTAG_MATH, &math, &len_math );
+      if ( error )
+        goto Exit;
+    }
+
+    /* validate tables */
+
+    if ( base )
+    {
+      ft_validator_init( &valid, base, base + len_base, FT_VALIDATE_DEFAULT );
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_BASE_validate( base, &valid );
+      error = valid.error;
+      if ( error )
+        goto Exit;
+    }
+
+    if ( gpos )
+    {
+      ft_validator_init( &valid, gpos, gpos + len_gpos, FT_VALIDATE_DEFAULT );
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_GPOS_validate( gpos, num_glyphs, &valid );
+      error = valid.error;
+      if ( error )
+        goto Exit;
+    }
+
+    if ( gsub )
+    {
+      ft_validator_init( &valid, gsub, gsub + len_gsub, FT_VALIDATE_DEFAULT );
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_GSUB_validate( gsub, num_glyphs, &valid );
+      error = valid.error;
+      if ( error )
+        goto Exit;
+    }
+
+    if ( gdef )
+    {
+      ft_validator_init( &valid, gdef, gdef + len_gdef, FT_VALIDATE_DEFAULT );
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_GDEF_validate( gdef, gsub, gpos, num_glyphs, &valid );
+      error = valid.error;
+      if ( error )
+        goto Exit;
+    }
+
+    if ( jstf )
+    {
+      ft_validator_init( &valid, jstf, jstf + len_jstf, FT_VALIDATE_DEFAULT );
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_JSTF_validate( jstf, gsub, gpos, num_glyphs, &valid );
+      error = valid.error;
+      if ( error )
+        goto Exit;
+    }
+
+    if ( math )
+    {
+      ft_validator_init( &valid, math, math + len_math, FT_VALIDATE_DEFAULT );
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_MATH_validate( math, num_glyphs, &valid );
+      error = valid.error;
+      if ( error )
+        goto Exit;
+    }
+
+    *ot_base = (FT_Bytes)base;
+    *ot_gdef = (FT_Bytes)gdef;
+    *ot_gpos = (FT_Bytes)gpos;
+    *ot_gsub = (FT_Bytes)gsub;
+    *ot_jstf = (FT_Bytes)jstf;
+
+  Exit:
+    if ( error )
+    {
+      FT_Memory  memory = FT_FACE_MEMORY( face );
+
+
+      FT_FREE( base );
+      FT_FREE( gdef );
+      FT_FREE( gpos );
+      FT_FREE( gsub );
+      FT_FREE( jstf );
+    }
+
+    {
+      FT_Memory  memory = FT_FACE_MEMORY( face );
+
+
+      FT_FREE( math );                 /* Can't return this as API is frozen */
+    }
+
+    return error;
+  }
+
+
+  static
+  const FT_Service_OTvalidateRec  otvalid_interface =
+  {
+    otv_validate        /* validate */
+  };
+
+
+  static
+  const FT_ServiceDescRec  otvalid_services[] =
+  {
+    { FT_SERVICE_ID_OPENTYPE_VALIDATE, &otvalid_interface },
+    { NULL, NULL }
+  };
+
+
+  static FT_Pointer
+  otvalid_get_service( FT_Module    module,
+                       const char*  service_id )
+  {
+    FT_UNUSED( module );
+
+    return ft_service_list_lookup( otvalid_services, service_id );
+  }
+
+
+  FT_CALLBACK_TABLE_DEF
+  const FT_Module_Class  otv_module_class =
+  {
+    0,
+    sizeof ( FT_ModuleRec ),
+    "otvalid",
+    0x10000L,
+    0x20000L,
+
+    NULL,              /* module-specific interface */
+
+    (FT_Module_Constructor)NULL,                /* module_init   */
+    (FT_Module_Destructor) NULL,                /* module_done   */
+    (FT_Module_Requester)  otvalid_get_service  /* get_interface */
+  };
+
+
+/* END */
+@
+
+
+1.5
+log
+@fix build
+@
+text
+@d1 1
+a1 1
+/* $MirOS$ */
+d9 1
+a9 1
+/*  Copyright 2004, 2005, 2006, 2007, 2008 by                              */
+d54 2
+a55 2
+    if ( error == OTV_Err_Table_Missing )
+      return OTV_Err_Ok;
+d78 1
+a78 1
+    FT_Error                  error = OTV_Err_Ok;
+d219 2
+a220 1
+    if ( error ) {
+d230 1
+d245 1
+a245 1
+    otv_validate
+d271 1
+a271 1
+    sizeof( FT_ModuleRec ),
+d276 1
+a276 1
+    0,              /* module-specific interface */
+d278 3
+a280 3
+    (FT_Module_Constructor)0,
+    (FT_Module_Destructor) 0,
+    (FT_Module_Requester)  otvalid_get_service
+@
+
+
+1.4
+log
+@fastmerge
+@
+text
+@d1 2
+d87 1
+a87 1
+    FT_UInt                   num_glyphs = (FT_UInt)face->num_glyphs;
+@
+
+
+1.3
+log
+@Merge freetype 2.3.6
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006, 2007 by                                    */
+d85 1
+d92 12
+d164 1
+a164 1
+        otv_GPOS_validate( gpos, face->num_glyphs, &valid );
+d174 1
+a174 1
+        otv_GSUB_validate( gsub, face->num_glyphs, &valid );
+d184 1
+a184 1
+        otv_GDEF_validate( gdef, gsub, gpos, &valid );
+d194 1
+a194 1
+        otv_JSTF_validate( jstf, gsub, gpos, face->num_glyphs, &valid );
+d204 1
+a204 1
+        otv_MATH_validate( math, face->num_glyphs, &valid );
+@
+
+
+1.2
+log
+@Merge freetype 2.3.5, all conflicts automatically resolved
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006 by                                          */
+d82 1
+d84 1
+d88 2
+a89 2
+    base     = gdef     = gpos     = gsub     = jstf     = NULL;
+    len_base = len_gdef = len_gpos = len_gsub = len_jstf = 0;
+d128 7
+d187 10
+d214 6
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005 by                                                */
+d42 4
+a45 4
+  otv_load_table( FT_Face    face,
+                  FT_Tag     tag,
+                  FT_Byte*  *table,
+                  FT_ULong  *table_len )
+d68 16
+a83 12
+  otv_validate( FT_Face    face,
+                FT_UInt    ot_flags,
+                FT_Bytes  *ot_base,
+                FT_Bytes  *ot_gdef,
+                FT_Bytes  *ot_gpos,
+                FT_Bytes  *ot_gsub,
+                FT_Bytes  *ot_jstf )
+  {
+    FT_Error         error = OTV_Err_Ok;
+    FT_Byte          *base, *gdef, *gpos, *gsub, *jstf;
+    FT_ULong         len_base, len_gdef, len_gpos, len_gsub, len_jstf;
+    FT_ValidatorRec  valid;
+d131 1
+a131 1
+      if ( ft_validator_run( &valid ) == 0 )
+d141 1
+a141 1
+      if ( ft_validator_run( &valid ) == 0 )
+d151 1
+a151 1
+      if ( ft_validator_run( &valid ) == 0 )
+d161 1
+a161 1
+      if ( ft_validator_run( &valid ) == 0 )
+d171 1
+a171 1
+      if ( ft_validator_run( &valid ) == 0 )
+d201 1
+a201 1
+  const FT_Service_OTvalidateRec  otvalid_interface = 
+d208 1
+a208 1
+  const FT_ServiceDescRec  otvalid_services[] = 
+@
+
+
+1.1.1.1
+log
+@Import freetype-2.3.5 into the X11 tree. This is a recommended security
+update for everyone.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006 by                                          */
+d42 4
+a45 4
+  otv_load_table( FT_Face             face,
+                  FT_Tag              tag,
+                  FT_Byte* volatile*  table,
+                  FT_ULong*           table_len )
+d68 12
+a79 16
+  otv_validate( FT_Face volatile   face,
+                FT_UInt            ot_flags,
+                FT_Bytes          *ot_base,
+                FT_Bytes          *ot_gdef,
+                FT_Bytes          *ot_gpos,
+                FT_Bytes          *ot_gsub,
+                FT_Bytes          *ot_jstf )
+  {
+    FT_Error                  error = OTV_Err_Ok;
+    FT_Byte* volatile         base;
+    FT_Byte* volatile         gdef;
+    FT_Byte* volatile         gpos;
+    FT_Byte* volatile         gsub;
+    FT_Byte* volatile         jstf;
+    FT_ULong                  len_base, len_gdef, len_gpos, len_gsub, len_jstf;
+    FT_ValidatorRec volatile  valid;
+d127 1
+a127 1
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+d137 1
+a137 1
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+d147 1
+a147 1
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+d157 1
+a157 1
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+d167 1
+a167 1
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+d197 1
+a197 1
+  const FT_Service_OTvalidateRec  otvalid_interface =
+d204 1
+a204 1
+  const FT_ServiceDescRec  otvalid_services[] =
+@
+
+
+1.1.1.2
+log
+@SECURITY: Import freetype 2.3.6. From the release notes:
+
+    - A  bunch of  potential security  problems have  been found.  All
+      users should update.
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006, 2007 by                                    */
+a81 1
+    FT_Byte* volatile         math;
+a82 1
+    FT_ULong                  len_math;
+d86 2
+a87 2
+    base     = gdef     = gpos     = gsub     = jstf     = math     = NULL;
+    len_base = len_gdef = len_gpos = len_gsub = len_jstf = len_math = 0;
+a125 7
+    if ( ot_flags & FT_VALIDATE_MATH )
+    {
+      error = otv_load_table( face, TTAG_MATH, &math, &len_math );
+      if ( error )
+        goto Exit;
+    }
+
+a177 10
+    if ( math )
+    {
+      ft_validator_init( &valid, math, math + len_math, FT_VALIDATE_DEFAULT );
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_MATH_validate( math, face->num_glyphs, &valid );
+      error = valid.error;
+      if ( error )
+        goto Exit;
+    }
+
+a194 6
+    {
+      FT_Memory  memory = FT_FACE_MEMORY( face );
+
+
+      FT_FREE( math );                 /* Can't return this as API is frozen */
+    }
+@
+
+
+1.1.115.1
+log
+@Import Freetype 2.2.1 with a bunch of security fixes
+@
+text
+@@
+
+
+1.1.115.2
+log
+@we need newer freetype for advance calculation
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004, 2005, 2006, 2007, 2008 by                              */
+d42 4
+a45 4
+  otv_load_table( FT_Face             face,
+                  FT_Tag              tag,
+                  FT_Byte* volatile*  table,
+                  FT_ULong*           table_len )
+d68 16
+a83 35
+  otv_validate( FT_Face volatile   face,
+                FT_UInt            ot_flags,
+                FT_Bytes          *ot_base,
+                FT_Bytes          *ot_gdef,
+                FT_Bytes          *ot_gpos,
+                FT_Bytes          *ot_gsub,
+                FT_Bytes          *ot_jstf )
+  {
+    FT_Error                  error = OTV_Err_Ok;
+    FT_Byte* volatile         base;
+    FT_Byte* volatile         gdef;
+    FT_Byte* volatile         gpos;
+    FT_Byte* volatile         gsub;
+    FT_Byte* volatile         jstf;
+    FT_Byte* volatile         math;
+    FT_ULong                  len_base, len_gdef, len_gpos, len_gsub, len_jstf;
+    FT_ULong                  len_math;
+    FT_UInt                   num_glyphs = (FT_UInt)face->num_glyphs;
+    FT_ValidatorRec volatile  valid;
+
+
+    base     = gdef     = gpos     = gsub     = jstf     = math     = NULL;
+    len_base = len_gdef = len_gpos = len_gsub = len_jstf = len_math = 0;
+
+    /*
+     * XXX: OpenType tables cannot handle 32-bit glyph index,
+     *      although broken TrueType can have 32-bit glyph index.
+     */
+    if ( face->num_glyphs > 0xFFFFL )
+    {
+      FT_TRACE1(( "otv_validate: Invalid glyphs index (0x0000FFFF - 0x%08x) ",
+                  face->num_glyphs ));
+      FT_TRACE1(( "are not handled by OpenType tables\n" ));
+      num_glyphs = 0xFFFF;
+    }
+a121 7
+    if ( ot_flags & FT_VALIDATE_MATH )
+    {
+      error = otv_load_table( face, TTAG_MATH, &math, &len_math );
+      if ( error )
+        goto Exit;
+    }
+
+d127 1
+a127 1
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+d137 2
+a138 2
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_GPOS_validate( gpos, num_glyphs, &valid );
+d147 2
+a148 2
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_GSUB_validate( gsub, num_glyphs, &valid );
+d157 2
+a158 2
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_GDEF_validate( gdef, gsub, gpos, num_glyphs, &valid );
+d167 2
+a168 12
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_JSTF_validate( jstf, gsub, gpos, num_glyphs, &valid );
+      error = valid.error;
+      if ( error )
+        goto Exit;
+    }
+
+    if ( math )
+    {
+      ft_validator_init( &valid, math, math + len_math, FT_VALIDATE_DEFAULT );
+      if ( ft_setjmp( valid.jump_buffer ) == 0 )
+        otv_MATH_validate( math, num_glyphs, &valid );
+a190 6
+    {
+      FT_Memory  memory = FT_FACE_MEMORY( face );
+
+
+      FT_FREE( math );                 /* Can't return this as API is frozen */
+    }
+d197 1
+a197 1
+  const FT_Service_OTvalidateRec  otvalid_interface =
+d204 1
+a204 1
+  const FT_ServiceDescRec  otvalid_services[] =
+@
+
+
+1.1.115.3
+log
+@let’s see whether we can’t update freetype2 as well…
+@
+text
+@d7 1
+a7 1
+/*  Copyright 2004-2016 by                                                 */
+d52 2
+a53 2
+    if ( FT_ERR_EQ( error, Table_Missing ) )
+      return FT_Err_Ok;
+d76 1
+a76 1
+    FT_Error                  error = FT_Err_Ok;
+d217 1
+a217 2
+    if ( error )
+    {
+a226 1
+
+d241 1
+a241 1
+    otv_validate        /* validate */
+d267 1
+a267 1
+    sizeof ( FT_ModuleRec ),
+d272 1
+a272 1
+    NULL,              /* module-specific interface */
+d274 3
+a276 3
+    (FT_Module_Constructor)NULL,                /* module_init   */
+    (FT_Module_Destructor) NULL,                /* module_done   */
+    (FT_Module_Requester)  otvalid_get_service  /* get_interface */
+@
+
+

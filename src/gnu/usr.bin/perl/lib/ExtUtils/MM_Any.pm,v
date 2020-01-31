@@ -1,0 +1,2519 @@
+head	1.1;
+branch	1.1.1;
+access;
+symbols
+	OPENBSD_4_4:1.1.1.3
+	MIRBSD_10:1.1.1.2.0.2
+	MIRBSD_10_BASE:1.1.1.2
+	cvs-200704292000:1.1.1.2
+	cvs-200606302200:1.1.1.2
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200601311430:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2005.02.05.17.23.22;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.23.22;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2006.06.30.22.41.39;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+commitid	10044A5A6F7276AA324;
+
+1.1.1.3
+date	2008.12.13.22.18.56;	author tg;	state Exp;
+branches;
+next	;
+commitid	100494434BF191CECA0;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@package ExtUtils::MM_Any;
+
+use strict;
+use vars qw($VERSION @@ISA);
+$VERSION = 0.07;
+@@ISA = qw(File::Spec);
+
+use Config;
+use File::Spec;
+
+
+=head1 NAME
+
+ExtUtils::MM_Any - Platform-agnostic MM methods
+
+=head1 SYNOPSIS
+
+  FOR INTERNAL USE ONLY!
+
+  package ExtUtils::MM_SomeOS;
+
+  # Temporarily, you have to subclass both.  Put MM_Any first.
+  require ExtUtils::MM_Any;
+  require ExtUtils::MM_Unix;
+  @@ISA = qw(ExtUtils::MM_Any ExtUtils::Unix);
+
+=head1 DESCRIPTION
+
+B<FOR INTERNAL USE ONLY!>
+
+ExtUtils::MM_Any is a superclass for the ExtUtils::MM_* set of
+modules.  It contains methods which are either inherently
+cross-platform or are written in a cross-platform manner.
+
+Subclass off of ExtUtils::MM_Any I<and> ExtUtils::MM_Unix.  This is a
+temporary solution.
+
+B<THIS MAY BE TEMPORARY!>
+
+=head1 Inherently Cross-Platform Methods
+
+These are methods which are by their nature cross-platform and should
+always be cross-platform.
+
+=over 4
+
+=item installvars
+
+    my @@installvars = $mm->installvars;
+
+A list of all the INSTALL* variables without the INSTALL prefix.  Useful
+for iteration or building related variable sets.
+
+=cut
+
+sub installvars {
+    return qw(PRIVLIB SITELIB  VENDORLIB
+              ARCHLIB SITEARCH VENDORARCH
+              BIN     SITEBIN  VENDORBIN
+              SCRIPT
+              MAN1DIR SITEMAN1DIR VENDORMAN1DIR
+              MAN3DIR SITEMAN3DIR VENDORMAN3DIR
+             );
+}
+
+=item os_flavor_is
+
+    $mm->os_flavor_is($this_flavor);
+    $mm->os_flavor_is(@@one_of_these_flavors);
+
+Checks to see if the current operating system is one of the given flavors.
+
+This is useful for code like:
+
+    if( $mm->os_flavor_is('Unix') ) {
+        $out = `foo 2>&1`;
+    }
+    else {
+        $out = `foo`;
+    }
+
+=cut
+
+sub os_flavor_is {
+    my $self = shift;
+    my %flavors = map { ($_ => 1) } $self->os_flavor;
+    return (grep { $flavors{$_} } @@_) ? 1 : 0;
+}
+
+=back
+
+=head2 File::Spec wrappers
+
+ExtUtils::MM_Any is a subclass of File::Spec.  The methods noted here
+override File::Spec.
+
+=over 4
+
+=item catfile
+
+File::Spec <= 0.83 has a bug where the file part of catfile is not
+canonicalized.  This override fixes that bug.
+
+=cut
+
+sub catfile {
+    my $self = shift;
+    return $self->canonpath($self->SUPER::catfile(@@_));
+}
+
+=back
+
+=head1 Thought To Be Cross-Platform Methods
+
+These are methods which are thought to be cross-platform by virtue of
+having been written in a way to avoid incompatibilities.  They may
+require partial overrides.
+
+=over 4
+
+=item B<split_command>
+
+    my @@cmds = $MM->split_command($cmd, @@args);
+
+Most OS have a maximum command length they can execute at once.  Large
+modules can easily generate commands well past that limit.  Its
+necessary to split long commands up into a series of shorter commands.
+
+split_command() will return a series of @@cmds each processing part of
+the args.  Collectively they will process all the arguments.  Each
+individual line in @@cmds will not be longer than the
+$self->max_exec_len being careful to take into account macro expansion.
+
+$cmd should include any switches and repeated initial arguments.
+
+If no @@args are given, no @@cmds will be returned.
+
+Pairs of arguments will always be preserved in a single command, this
+is a heuristic for things like pm_to_blib and pod2man which work on
+pairs of arguments.  This makes things like this safe:
+
+    $self->split_command($cmd, %pod2man);
+
+
+=cut
+
+sub split_command {
+    my($self, $cmd, @@args) = @@_;
+
+    my @@cmds = ();
+    return(@@cmds) unless @@args;
+
+    # If the command was given as a here-doc, there's probably a trailing
+    # newline.
+    chomp $cmd;
+
+    # set aside 20% for macro expansion.
+    my $len_left = int($self->max_exec_len * 0.80);
+    $len_left -= length $self->_expand_macros($cmd);
+
+    do {
+        my $arg_str = '';
+        my @@next_args;
+        while( @@next_args = splice(@@args, 0, 2) ) {
+            # Two at a time to preserve pairs.
+            my $next_arg_str = "\t  ". join ' ', @@next_args, "\n";
+
+            if( !length $arg_str ) {
+                $arg_str .= $next_arg_str
+            }
+            elsif( length($arg_str) + length($next_arg_str) > $len_left ) {
+                unshift @@args, @@next_args;
+                last;
+            }
+            else {
+                $arg_str .= $next_arg_str;
+            }
+        }
+        chop $arg_str;
+
+        push @@cmds, $self->escape_newlines("$cmd\n$arg_str");
+    } while @@args;
+
+    return @@cmds;
+}
+
+
+sub _expand_macros {
+    my($self, $cmd) = @@_;
+
+    $cmd =~ s{\$\((\w+)\)}{
+        defined $self->{$1} ? $self->{$1} : "\$($1)"
+    }e;
+    return $cmd;
+}
+
+
+=item B<echo>
+
+    my @@commands = $MM->echo($text);
+    my @@commands = $MM->echo($text, $file);
+    my @@commands = $MM->echo($text, $file, $appending);
+
+Generates a set of @@commands which print the $text to a $file.
+
+If $file is not given, output goes to STDOUT.
+
+If $appending is true the $file will be appended to rather than
+overwritten.
+
+=cut
+
+sub echo {
+    my($self, $text, $file, $appending) = @@_;
+    $appending ||= 0;
+
+    my @@cmds = map { '$(NOECHO) $(ECHO) '.$self->quote_literal($_) } 
+               split /\n/, $text;
+    if( $file ) {
+        my $redirect = $appending ? '>>' : '>';
+        $cmds[0] .= " $redirect $file";
+        $_ .= " >> $file" foreach @@cmds[1..$#cmds];
+    }
+
+    return @@cmds;
+}
+
+
+=item init_VERSION
+
+    $mm->init_VERSION
+
+Initialize macros representing versions of MakeMaker and other tools
+
+MAKEMAKER: path to the MakeMaker module.
+
+MM_VERSION: ExtUtils::MakeMaker Version
+
+MM_REVISION: ExtUtils::MakeMaker version control revision (for backwards 
+             compat)
+
+VERSION: version of your module
+
+VERSION_MACRO: which macro represents the version (usually 'VERSION')
+
+VERSION_SYM: like version but safe for use as an RCS revision number
+
+DEFINE_VERSION: -D line to set the module version when compiling
+
+XS_VERSION: version in your .xs file.  Defaults to $(VERSION)
+
+XS_VERSION_MACRO: which macro represents the XS version.
+
+XS_DEFINE_VERSION: -D line to set the xs version when compiling.
+
+Called by init_main.
+
+=cut
+
+sub init_VERSION {
+    my($self) = shift;
+
+    $self->{MAKEMAKER}  = $ExtUtils::MakeMaker::Filename;
+    $self->{MM_VERSION} = $ExtUtils::MakeMaker::VERSION;
+    $self->{MM_REVISION}= $ExtUtils::MakeMaker::Revision;
+    $self->{VERSION_FROM} ||= '';
+
+    if ($self->{VERSION_FROM}){
+        $self->{VERSION} = $self->parse_version($self->{VERSION_FROM});
+        if( $self->{VERSION} eq 'undef' ) {
+            require Carp;
+            Carp::carp("WARNING: Setting VERSION via file ".
+                       "'$self->{VERSION_FROM}' failed\n");
+        }
+    }
+
+    # strip blanks
+    if (defined $self->{VERSION}) {
+        $self->{VERSION} =~ s/^\s+//;
+        $self->{VERSION} =~ s/\s+$//;
+    }
+    else {
+        $self->{VERSION} = '';
+    }
+
+
+    $self->{VERSION_MACRO}  = 'VERSION';
+    ($self->{VERSION_SYM} = $self->{VERSION}) =~ s/\W/_/g;
+    $self->{DEFINE_VERSION} = '-D$(VERSION_MACRO)=\"$(VERSION)\"';
+
+
+    # Graham Barr and Paul Marquess had some ideas how to ensure
+    # version compatibility between the *.pm file and the
+    # corresponding *.xs file. The bottomline was, that we need an
+    # XS_VERSION macro that defaults to VERSION:
+    $self->{XS_VERSION} ||= $self->{VERSION};
+
+    $self->{XS_VERSION_MACRO}  = 'XS_VERSION';
+    $self->{XS_DEFINE_VERSION} = '-D$(XS_VERSION_MACRO)=\"$(XS_VERSION)\"';
+
+}
+
+=item wraplist
+
+Takes an array of items and turns them into a well-formatted list of
+arguments.  In most cases this is simply something like:
+
+    FOO \
+    BAR \
+    BAZ
+
+=cut
+
+sub wraplist {
+    my $self = shift;
+    return join " \\\n\t", @@_;
+}
+
+=item manifypods
+
+Defines targets and routines to translate the pods into manpages and
+put them into the INST_* directories.
+
+=cut
+
+sub manifypods {
+    my $self          = shift;
+
+    my $POD2MAN_macro = $self->POD2MAN_macro();
+    my $manifypods_target = $self->manifypods_target();
+
+    return <<END_OF_TARGET;
+
+$POD2MAN_macro
+
+$manifypods_target
+
+END_OF_TARGET
+
+}
+
+
+=item manifypods_target
+
+  my $manifypods_target = $self->manifypods_target;
+
+Generates the manifypods target.  This target generates man pages from
+all POD files in MAN1PODS and MAN3PODS.
+
+=cut
+
+sub manifypods_target {
+    my($self) = shift;
+
+    my $man1pods      = '';
+    my $man3pods      = '';
+    my $dependencies  = '';
+
+    # populate manXpods & dependencies:
+    foreach my $name (keys %{$self->{MAN1PODS}}, keys %{$self->{MAN3PODS}}) {
+        $dependencies .= " \\\n\t$name";
+    }
+
+    foreach my $name (keys %{$self->{MAN3PODS}}) {
+        $dependencies .= " \\\n\t$name"
+    }
+
+    my $manify = <<END;
+manifypods : pure_all $dependencies
+END
+
+    my @@man_cmds;
+    foreach my $section (qw(1 3)) {
+        my $pods = $self->{"MAN${section}PODS"};
+        push @@man_cmds, $self->split_command(<<CMD, %$pods);
+	\$(NOECHO) \$(POD2MAN) --section=$section --perm_rw=\$(PERM_RW)
+CMD
+    }
+
+    $manify .= "\t\$(NOECHO) \$(NOOP)\n" unless @@man_cmds;
+    $manify .= join '', map { "$_\n" } @@man_cmds;
+
+    return $manify;
+}
+
+
+=item makemakerdflt_target
+
+  my $make_frag = $mm->makemakerdflt_target
+
+Returns a make fragment with the makemakerdeflt_target specified.
+This target is the first target in the Makefile, is the default target
+and simply points off to 'all' just in case any make variant gets
+confused or something gets snuck in before the real 'all' target.
+
+=cut
+
+sub makemakerdflt_target {
+    return <<'MAKE_FRAG';
+makemakerdflt: all
+	$(NOECHO) $(NOOP)
+MAKE_FRAG
+
+}
+
+
+=item special_targets
+
+  my $make_frag = $mm->special_targets
+
+Returns a make fragment containing any targets which have special
+meaning to make.  For example, .SUFFIXES and .PHONY.
+
+=cut
+
+sub special_targets {
+    my $make_frag = <<'MAKE_FRAG';
+.SUFFIXES: .xs .c .C .cpp .i .s .cxx .cc $(OBJ_EXT)
+
+.PHONY: all config static dynamic test linkext manifest
+
+MAKE_FRAG
+
+    $make_frag .= <<'MAKE_FRAG' if $ENV{CLEARCASE_ROOT};
+.NO_CONFIG_REC: Makefile
+
+MAKE_FRAG
+
+    return $make_frag;
+}
+
+=item POD2MAN_macro
+
+  my $pod2man_macro = $self->POD2MAN_macro
+
+Returns a definition for the POD2MAN macro.  This is a program
+which emulates the pod2man utility.  You can add more switches to the
+command by simply appending them on the macro.
+
+Typical usage:
+
+    $(POD2MAN) --section=3 --perm_rw=$(PERM_RW) podfile1 man_page1 ...
+
+=cut
+
+sub POD2MAN_macro {
+    my $self = shift;
+
+# Need the trailing '--' so perl stops gobbling arguments and - happens
+# to be an alternative end of line seperator on VMS so we quote it
+    return <<'END_OF_DEF';
+POD2MAN_EXE = $(PERLRUN) "-MExtUtils::Command::MM" -e pod2man "--"
+POD2MAN = $(POD2MAN_EXE)
+END_OF_DEF
+}
+
+
+=item test_via_harness
+
+  my $command = $mm->test_via_harness($perl, $tests);
+
+Returns a $command line which runs the given set of $tests with
+Test::Harness and the given $perl.
+
+Used on the t/*.t files.
+
+=cut
+
+sub test_via_harness {
+    my($self, $perl, $tests) = @@_;
+
+    return qq{\t$perl "-MExtUtils::Command::MM" }.
+           qq{"-e" "test_harness(\$(TEST_VERBOSE), '\$(INST_LIB)', '\$(INST_ARCHLIB)')" $tests\n};
+}
+
+=item test_via_script
+
+  my $command = $mm->test_via_script($perl, $script);
+
+Returns a $command line which just runs a single test without
+Test::Harness.  No checks are done on the results, they're just
+printed.
+
+Used for test.pl, since they don't always follow Test::Harness
+formatting.
+
+=cut
+
+sub test_via_script {
+    my($self, $perl, $script) = @@_;
+    return qq{\t$perl "-I\$(INST_LIB)" "-I\$(INST_ARCHLIB)" $script\n};
+}
+
+=item libscan
+
+  my $wanted = $self->libscan($path);
+
+Takes a path to a file or dir and returns an empty string if we don't
+want to include this file in the library.  Otherwise it returns the
+the $path unchanged.
+
+Mainly used to exclude RCS, CVS, and SCCS directories from
+installation.
+
+=cut
+
+sub libscan {
+    my($self,$path) = @@_;
+    my($dirs,$file) = ($self->splitpath($path))[1,2];
+    return '' if grep /^(?:RCS|CVS|SCCS|\.svn)$/, 
+                     $self->splitdir($dirs), $file;
+
+    return $path;
+}
+
+=item tool_autosplit
+
+Defines a simple perl call that runs autosplit. May be deprecated by
+pm_to_blib soon.
+
+=cut
+
+sub tool_autosplit {
+    my($self, %attribs) = @@_;
+
+    my $maxlen = $attribs{MAXLEN} ? '$$AutoSplit::Maxlen=$attribs{MAXLEN};' 
+                                  : '';
+
+    my $asplit = $self->oneliner(sprintf <<'PERL_CODE', $maxlen);
+use AutoSplit; %s autosplit($$ARGV[0], $$ARGV[1], 0, 1, 1)
+PERL_CODE
+
+    return sprintf <<'MAKE_FRAG', $asplit;
+# Usage: $(AUTOSPLITFILE) FileToSplit AutoDirToSplitInto
+AUTOSPLITFILE = %s
+
+MAKE_FRAG
+
+}
+
+
+=item all_target
+
+Generate the default target 'all'.
+
+=cut
+
+sub all_target {
+    my $self = shift;
+
+    return <<'MAKE_EXT';
+all :: pure_all
+	$(NOECHO) $(NOOP)
+MAKE_EXT
+
+}
+
+
+=item metafile_target
+
+    my $target = $mm->metafile_target;
+
+Generate the metafile target.
+
+Writes the file META.yml, YAML encoded meta-data about the module.  The
+format follows Module::Build's as closely as possible.  Additionally, we
+include:
+
+    version_from
+    installdirs
+
+=cut
+
+sub metafile_target {
+    my $self = shift;
+
+    return <<'MAKE_FRAG' if $self->{NO_META};
+metafile:
+	$(NOECHO) $(NOOP)
+MAKE_FRAG
+
+    my $prereq_pm = '';
+    foreach my $mod ( sort { lc $a cmp lc $b } keys %{$self->{PREREQ_PM}} ) {
+        my $ver = $self->{PREREQ_PM}{$mod};
+        $prereq_pm .= sprintf "    %-30s %s\n", "$mod:", $ver;
+    }
+    
+    my $meta = <<YAML;
+# http://module-build.sourceforge.net/META-spec.html
+#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
+name:         $self->{DISTNAME}
+version:      $self->{VERSION}
+version_from: $self->{VERSION_FROM}
+installdirs:  $self->{INSTALLDIRS}
+requires:
+$prereq_pm
+distribution_type: module
+generated_by: ExtUtils::MakeMaker version $ExtUtils::MakeMaker::VERSION
+YAML
+
+    my @@write_meta = $self->echo($meta, 'META.yml');
+    return sprintf <<'MAKE_FRAG', join "\n\t", @@write_meta;
+metafile :
+	%s
+MAKE_FRAG
+
+}
+
+
+=item metafile_addtomanifest_target
+
+  my $target = $mm->metafile_addtomanifest_target
+
+Adds the META.yml file to the MANIFEST.
+
+=cut
+
+sub metafile_addtomanifest_target {
+    my $self = shift;
+
+    return <<'MAKE_FRAG' if $self->{NO_META};
+metafile_addtomanifest:
+	$(NOECHO) $(NOOP)
+MAKE_FRAG
+
+    my $add_meta = $self->oneliner(<<'CODE', ['-MExtUtils::Manifest=maniadd']);
+eval { maniadd({q{META.yml} => q{Module meta-data (added by MakeMaker)}}) } 
+    or print "Could not add META.yml to MANIFEST: $${'@@'}\n"
+CODE
+
+    return sprintf <<'MAKE_FRAG', $add_meta;
+metafile_addtomanifest:
+	$(NOECHO) %s
+MAKE_FRAG
+
+}
+
+
+=back
+
+=head2 Abstract methods
+
+Methods which cannot be made cross-platform and each subclass will
+have to do their own implementation.
+
+=over 4
+
+=item oneliner
+
+  my $oneliner = $MM->oneliner($perl_code);
+  my $oneliner = $MM->oneliner($perl_code, \@@switches);
+
+This will generate a perl one-liner safe for the particular platform
+you're on based on the given $perl_code and @@switches (a -e is
+assumed) suitable for using in a make target.  It will use the proper
+shell quoting and escapes.
+
+$(PERLRUN) will be used as perl.
+
+Any newlines in $perl_code will be escaped.  Leading and trailing
+newlines will be stripped.  Makes this idiom much easier:
+
+    my $code = $MM->oneliner(<<'CODE', [...switches...]);
+some code here
+another line here
+CODE
+
+Usage might be something like:
+
+    # an echo emulation
+    $oneliner = $MM->oneliner('print "Foo\n"');
+    $make = '$oneliner > somefile';
+
+All dollar signs must be doubled in the $perl_code if you expect them
+to be interpreted normally, otherwise it will be considered a make
+macro.  Also remember to quote make macros else it might be used as a
+bareword.  For example:
+
+    # Assign the value of the $(VERSION_FROM) make macro to $vf.
+    $oneliner = $MM->oneliner('$$vf = "$(VERSION_FROM)"');
+
+Its currently very simple and may be expanded sometime in the figure
+to include more flexible code and switches.
+
+
+=item B<quote_literal>
+
+    my $safe_text = $MM->quote_literal($text);
+
+This will quote $text so it is interpreted literally in the shell.
+
+For example, on Unix this would escape any single-quotes in $text and
+put single-quotes around the whole thing.
+
+
+=item B<escape_newlines>
+
+    my $escaped_text = $MM->escape_newlines($text);
+
+Shell escapes newlines in $text.
+
+
+=item max_exec_len
+
+    my $max_exec_len = $MM->max_exec_len;
+
+Calculates the maximum command size the OS can exec.  Effectively,
+this is the max size of a shell command line.
+
+=for _private
+$self->{_MAX_EXEC_LEN} is set by this method, but only for testing purposes.
+
+=item B<init_others>
+
+    $MM->init_others();
+
+Initializes the macro definitions used by tools_other() and places them
+in the $MM object.
+
+If there is no description, its the same as the parameter to
+WriteMakefile() documented in ExtUtils::MakeMaker.
+
+Defines at least these macros.
+
+  Macro             Description
+
+  NOOP              Do nothing
+  NOECHO            Tell make not to display the command itself
+
+  MAKEFILE
+  FIRST_MAKEFILE
+  MAKEFILE_OLD
+  MAKE_APERL_FILE   File used by MAKE_APERL
+
+  SHELL             Program used to run
+                    shell commands
+
+  ECHO              Print text adding a newline on the end
+  RM_F              Remove a file 
+  RM_RF             Remove a directory          
+  TOUCH             Update a file's timestamp   
+  TEST_F            Test for a file's existence 
+  CP                Copy a file                 
+  MV                Move a file                 
+  CHMOD             Change permissions on a     
+                    file
+
+  UMASK_NULL        Nullify umask
+  DEV_NULL          Supress all command output
+
+=item init_DIRFILESEP
+
+  $MM->init_DIRFILESEP;
+  my $dirfilesep = $MM->{DIRFILESEP};
+
+Initializes the DIRFILESEP macro which is the seperator between the
+directory and filename in a filepath.  ie. / on Unix, \ on Win32 and
+nothing on VMS.
+
+For example:
+
+    # instead of $(INST_ARCHAUTODIR)/extralibs.ld
+    $(INST_ARCHAUTODIR)$(DIRFILESEP)extralibs.ld
+
+Something of a hack but it prevents a lot of code duplication between
+MM_* variants.
+
+Do not use this as a seperator between directories.  Some operating
+systems use different seperators between subdirectories as between
+directories and filenames (for example:  VOLUME:[dir1.dir2]file on VMS).
+
+=item init_linker
+
+    $mm->init_linker;
+
+Initialize macros which have to do with linking.
+
+PERL_ARCHIVE: path to libperl.a equivalent to be linked to dynamic
+extensions.
+
+PERL_ARCHIVE_AFTER: path to a library which should be put on the
+linker command line I<after> the external libraries to be linked to
+dynamic extensions.  This may be needed if the linker is one-pass, and
+Perl includes some overrides for C RTL functions, such as malloc().
+
+EXPORT_LIST: name of a file that is passed to linker to define symbols
+to be exported.
+
+Some OSes do not need these in which case leave it blank.
+
+
+=item init_platform
+
+    $mm->init_platform
+
+Initialize any macros which are for platform specific use only.
+
+A typical one is the version number of your OS specific mocule.
+(ie. MM_Unix_VERSION or MM_VMS_VERSION).
+
+=item platform_constants
+
+    my $make_frag = $mm->platform_constants
+
+Returns a make fragment defining all the macros initialized in
+init_platform() rather than put them in constants().
+
+=cut
+
+sub init_platform {
+    return '';
+}
+
+sub platform_constants {
+    return '';
+}
+
+=item os_flavor
+
+    my @@os_flavor = $mm->os_flavor;
+
+@@os_flavor is the style of operating system this is, usually
+corresponding to the MM_*.pm file we're using.  
+
+The first element of @@os_flavor is the major family (ie. Unix,
+Windows, VMS, OS/2, MacOS, etc...) and the rest are sub families.
+
+Some examples:
+
+    Cygwin98       ('Unix',  'Cygwin', 'Cygwin9x')
+    Windows NT     ('Win32', 'WinNT')
+    Win98          ('Win32', 'Win9x')
+    Linux          ('Unix',  'Linux')
+    MacOS Classic  ('MacOS', 'MacOS Classic')
+    MacOS X        ('Unix',  'Darwin', 'MacOS', 'MacOS X')
+    OS/2           ('OS/2')
+
+This is used to write code for styles of operating system.  
+See os_flavor_is() for use.
+
+
+=back
+
+=head1 AUTHOR
+
+Michael G Schwern <schwern@@pobox.com> and the denizens of
+makemaker@@perl.org with code from ExtUtils::MM_Unix and
+ExtUtils::MM_Win32.
+
+
+=cut
+
+1;
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@Import Perl 5.8.8 from OpenLSD
+@
+text
+@d5 2
+a6 1
+$VERSION = '0.13';
+d8 1
+a9 13
+BEGIN { @@ISA = qw(File::Spec); }
+
+# We need $Verbose
+use ExtUtils::MakeMaker qw($Verbose);
+
+use ExtUtils::MakeMaker::Config;
+
+
+# So we don't have to keep calling the methods over and over again,
+# we have these globals to cache the values.  Faster and shrtr.
+my $Curdir  = __PACKAGE__->curdir;
+my $Rootdir = __PACKAGE__->rootdir;
+my $Updir   = __PACKAGE__->updir;
+d40 1
+d42 2
+a43 1
+=head1 METHODS
+d45 1
+a45 1
+Any methods marked I<Abstract> must be implemented by subclasses.
+d47 1
+d49 1
+a49 1
+=head2 Cross-platform helper methods
+d51 2
+a52 1
+These are methods which help writing cross-platform code.
+d54 1
+d56 9
+d66 1
+a66 24
+=head3 os_flavor  I<Abstract>
+
+    my @@os_flavor = $mm->os_flavor;
+
+@@os_flavor is the style of operating system this is, usually
+corresponding to the MM_*.pm file we're using.  
+
+The first element of @@os_flavor is the major family (ie. Unix,
+Windows, VMS, OS/2, etc...) and the rest are sub families.
+
+Some examples:
+
+    Cygwin98       ('Unix',  'Cygwin', 'Cygwin9x')
+    Windows NT     ('Win32', 'WinNT')
+    Win98          ('Win32', 'Win9x')
+    Linux          ('Unix',  'Linux')
+    MacOS X        ('Unix',  'Darwin', 'MacOS', 'MacOS X')
+    OS/2           ('OS/2')
+
+This is used to write code for styles of operating system.  
+See os_flavor_is() for use.
+
+
+=head3 os_flavor_is
+d68 2
+a69 2
+    my $is_this_flavor = $mm->os_flavor_is($this_flavor);
+    my $is_this_flavor = $mm->os_flavor_is(@@one_of_these_flavors);
+d90 22
+d113 9
+a121 1
+=head3 split_command
+d129 1
+a129 1
+C<split_command> will return a series of @@cmds each processing part of
+d181 1
+a181 1
+        push @@cmds, $self->escape_newlines("$cmd \n$arg_str");
+d198 1
+a198 1
+=head3 echo
+d229 1
+a229 1
+=head3 wraplist
+d231 1
+a231 1
+  my $args = $mm->wraplist(@@list);
+d233 1
+a233 2
+Takes an array of items and turns them into a well-formatted list of
+arguments.  In most cases this is simply something like:
+d235 1
+a235 3
+    FOO \
+    BAR \
+    BAZ
+d237 1
+a237 1
+=cut
+d239 2
+a240 4
+sub wraplist {
+    my $self = shift;
+    return join " \\\n\t", @@_;
+}
+d242 1
+d244 1
+a244 1
+=head3 cd  I<Abstract>
+d246 1
+a246 1
+  my $subdir_cmd = $MM->cd($subdir, @@cmds);
+d248 1
+a248 2
+This will generate a make fragment which runs the @@cmds in the given
+$dir.  The rough equivalent to this, except cross platform.
+d250 1
+a250 1
+  cd $subdir && $cmd
+d252 1
+a252 2
+Currently $dir can only go down one level.  "foo" is fine.  "foo/bar" is
+not.  "../foo" is right out.
+d254 1
+a254 2
+The resulting $subdir_cmd has no leading tab nor trailing newline.  This
+makes it easier to embed in a make string.  For example.
+d256 1
+a256 6
+      my $make = sprintf <<'CODE', $subdir_cmd;
+  foo :
+      $(ECHO) what
+      %s
+      $(ECHO) mouche
+  CODE
+d258 1
+d260 2
+a261 1
+=head3 oneliner  I<Abstract>
+d263 4
+a266 2
+  my $oneliner = $MM->oneliner($perl_code);
+  my $oneliner = $MM->oneliner($perl_code, \@@switches);
+d268 8
+a275 4
+This will generate a perl one-liner safe for the particular platform
+you're on based on the given $perl_code and @@switches (a -e is
+assumed) suitable for using in a make target.  It will use the proper
+shell quoting and escapes.
+d277 8
+a284 1
+$(PERLRUN) will be used as perl.
+a285 2
+Any newlines in $perl_code will be escaped.  Leading and trailing
+newlines will be stripped.  Makes this idiom much easier:
+d287 3
+a289 4
+    my $code = $MM->oneliner(<<'CODE', [...switches...]);
+some code here
+another line here
+CODE
+a290 1
+Usage might be something like:
+d292 5
+a296 3
+    # an echo emulation
+    $oneliner = $MM->oneliner('print "Foo\n"');
+    $make = '$oneliner > somefile';
+d298 2
+a299 4
+All dollar signs must be doubled in the $perl_code if you expect them
+to be interpreted normally, otherwise it will be considered a make
+macro.  Also remember to quote make macros else it might be used as a
+bareword.  For example:
+d301 1
+a301 2
+    # Assign the value of the $(VERSION_FROM) make macro to $vf.
+    $oneliner = $MM->oneliner('$$vf = "$(VERSION_FROM)"');
+d303 1
+a303 2
+Its currently very simple and may be expanded sometime in the figure
+to include more flexible code and switches.
+d305 2
+d308 3
+a310 1
+=head3 quote_literal  I<Abstract>
+d312 1
+a312 1
+    my $safe_text = $MM->quote_literal($text);
+d314 4
+a317 1
+This will quote $text so it is interpreted literally in the shell.
+d319 1
+a319 2
+For example, on Unix this would escape any single-quotes in $text and
+put single-quotes around the whole thing.
+d321 2
+d324 1
+a324 1
+=head3 escape_newlines  I<Abstract>
+d326 2
+a327 1
+    my $escaped_text = $MM->escape_newlines($text);
+d329 2
+a330 1
+Shell escapes newlines in $text.
+d332 1
+d334 1
+a334 1
+=head3 max_exec_len  I<Abstract>
+d336 1
+a336 1
+    my $max_exec_len = $MM->max_exec_len;
+d338 1
+a338 2
+Calculates the maximum command size the OS can exec.  Effectively,
+this is the max size of a shell command line.
+d340 1
+a340 2
+=for _private
+$self->{_MAX_EXEC_LEN} is set by this method, but only for testing purposes.
+d343 1
+d345 1
+d347 2
+d350 1
+a350 1
+=head2 Targets
+d352 2
+a353 1
+These are methods which produce make targets.
+d355 3
+d359 4
+a362 1
+=head3 all_target
+d364 3
+a366 1
+Generate the default target 'all'.
+d368 3
+a370 1
+=cut
+d372 7
+a378 2
+sub all_target {
+    my $self = shift;
+d380 2
+a381 4
+    return <<'MAKE_EXT';
+all :: pure_all
+	$(NOECHO) $(NOOP)
+MAKE_EXT
+d383 1
+d387 1
+a387 1
+=head3 blibdirs_target
+d389 1
+a389 6
+    my $make_frag = $mm->blibdirs_target;
+
+Creates the blibdirs target which creates all the directories we use
+in blib/.
+
+The blibdirs.ts target is deprecated.  Depend on blibdirs instead.
+d391 4
+d398 3
+a400 13
+sub blibdirs_target {
+    my $self = shift;
+
+    my @@dirs = map { uc "\$(INST_$_)" } qw(libdir archlib
+                                           autodir archautodir
+                                           bin script
+                                           man1dir man3dir
+                                          );
+
+    my @@exists = map { $_.'$(DFSEP).exists' } @@dirs;
+
+    my $make = sprintf <<'MAKE', join(' ', @@exists);
+blibdirs : %s
+d402 1
+d404 1
+a404 3
+# Backwards compat with 6.18 through 6.25
+blibdirs.ts : blibdirs
+	$(NOECHO) $(NOOP)
+a405 1
+MAKE
+d407 1
+a407 1
+    $make .= $self->dir_target(@@dirs);
+d409 1
+a409 2
+    return $make;
+}
+d411 2
+a412 4
+
+=head3 clean (o)
+
+Defines the clean target.
+d416 3
+a418 2
+sub clean {
+# --- Cleanup and Distribution Sections ---
+d420 1
+a420 32
+    my($self, %attribs) = @@_;
+    my @@m;
+    push(@@m, '
+# Delete temporary files but do not touch installed files. We don\'t delete
+# the Makefile here so a later make realclean still has a makefile to use.
+
+clean :: clean_subdirs
+');
+
+    my @@files = values %{$self->{XS}}; # .c files from *.xs files
+    my @@dirs  = qw(blib);
+
+    # Normally these are all under blib but they might have been
+    # redefined.
+    # XXX normally this would be a good idea, but the Perl core sets
+    # INST_LIB = ../../lib rather than actually installing the files.
+    # So a "make clean" in an ext/ directory would blow away lib.
+    # Until the core is adjusted let's leave this out.
+#     push @@dirs, qw($(INST_ARCHLIB) $(INST_LIB)
+#                    $(INST_BIN) $(INST_SCRIPT)
+#                    $(INST_MAN1DIR) $(INST_MAN3DIR)
+#                    $(INST_LIBDIR) $(INST_ARCHLIBDIR) $(INST_AUTODIR) 
+#                    $(INST_STATIC) $(INST_DYNAMIC) $(INST_BOOT)
+#                 );
+                  
+
+    if( $attribs{FILES} ) {
+        # Use @@dirs because we don't know what's in here.
+        push @@dirs, ref $attribs{FILES}                ?
+                        @@{$attribs{FILES}}             :
+                        split /\s+/, $attribs{FILES}   ;
+    }
+d422 1
+a422 8
+    push(@@files, qw[$(MAKE_APERL_FILE) 
+                    perlmain.c tmon.out mon.out so_locations 
+                    blibdirs.ts pm_to_blib pm_to_blib.ts
+                    *$(OBJ_EXT) *$(LIB_EXT) perl.exe perl perl$(EXE_EXT)
+                    $(BOOTSTRAP) $(BASEEXT).bso
+                    $(BASEEXT).def lib$(BASEEXT).def
+                    $(BASEEXT).exp $(BASEEXT).x
+                   ]);
+d424 2
+a425 2
+    push(@@files, $self->catfile('$(INST_ARCHAUTODIR)','extralibs.all'));
+    push(@@files, $self->catfile('$(INST_ARCHAUTODIR)','extralibs.ld'));
+d427 1
+a427 3
+    # core files
+    push(@@files, qw[core core.*perl.*.? *perl.core]);
+    push(@@files, map { "core." . "[0-9]"x$_ } (1..5));
+d429 2
+a430 3
+    # OS specific things to clean up.  Use @@dirs since we don't know
+    # what might be in here.
+    push @@dirs, $self->extra_clean_files;
+d432 1
+a432 3
+    # Occasionally files are repeated several times from different sources
+    { my(%f) = map { ($_ => 1) } @@files; @@files = keys %f; }
+    { my(%d) = map { ($_ => 1) } @@dirs;  @@dirs  = keys %d; }
+d434 1
+a434 2
+    push @@m, map "\t$_\n", $self->split_command('- $(RM_F)',  @@files);
+    push @@m, map "\t$_\n", $self->split_command('- $(RM_RF)', @@dirs);
+d436 3
+a438 4
+    # Leave Makefile.old around for realclean
+    push @@m, <<'MAKE';
+	- $(MV) $(FIRST_MAKEFILE) $(MAKEFILE_OLD) $(DEV_NULL)
+MAKE
+d440 1
+a440 1
+    push(@@m, "\t$attribs{POSTOP}\n")   if $attribs{POSTOP};
+d442 1
+a442 2
+    join("", @@m);
+}
+d444 1
+d446 2
+a447 1
+=head3 clean_subdirs_target
+d449 7
+a455 1
+  my $make_frag = $MM->clean_subdirs_target;
+a456 2
+Returns the clean_subdirs target.  This is used by the clean target to
+call clean on any subdirectories which contain Makefiles.
+d458 1
+a458 1
+=cut
+d460 1
+a460 2
+sub clean_subdirs_target {
+    my($self) = shift;
+d462 2
+a463 5
+    # No subdirectories, no cleaning.
+    return <<'NOOP_FRAG' unless @@{$self->{DIR}};
+clean_subdirs :
+	$(NOECHO) $(NOOP)
+NOOP_FRAG
+d465 1
+d467 1
+a467 1
+    my $clean = "clean_subdirs :\n";
+d469 2
+a470 4
+    for my $dir (@@{$self->{DIR}}) {
+        my $subclean = $self->oneliner(sprintf <<'CODE', $dir);
+chdir '%s';  system '$(MAKE) clean' if -f '$(FIRST_MAKEFILE)';
+CODE
+d472 2
+a473 4
+        $clean .= "\t$subclean\n";
+    }
+
+    return $clean;
+d476 1
+d478 1
+a478 1
+=head3 dir_target
+d480 3
+a482 1
+    my $make_frag = $mm->dir_target(@@directories);
+d484 2
+a485 10
+Generates targets to create the specified directories and set its
+permission to 0755.
+
+Because depending on a directory to just ensure it exists doesn't work
+too well (the modified time changes too often) dir_target() creates a
+.exists file in the created directory.  It is this you should depend on.
+For portability purposes you should use the $(DIRFILESEP) macro rather
+than a '/' to seperate the directory from the file.
+
+    yourdirectory$(DIRFILESEP).exists
+d489 4
+a492 2
+sub dir_target {
+    my($self, @@dirs) = @@_;
+d494 1
+a494 7
+    my $make = '';
+    foreach my $dir (@@dirs) {
+        $make .= sprintf <<'MAKE', ($dir) x 7;
+%s$(DFSEP).exists :: Makefile.PL
+	$(NOECHO) $(MKPATH) %s
+	$(NOECHO) $(CHMOD) 755 %s
+	$(NOECHO) $(TOUCH) %s$(DFSEP).exists
+d496 1
+a496 1
+MAKE
+d498 3
+a500 1
+    }
+d502 2
+a503 8
+    return $make;
+}
+
+
+=head3 distdir
+
+Defines the scratch directory target that will hold the distribution
+before tar-ing (or shar-ing).
+d507 5
+a511 19
+# For backwards compatibility.
+*dist_dir = *distdir;
+
+sub distdir {
+    my($self) = shift;
+
+    my $meta_target = $self->{NO_META} ? '' : 'distmeta';
+    my $sign_target = !$self->{SIGN}   ? '' : 'distsignature';
+
+    return sprintf <<'MAKE_FRAG', $meta_target, $sign_target;
+create_distdir :
+	$(RM_RF) $(DISTVNAME)
+	$(PERLRUN) "-MExtUtils::Manifest=manicopy,maniread" \
+		-e "manicopy(maniread(),'$(DISTVNAME)', '$(DIST_CP)');"
+
+distdir : create_distdir %s %s
+	$(NOECHO) $(NOOP)
+
+MAKE_FRAG
+d513 1
+d516 1
+d518 2
+a519 5
+=head3 dist_test
+
+Defines a target that produces the distribution in the
+scratchdirectory, and runs 'perl Makefile.PL; make ;make test' in that
+subdirectory.
+d523 2
+a524 2
+sub dist_test {
+    my($self) = shift;
+d526 2
+a527 1
+    my $mpl_args = join " ", map qq["$_"], @@ARGV;
+d529 3
+a531 5
+    my $test = $self->cd('$(DISTVNAME)',
+                         '$(ABSPERLRUN) Makefile.PL '.$mpl_args,
+                         '$(MAKE) $(PASTHRU)',
+                         '$(MAKE) test $(PASTHRU)'
+                        );
+d533 3
+a535 3
+    return sprintf <<'MAKE_FRAG', $test;
+disttest : distdir
+	%s
+a538 1
+
+d542 1
+a542 1
+=head3 dynamic (o)
+d544 1
+a544 1
+Defines the dynamic target.
+d548 2
+a549 2
+sub dynamic {
+# --- Dynamic Loading Sections ---
+d551 2
+a552 3
+    my($self) = shift;
+    '
+dynamic :: $(FIRST_MAKEFILE) $(INST_DYNAMIC) $(INST_BOOT)
+d554 1
+a554 52
+';
+}
+
+
+=head3 makemakerdflt_target
+
+  my $make_frag = $mm->makemakerdflt_target
+
+Returns a make fragment with the makemakerdeflt_target specified.
+This target is the first target in the Makefile, is the default target
+and simply points off to 'all' just in case any make variant gets
+confused or something gets snuck in before the real 'all' target.
+
+=cut
+
+sub makemakerdflt_target {
+    return <<'MAKE_FRAG';
+makemakerdflt: all
+	$(NOECHO) $(NOOP)
+MAKE_FRAG
+
+}
+
+
+=head3 manifypods_target
+
+  my $manifypods_target = $self->manifypods_target;
+
+Generates the manifypods target.  This target generates man pages from
+all POD files in MAN1PODS and MAN3PODS.
+
+=cut
+
+sub manifypods_target {
+    my($self) = shift;
+
+    my $man1pods      = '';
+    my $man3pods      = '';
+    my $dependencies  = '';
+
+    # populate manXpods & dependencies:
+    foreach my $name (keys %{$self->{MAN1PODS}}, keys %{$self->{MAN3PODS}}) {
+        $dependencies .= " \\\n\t$name";
+    }
+
+    foreach my $name (keys %{$self->{MAN3PODS}}) {
+        $dependencies .= " \\\n\t$name"
+    }
+
+    my $manify = <<END;
+manifypods : pure_all $dependencies
+END
+a555 12
+    my @@man_cmds;
+    foreach my $section (qw(1 3)) {
+        my $pods = $self->{"MAN${section}PODS"};
+        push @@man_cmds, $self->split_command(<<CMD, %$pods);
+	\$(NOECHO) \$(POD2MAN) --section=$section --perm_rw=\$(PERM_RW)
+CMD
+    }
+
+    $manify .= "\t\$(NOECHO) \$(NOOP)\n" unless @@man_cmds;
+    $manify .= join '', map { "$_\n" } @@man_cmds;
+
+    return $manify;
+d559 1
+a559 1
+=head3 metafile_target
+d565 3
+a567 3
+Writes the file META.yml YAML encoded meta-data about the module in
+the distdir.  The format follows Module::Build's as closely as
+possible.  Additionally, we include:
+d587 1
+a587 1
+
+d601 3
+a603 5
+    my @@write_meta = $self->echo($meta, 'META_new.yml');
+
+    return sprintf <<'MAKE_FRAG', join("\n\t", @@write_meta);
+metafile : create_distdir
+	$(NOECHO) $(ECHO) Generating META.yml
+a604 1
+	-$(NOECHO) $(MV) META_new.yml $(DISTVNAME)/META.yml
+d610 1
+a610 1
+=head3 distmeta_target
+d612 1
+a612 1
+    my $make_frag = $mm->distmeta_target;
+d614 1
+a614 2
+Generates the distmeta target to add META.yml to the MANIFEST in the
+distdir.
+d618 1
+a618 1
+sub distmeta_target {
+d621 5
+d631 2
+a632 4
+    my $add_meta_to_distdir = $self->cd('$(DISTVNAME)', $add_meta);
+
+    return sprintf <<'MAKE', $add_meta_to_distdir;
+distmeta : create_distdir metafile
+d634 1
+d636 1
+a636 1
+MAKE
+a637 1
+}
+d639 1
+d641 1
+a641 1
+=head3 realclean (o)
+d643 2
+a644 1
+Defines the realclean target.
+d646 1
+a646 1
+=cut
+d648 1
+a648 2
+sub realclean {
+    my($self, %attribs) = @@_;
+d650 2
+a651 2
+    my @@dirs  = qw($(DISTVNAME));
+    my @@files = qw($(FIRST_MAKEFILE) $(MAKEFILE_OLD));
+d653 4
+a656 6
+    # Special exception for the perl core where INST_* is not in blib.
+    # This cleans up the files built from the ext/ directory (all XS).
+    if( $self->{PERL_CORE} ) {
+	push @@dirs, qw($(INST_AUTODIR) $(INST_ARCHAUTODIR));
+        push @@files, values %{$self->{PM}};
+    }
+d658 1
+a658 3
+    if( $self->has_link_code ){
+        push @@files, qw($(OBJECT));
+    }
+d660 2
+a661 8
+    if( $attribs{FILES} ) {
+        if( ref $attribs{FILES} ) {
+            push @@dirs, @@{ $attribs{FILES} };
+        }
+        else {
+            push @@dirs, split /\s+/, $attribs{FILES};
+        }
+    }
+d663 4
+a666 15
+    # Occasionally files are repeated several times from different sources
+    { my(%f) = map { ($_ => 1) } @@files;  @@files = keys %f; }
+    { my(%d) = map { ($_ => 1) } @@dirs;   @@dirs  = keys %d; }
+
+    my $rm_cmd  = join "\n\t", map { "$_" } 
+                    $self->split_command('- $(RM_F)',  @@files);
+    my $rmf_cmd = join "\n\t", map { "$_" } 
+                    $self->split_command('- $(RM_RF)', @@dirs);
+
+    my $m = sprintf <<'MAKE', $rm_cmd, $rmf_cmd;
+# Delete temporary files (via clean) and also delete dist files
+realclean purge ::  clean realclean_subdirs
+	%s
+	%s
+MAKE
+d668 1
+a668 1
+    $m .= "\t$attribs{POSTOP}\n" if $attribs{POSTOP};
+d670 3
+a672 2
+    return $m;
+}
+d674 4
+d679 2
+a680 1
+=head3 realclean_subdirs_target
+d682 2
+a683 1
+  my $make_frag = $MM->realclean_subdirs_target;
+a684 2
+Returns the realclean_subdirs target.  This is used by the realclean
+target to call realclean on any subdirectories which contain Makefiles.
+d686 1
+a686 1
+=cut
+d688 1
+a688 2
+sub realclean_subdirs_target {
+    my $self = shift;
+d690 1
+a690 4
+    return <<'NOOP_FRAG' unless @@{$self->{DIR}};
+realclean_subdirs :
+	$(NOECHO) $(NOOP)
+NOOP_FRAG
+d692 2
+a693 1
+    my $rclean = "realclean_subdirs :\n";
+a694 5
+    foreach my $dir (@@{$self->{DIR}}) {
+        foreach my $makefile ('$(MAKEFILE_OLD)', '$(FIRST_MAKEFILE)' ) {
+            my $subrclean .= $self->oneliner(sprintf <<'CODE', $dir, ($makefile) x 2);
+chdir '%s';  system '$(MAKE) $(USEMAKEFILE) %s realclean' if -f '%s';
+CODE
+d696 1
+a696 3
+            $rclean .= sprintf <<'RCLEAN', $subrclean;
+	- %s
+RCLEAN
+d698 1
+a698 2
+        }
+    }
+d700 1
+a700 2
+    return $rclean;
+}
+d703 1
+a703 1
+=head3 signature_target
+d705 1
+a705 1
+    my $target = $mm->signature_target;
+d707 2
+a708 1
+Generate the signature target.
+d710 2
+a711 1
+Writes the file SIGNATURE with "cpansign -s".
+d713 1
+a713 1
+=cut
+d715 1
+a715 2
+sub signature_target {
+    my $self = shift;
+d717 2
+a718 4
+    return <<'MAKE_FRAG';
+signature :
+	cpansign -s
+MAKE_FRAG
+d720 2
+a721 1
+}
+d723 1
+d725 1
+a725 1
+=head3 distsignature_target
+d727 2
+a728 1
+    my $make_frag = $mm->distsignature_target;
+d730 4
+a733 2
+Generates the distsignature target to add SIGNATURE to the MANIFEST in the
+distdir.
+d735 2
+a736 1
+=cut
+d738 9
+a746 2
+sub distsignature_target {
+    my $self = shift;
+d748 2
+a749 4
+    my $add_sign = $self->oneliner(<<'CODE', ['-MExtUtils::Manifest=maniadd']);
+eval { maniadd({q{SIGNATURE} => q{Public-key signature (added by MakeMaker)}}) } 
+    or print "Could not add SIGNATURE to MANIFEST: $${'@@'}\n"
+CODE
+d751 1
+a751 1
+    my $sign_dist        = $self->cd('$(DISTVNAME)' => 'cpansign -s');
+d753 2
+a754 4
+    # cpansign -s complains if SIGNATURE is in the MANIFEST yet does not
+    # exist
+    my $touch_sig        = $self->cd('$(DISTVNAME)' => '$(TOUCH) SIGNATURE');
+    my $add_sign_to_dist = $self->cd('$(DISTVNAME)' => $add_sign );
+d756 3
+a758 5
+    return sprintf <<'MAKE', $add_sign_to_dist, $touch_sig, $sign_dist
+distsignature : create_distdir
+	$(NOECHO) %s
+	$(NOECHO) %s
+	%s
+d760 1
+a760 1
+MAKE
+d762 2
+a763 1
+}
+d765 2
+d768 3
+a770 1
+=head3 special_targets
+d772 1
+a772 492
+  my $make_frag = $mm->special_targets
+
+Returns a make fragment containing any targets which have special
+meaning to make.  For example, .SUFFIXES and .PHONY.
+
+=cut
+
+sub special_targets {
+    my $make_frag = <<'MAKE_FRAG';
+.SUFFIXES : .xs .c .C .cpp .i .s .cxx .cc $(OBJ_EXT)
+
+.PHONY: all config static dynamic test linkext manifest blibdirs clean realclean disttest distdir
+
+MAKE_FRAG
+
+    $make_frag .= <<'MAKE_FRAG' if $ENV{CLEARCASE_ROOT};
+.NO_CONFIG_REC: Makefile
+
+MAKE_FRAG
+
+    return $make_frag;
+}
+
+
+
+
+=head2 Init methods
+
+Methods which help initialize the MakeMaker object and macros.
+
+
+=head3 init_INST
+
+    $mm->init_INST;
+
+Called by init_main.  Sets up all INST_* variables except those related
+to XS code.  Those are handled in init_xs.
+
+=cut
+
+sub init_INST {
+    my($self) = shift;
+
+    $self->{INST_ARCHLIB} ||= $self->catdir($Curdir,"blib","arch");
+    $self->{INST_BIN}     ||= $self->catdir($Curdir,'blib','bin');
+
+    # INST_LIB typically pre-set if building an extension after
+    # perl has been built and installed. Setting INST_LIB allows
+    # you to build directly into, say $Config{privlibexp}.
+    unless ($self->{INST_LIB}){
+	if ($self->{PERL_CORE}) {
+            if (defined $Cross::platform) {
+                $self->{INST_LIB} = $self->{INST_ARCHLIB} = 
+                  $self->catdir($self->{PERL_LIB},"..","xlib",
+                                     $Cross::platform);
+            }
+            else {
+                $self->{INST_LIB} = $self->{INST_ARCHLIB} = $self->{PERL_LIB};
+            }
+	} else {
+	    $self->{INST_LIB} = $self->catdir($Curdir,"blib","lib");
+	}
+    }
+
+    my @@parentdir = split(/::/, $self->{PARENT_NAME});
+    $self->{INST_LIBDIR}      = $self->catdir('$(INST_LIB)',     @@parentdir);
+    $self->{INST_ARCHLIBDIR}  = $self->catdir('$(INST_ARCHLIB)', @@parentdir);
+    $self->{INST_AUTODIR}     = $self->catdir('$(INST_LIB)', 'auto', 
+                                              '$(FULLEXT)');
+    $self->{INST_ARCHAUTODIR} = $self->catdir('$(INST_ARCHLIB)', 'auto',
+                                              '$(FULLEXT)');
+
+    $self->{INST_SCRIPT}  ||= $self->catdir($Curdir,'blib','script');
+
+    $self->{INST_MAN1DIR} ||= $self->catdir($Curdir,'blib','man1');
+    $self->{INST_MAN3DIR} ||= $self->catdir($Curdir,'blib','man3');
+
+    return 1;
+}
+
+
+=head3 init_INSTALL
+
+    $mm->init_INSTALL;
+
+Called by init_main.  Sets up all INSTALL_* variables (except
+INSTALLDIRS) and *PREFIX.
+
+=cut
+
+sub init_INSTALL {
+    my($self) = shift;
+
+    if( $self->{ARGS}{INSTALLBASE} and $self->{ARGS}{PREFIX} ) {
+        die "Only one of PREFIX or INSTALLBASE can be given.  Not both.\n";
+    }
+
+    if( $self->{ARGS}{INSTALLBASE} ) {
+        $self->init_INSTALL_from_INSTALLBASE;
+    }
+    else {
+        $self->init_INSTALL_from_PREFIX;
+    }
+}
+
+
+=head3 init_INSTALL_from_PREFIX
+
+  $mm->init_INSTALL_from_PREFIX;
+
+=cut
+
+sub init_INSTALL_from_PREFIX {
+    my $self = shift;
+
+    $self->init_lib2arch;
+
+    # There are often no Config.pm defaults for these new man variables so 
+    # we fall back to the old behavior which is to use installman*dir
+    foreach my $num (1, 3) {
+        my $k = 'installsiteman'.$num.'dir';
+
+        $self->{uc $k} ||= uc "\$(installman${num}dir)"
+          unless $Config{$k};
+    }
+
+    foreach my $num (1, 3) {
+        my $k = 'installvendorman'.$num.'dir';
+
+        unless( $Config{$k} ) {
+            $self->{uc $k}  ||= $Config{usevendorprefix}
+                              ? uc "\$(installman${num}dir)"
+                              : '';
+        }
+    }
+
+    $self->{INSTALLSITEBIN} ||= '$(INSTALLBIN)'
+      unless $Config{installsitebin};
+
+    unless( $Config{installvendorbin} ) {
+        $self->{INSTALLVENDORBIN} ||= $Config{usevendorprefix} 
+                                    ? $Config{installbin}
+                                    : '';
+    }
+
+
+    my $iprefix = $Config{installprefixexp} || $Config{installprefix} || 
+                  $Config{prefixexp}        || $Config{prefix} || '';
+    my $vprefix = $Config{usevendorprefix}  ? $Config{vendorprefixexp} : '';
+    my $sprefix = $Config{siteprefixexp}    || '';
+
+    # 5.005_03 doesn't have a siteprefix.
+    $sprefix = $iprefix unless $sprefix;
+
+
+    $self->{PREFIX}       ||= '';
+
+    if( $self->{PREFIX} ) {
+        @@{$self}{qw(PERLPREFIX SITEPREFIX VENDORPREFIX)} =
+          ('$(PREFIX)') x 3;
+    }
+    else {
+        $self->{PERLPREFIX}   ||= $iprefix;
+        $self->{SITEPREFIX}   ||= $sprefix;
+        $self->{VENDORPREFIX} ||= $vprefix;
+
+        # Lots of MM extension authors like to use $(PREFIX) so we
+        # put something sensible in there no matter what.
+        $self->{PREFIX} = '$('.uc $self->{INSTALLDIRS}.'PREFIX)';
+    }
+
+    my $arch    = $Config{archname};
+    my $version = $Config{version};
+
+    # default style
+    my $libstyle = $Config{installstyle} || 'lib/perl5';
+    my $manstyle = '';
+
+    if( $self->{LIBSTYLE} ) {
+        $libstyle = $self->{LIBSTYLE};
+        $manstyle = $self->{LIBSTYLE} eq 'lib/perl5' ? 'lib/perl5' : '';
+    }
+
+    # Some systems, like VOS, set installman*dir to '' if they can't
+    # read man pages.
+    for my $num (1, 3) {
+        $self->{'INSTALLMAN'.$num.'DIR'} ||= 'none'
+          unless $Config{'installman'.$num.'dir'};
+    }
+
+    my %bin_layouts = 
+    (
+        bin         => { s => $iprefix,
+                         t => 'perl',
+                         d => 'bin' },
+        vendorbin   => { s => $vprefix,
+                         t => 'vendor',
+                         d => 'bin' },
+        sitebin     => { s => $sprefix,
+                         t => 'site',
+                         d => 'bin' },
+        script      => { s => $iprefix,
+                         t => 'perl',
+                         d => 'bin' },
+    );
+    
+    my %man_layouts =
+    (
+        man1dir         => { s => $iprefix,
+                             t => 'perl',
+                             d => 'man/man1',
+                             style => $manstyle, },
+        siteman1dir     => { s => $sprefix,
+                             t => 'site',
+                             d => 'man/man1',
+                             style => $manstyle, },
+        vendorman1dir   => { s => $vprefix,
+                             t => 'vendor',
+                             d => 'man/man1',
+                             style => $manstyle, },
+
+        man3dir         => { s => $iprefix,
+                             t => 'perl',
+                             d => 'man/man3',
+                             style => $manstyle, },
+        siteman3dir     => { s => $sprefix,
+                             t => 'site',
+                             d => 'man/man3',
+                             style => $manstyle, },
+        vendorman3dir   => { s => $vprefix,
+                             t => 'vendor',
+                             d => 'man/man3',
+                             style => $manstyle, },
+    );
+
+    my %lib_layouts =
+    (
+        privlib     => { s => $iprefix,
+                         t => 'perl',
+                         d => '',
+                         style => $libstyle, },
+        vendorlib   => { s => $vprefix,
+                         t => 'vendor',
+                         d => '',
+                         style => $libstyle, },
+        sitelib     => { s => $sprefix,
+                         t => 'site',
+                         d => 'site_perl',
+                         style => $libstyle, },
+        
+        archlib     => { s => $iprefix,
+                         t => 'perl',
+                         d => "$version/$arch",
+                         style => $libstyle },
+        vendorarch  => { s => $vprefix,
+                         t => 'vendor',
+                         d => "$version/$arch",
+                         style => $libstyle },
+        sitearch    => { s => $sprefix,
+                         t => 'site',
+                         d => "site_perl/$version/$arch",
+                         style => $libstyle },
+    );
+
+
+    # Special case for LIB.
+    if( $self->{LIB} ) {
+        foreach my $var (keys %lib_layouts) {
+            my $Installvar = uc "install$var";
+
+            if( $var =~ /arch/ ) {
+                $self->{$Installvar} ||= 
+                  $self->catdir($self->{LIB}, $Config{archname});
+            }
+            else {
+                $self->{$Installvar} ||= $self->{LIB};
+            }
+        }
+    }
+
+    my %type2prefix = ( perl    => 'PERLPREFIX',
+                        site    => 'SITEPREFIX',
+                        vendor  => 'VENDORPREFIX'
+                      );
+
+    my %layouts = (%bin_layouts, %man_layouts, %lib_layouts);
+    while( my($var, $layout) = each(%layouts) ) {
+        my($s, $t, $d, $style) = @@{$layout}{qw(s t d style)};
+        my $r = '$('.$type2prefix{$t}.')';
+
+        print STDERR "Prefixing $var\n" if $Verbose >= 2;
+
+        my $installvar = "install$var";
+        my $Installvar = uc $installvar;
+        next if $self->{$Installvar};
+
+        $d = "$style/$d" if $style;
+        $self->prefixify($installvar, $s, $r, $d);
+
+        print STDERR "  $Installvar == $self->{$Installvar}\n" 
+          if $Verbose >= 2;
+    }
+
+    # Generate these if they weren't figured out.
+    $self->{VENDORARCHEXP} ||= $self->{INSTALLVENDORARCH};
+    $self->{VENDORLIBEXP}  ||= $self->{INSTALLVENDORLIB};
+
+    return 1;
+}
+
+
+=head3 init_from_INSTALLBASE
+
+    $mm->init_from_INSTALLBASE
+
+=cut
+
+my %map = (
+           lib      => [qw(lib perl5)],
+           arch     => [('lib', 'perl5', $Config{archname})],
+           bin      => [qw(bin)],
+           man1dir  => [qw(man man1)],
+           man3dir  => [qw(man man3)]
+          );
+$map{script} = $map{bin};
+
+sub init_INSTALL_from_INSTALLBASE {
+    my $self = shift;
+
+    @@{$self}{qw(PREFIX VENDORPREFIX SITEPREFIX PERLPREFIX)} = 
+                                                         '$(INSTALLBASE)';
+
+    my %install;
+    foreach my $thing (keys %map) {
+        foreach my $dir (('', 'SITE', 'VENDOR')) {
+            my $uc_thing = uc $thing;
+            my $key = "INSTALL".$dir.$uc_thing;
+
+            $install{$key} ||= 
+              $self->catdir('$(INSTALLBASE)', @@{$map{$thing}});
+        }
+    }
+
+    # Adjust for variable quirks.
+    $install{INSTALLARCHLIB} ||= delete $install{INSTALLARCH};
+    $install{INSTALLPRIVLIB} ||= delete $install{INSTALLLIB};
+    delete @@install{qw(INSTALLVENDORSCRIPT INSTALLSITESCRIPT)};
+
+    foreach my $key (keys %install) {
+        $self->{$key} ||= $install{$key};
+    }
+
+    return 1;
+}
+
+
+=head3 init_VERSION  I<Abstract>
+
+    $mm->init_VERSION
+
+Initialize macros representing versions of MakeMaker and other tools
+
+MAKEMAKER: path to the MakeMaker module.
+
+MM_VERSION: ExtUtils::MakeMaker Version
+
+MM_REVISION: ExtUtils::MakeMaker version control revision (for backwards 
+             compat)
+
+VERSION: version of your module
+
+VERSION_MACRO: which macro represents the version (usually 'VERSION')
+
+VERSION_SYM: like version but safe for use as an RCS revision number
+
+DEFINE_VERSION: -D line to set the module version when compiling
+
+XS_VERSION: version in your .xs file.  Defaults to $(VERSION)
+
+XS_VERSION_MACRO: which macro represents the XS version.
+
+XS_DEFINE_VERSION: -D line to set the xs version when compiling.
+
+Called by init_main.
+
+=cut
+
+sub init_VERSION {
+    my($self) = shift;
+
+    $self->{MAKEMAKER}  = $ExtUtils::MakeMaker::Filename;
+    $self->{MM_VERSION} = $ExtUtils::MakeMaker::VERSION;
+    $self->{MM_REVISION}= $ExtUtils::MakeMaker::Revision;
+    $self->{VERSION_FROM} ||= '';
+
+    if ($self->{VERSION_FROM}){
+        $self->{VERSION} = $self->parse_version($self->{VERSION_FROM});
+        if( $self->{VERSION} eq 'undef' ) {
+            require Carp;
+            Carp::carp("WARNING: Setting VERSION via file ".
+                       "'$self->{VERSION_FROM}' failed\n");
+        }
+    }
+
+    # strip blanks
+    if (defined $self->{VERSION}) {
+        $self->{VERSION} =~ s/^\s+//;
+        $self->{VERSION} =~ s/\s+$//;
+    }
+    else {
+        $self->{VERSION} = '';
+    }
+
+
+    $self->{VERSION_MACRO}  = 'VERSION';
+    ($self->{VERSION_SYM} = $self->{VERSION}) =~ s/\W/_/g;
+    $self->{DEFINE_VERSION} = '-D$(VERSION_MACRO)=\"$(VERSION)\"';
+
+
+    # Graham Barr and Paul Marquess had some ideas how to ensure
+    # version compatibility between the *.pm file and the
+    # corresponding *.xs file. The bottomline was, that we need an
+    # XS_VERSION macro that defaults to VERSION:
+    $self->{XS_VERSION} ||= $self->{VERSION};
+
+    $self->{XS_VERSION_MACRO}  = 'XS_VERSION';
+    $self->{XS_DEFINE_VERSION} = '-D$(XS_VERSION_MACRO)=\"$(XS_VERSION)\"';
+
+}
+
+
+=head3 init_others  I<Abstract>
+
+    $MM->init_others();
+
+Initializes the macro definitions used by tools_other() and places them
+in the $MM object.
+
+If there is no description, its the same as the parameter to
+WriteMakefile() documented in ExtUtils::MakeMaker.
+
+Defines at least these macros.
+
+  Macro             Description
+
+  NOOP              Do nothing
+  NOECHO            Tell make not to display the command itself
+
+  MAKEFILE
+  FIRST_MAKEFILE
+  MAKEFILE_OLD
+  MAKE_APERL_FILE   File used by MAKE_APERL
+
+  SHELL             Program used to run
+                    shell commands
+
+  ECHO              Print text adding a newline on the end
+  RM_F              Remove a file 
+  RM_RF             Remove a directory          
+  TOUCH             Update a file's timestamp   
+  TEST_F            Test for a file's existence 
+  CP                Copy a file                 
+  MV                Move a file                 
+  CHMOD             Change permissions on a     
+                    file
+
+  UMASK_NULL        Nullify umask
+  DEV_NULL          Supress all command output
+
+
+=head3 init_DIRFILESEP  I<Abstract>
+
+  $MM->init_DIRFILESEP;
+  my $dirfilesep = $MM->{DIRFILESEP};
+
+Initializes the DIRFILESEP macro which is the seperator between the
+directory and filename in a filepath.  ie. / on Unix, \ on Win32 and
+nothing on VMS.
+
+For example:
+
+    # instead of $(INST_ARCHAUTODIR)/extralibs.ld
+    $(INST_ARCHAUTODIR)$(DIRFILESEP)extralibs.ld
+
+Something of a hack but it prevents a lot of code duplication between
+MM_* variants.
+
+Do not use this as a seperator between directories.  Some operating
+systems use different seperators between subdirectories as between
+directories and filenames (for example:  VOLUME:[dir1.dir2]file on VMS).
+
+=head3 init_linker  I<Abstract>
+d792 1
+a792 1
+=head3 init_platform
+d801 1
+a801 1
+=cut
+d803 1
+a803 3
+sub init_platform {
+    return '';
+}
+d805 2
+a806 14
+
+
+
+
+=head2 Tools
+
+A grab bag of methods to generate specific macros and commands.
+
+
+
+=head3 manifypods
+
+Defines targets and routines to translate the pods into manpages and
+put them into the INST_* directories.
+d810 2
+a811 14
+sub manifypods {
+    my $self          = shift;
+
+    my $POD2MAN_macro = $self->POD2MAN_macro();
+    my $manifypods_target = $self->manifypods_target();
+
+    return <<END_OF_TARGET;
+
+$POD2MAN_macro
+
+$manifypods_target
+
+END_OF_TARGET
+
+d814 2
+a815 24
+
+=head3 POD2MAN_macro
+
+  my $pod2man_macro = $self->POD2MAN_macro
+
+Returns a definition for the POD2MAN macro.  This is a program
+which emulates the pod2man utility.  You can add more switches to the
+command by simply appending them on the macro.
+
+Typical usage:
+
+    $(POD2MAN) --section=3 --perm_rw=$(PERM_RW) podfile1 man_page1 ...
+
+=cut
+
+sub POD2MAN_macro {
+    my $self = shift;
+
+# Need the trailing '--' so perl stops gobbling arguments and - happens
+# to be an alternative end of line seperator on VMS so we quote it
+    return <<'END_OF_DEF';
+POD2MAN_EXE = $(PERLRUN) "-MExtUtils::Command::MM" -e pod2man "--"
+POD2MAN = $(POD2MAN_EXE)
+END_OF_DEF
+d818 1
+d820 1
+a820 1
+=head3 test_via_harness
+d822 2
+a823 1
+  my $command = $mm->test_via_harness($perl, $tests);
+d825 2
+a826 2
+Returns a $command line which runs the given set of $tests with
+Test::Harness and the given $perl.
+d828 1
+a828 1
+Used on the t/*.t files.
+d830 7
+a836 1
+=cut
+d838 2
+a839 24
+sub test_via_harness {
+    my($self, $perl, $tests) = @@_;
+
+    return qq{\t$perl "-MExtUtils::Command::MM" }.
+           qq{"-e" "test_harness(\$(TEST_VERBOSE), '\$(INST_LIB)', '\$(INST_ARCHLIB)')" $tests\n};
+}
+
+=head3 test_via_script
+
+  my $command = $mm->test_via_script($perl, $script);
+
+Returns a $command line which just runs a single test without
+Test::Harness.  No checks are done on the results, they're just
+printed.
+
+Used for test.pl, since they don't always follow Test::Harness
+formatting.
+
+=cut
+
+sub test_via_script {
+    my($self, $perl, $script) = @@_;
+    return qq{\t$perl "-I\$(INST_LIB)" "-I\$(INST_ARCHLIB)" $script\n};
+}
+d842 1
+a842 140
+=head3 tool_autosplit
+
+Defines a simple perl call that runs autosplit. May be deprecated by
+pm_to_blib soon.
+
+=cut
+
+sub tool_autosplit {
+    my($self, %attribs) = @@_;
+
+    my $maxlen = $attribs{MAXLEN} ? '$$AutoSplit::Maxlen=$attribs{MAXLEN};' 
+                                  : '';
+
+    my $asplit = $self->oneliner(sprintf <<'PERL_CODE', $maxlen);
+use AutoSplit; %s autosplit($$ARGV[0], $$ARGV[1], 0, 1, 1)
+PERL_CODE
+
+    return sprintf <<'MAKE_FRAG', $asplit;
+# Usage: $(AUTOSPLITFILE) FileToSplit AutoDirToSplitInto
+AUTOSPLITFILE = %s
+
+MAKE_FRAG
+
+}
+
+
+
+
+=head2 File::Spec wrappers
+
+ExtUtils::MM_Any is a subclass of File::Spec.  The methods noted here
+override File::Spec.
+
+
+
+=head3 catfile
+
+File::Spec <= 0.83 has a bug where the file part of catfile is not
+canonicalized.  This override fixes that bug.
+
+=cut
+
+sub catfile {
+    my $self = shift;
+    return $self->canonpath($self->SUPER::catfile(@@_));
+}
+
+
+
+=head2 Misc
+
+Methods I can't really figure out where they should go yet.
+
+
+=head3 find_tests
+
+  my $test = $mm->find_tests;
+
+Returns a string suitable for feeding to the shell to return all
+tests in t/*.t.
+
+=cut
+
+sub find_tests {
+    my($self) = shift;
+    return -d 't' ? 't/*.t' : '';
+}
+
+
+=head3 extra_clean_files
+
+    my @@files_to_clean = $MM->extra_clean_files;
+
+Returns a list of OS specific files to be removed in the clean target in
+addition to the usual set.
+
+=cut
+
+# An empty method here tickled a perl 5.8.1 bug and would return its object.
+sub extra_clean_files { 
+    return;
+}
+
+
+=head3 installvars
+
+    my @@installvars = $mm->installvars;
+
+A list of all the INSTALL* variables without the INSTALL prefix.  Useful
+for iteration or building related variable sets.
+
+=cut
+
+sub installvars {
+    return qw(PRIVLIB SITELIB  VENDORLIB
+              ARCHLIB SITEARCH VENDORARCH
+              BIN     SITEBIN  VENDORBIN
+              SCRIPT
+              MAN1DIR SITEMAN1DIR VENDORMAN1DIR
+              MAN3DIR SITEMAN3DIR VENDORMAN3DIR
+             );
+}
+
+
+=head3 libscan
+
+  my $wanted = $self->libscan($path);
+
+Takes a path to a file or dir and returns an empty string if we don't
+want to include this file in the library.  Otherwise it returns the
+the $path unchanged.
+
+Mainly used to exclude version control administrative directories from
+installation.
+
+=cut
+
+sub libscan {
+    my($self,$path) = @@_;
+    my($dirs,$file) = ($self->splitpath($path))[1,2];
+    return '' if grep /^(?:RCS|CVS|SCCS|\.svn|_darcs)$/, 
+                     $self->splitdir($dirs), $file;
+
+    return $path;
+}
+
+
+=head3 platform_constants
+
+    my $make_frag = $mm->platform_constants
+
+Returns a make fragment defining all the macros initialized in
+init_platform() rather than put them in constants().
+
+=cut
+
+sub platform_constants {
+    return '';
+}
+
+@
+
+
+1.1.1.3
+log
+@import up-to-date in-base Perl
+@
+text
+@a667 1
+	my $s = $section eq '3' ? '3p' : $section;
+d669 1
+a669 1
+	\$(NOECHO) \$(POD2MAN) --section=$s --perm_rw=\$(PERM_RW)
+@
+
+

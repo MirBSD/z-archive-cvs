@@ -1,0 +1,62 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2008.10.05.17.03.37;	author tg;	state Exp;
+branches;
+next	;
+commitid	10048E8F34476990F5E;
+
+
+desc
+@@
+
+
+1.1
+log
+@Fix an interesting bug, see patch-util_c comment on top of file for
+deeper information. Additional hints:
+
+16:50⎜«tobiasu» http://www.freebsd.org/cgi/query-pr.cgi?pr=127639
+
+17:00⎜«tobiasu» stellt sich trotzdem die frage warum memcpy das nicht auf die reihe bekommt
+17:00⎜<mirabilos> du KANNST von “ptr” nur oldsize bytes lesen, nicht “size” bytes
+17:01⎜<mirabilos> also gut, einfacheres beispiel
+17:01⎜<mirabilos> ptr = malloc(PAGESZ);
+17:01⎜<mirabilos> p2 = x_realloc(ptr, 2 * PAGESZ);
+17:01⎜<mirabilos> versucht, 2 pages von adresse ptr nach adresse p2 zu kopieren
+17:01⎜<mirabilos> aber die page hinter ptr ist ggf. nicht gemappt
+17:01⎜<mirabilos> jetzt klar?
+17:01⎜«tobiasu» lol, jau
+@
+text
+@$MirOS$
+
+	Very interesting bug: tries to read “size” bytes
+	from “ptr” (of size “oldsize”) while copying to
+	“p2” (of size “size”), instead of “oldsize” bytes;
+	with mmap malloc, jemalloc, and possibly omalloc,
+	the additional RAM needed is not always in core…
+
+--- util.c.orig	Mon Sep 13 10:38:08 2004
++++ util.c	Sun Oct  5 16:58:39 2008
+@@@@ -187,13 +187,9 @@@@ void *x_realloc(void *ptr, size_t size)
+ {
+ 	void *p2;
+ 	if (!ptr) return x_malloc(size);
+-	p2 = malloc(size);
++	p2 = realloc(ptr, size);
+ 	if (!p2) {
+ 		fatal("out of memory in x_realloc");
+-	}
+-	if (ptr) {
+-		memcpy(p2, ptr, size);
+-		free(ptr);
+ 	}
+ 	return p2;
+ }
+@

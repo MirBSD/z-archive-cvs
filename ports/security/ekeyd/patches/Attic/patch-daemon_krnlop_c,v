@@ -1,0 +1,188 @@
+head	1.3;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.3
+date	2009.11.22.19.32.34;	author tg;	state dead;
+branches;
+next	1.2;
+commitid	1004B0991C1317436F4;
+
+1.2
+date	2009.11.14.22.08.51;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004AFF2A78266122BC;
+
+1.1
+date	2009.11.14.21.45.31;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004AFF25061DF717E6;
+
+
+desc
+@@
+
+
+1.3
+log
+@update (most of our patches have been accepted, but ekey-rekey is
+really FUBAR’d now in upstream, couldn’t work, and the rest are to
+fix some really bad programming practice leading to a strcpy
+@
+text
+@$MirOS: ports/security/ekeyd/patches/patch-daemon_krnlop_c,v 1.2 2009/11/14 22:08:51 tg Exp $
+--- daemon/krnlop.c.orig	Fri Nov  6 10:19:55 2009
++++ daemon/krnlop.c	Sat Nov 14 21:58:04 2009
+@@@@ -24,10 +24,11 @@@@
+ #include <sys/ioctl.h>
+ #endif
+ 
+-#ifdef EKEY_OS_OPENBSD
++#if defined(EKEY_OS_OPENBSD) || defined(EKEY_OS_MIRBSD)
+ #include <sys/ioctl.h>
+ #include <dev/rndvar.h>
+ #include <dev/rndioctl.h>
++#include <errno.h>
+ #endif
+ 
+ #include "stream.h"
+@@@@ -35,19 +36,20 @@@@
+ 
+ static int krnlop_bpb;
+ 
+-#if defined(EKEY_OS_LINUX) || defined(EKEY_OS_OPENBSD)
++/*-
++ * Disabled for OpenBSD and MirBSD, because at least MirBSD doesn't
++ * implement RNDADDENTROPY (chances are OpenBSD doesn't, either).
++ * Furthermore, struct rand_pool_info contains the entropy directly,
++ * whereas struct rnd_pool_info contains a pointer to the entropy
++ * buffer (so the code below cannot work on OpenBSD/MirBSD anyway).
++ */
++#ifdef EKEY_OS_LINUX
+ ssize_t
+ krnl_write(int fd, const void *buf, size_t count)
+ {
+-#ifdef EKEY_OS_LINUX
+     struct rand_pool_info *rndpool;
+     rndpool = alloca(sizeof(struct rand_pool_info) + count);
+-#endif
+-#ifdef EKEY_OS_OPENBSD
+-    struct rnd_pool_info *rndpool;
+-    rndpool = alloca(sizeof(struct rnd_pool_info) + count);
+-#endif
+-    
++
+     rndpool->entropy_count = count * krnlop_bpb;
+     rndpool->buf_size = count;
+     memcpy(rndpool->buf, buf, count);
+@@@@ -58,12 +60,40 @@@@ krnl_write(int fd, const void *buf, size
+     }
+     return count;
+ }
++#elif defined(EKEY_OS_OPENBSD) || defined(EKEY_OS_MIRBSD)
++ssize_t
++krnl_write(int fd, const void *buf, size_t count)
++{
++    size_t ofs = 0;
++    ssize_t n;
++    unsigned int u;
++
++    while (ofs < count) {
++        n = write(fd, (const char *)buf + ofs, count - ofs);
++        if (n == -1) {
++            if (errno == EINTR)
++                continue;
++            perror("write");
++            return -1;
++        }
++        ofs += n;
++    }
++
++    /* from MirOS: src/libexec/cprng/cprng.c,v 1.14 */
++    u = count * krnlop_bpb;
++    if (ioctl(fd, RNDADDTOENTCNT, &u) == -1) {
++        perror("ioctl");
++        return -1;
++    }
++    return count;
++}
+ #endif
+ 
+ estream_state_t *estream_krnl_open(const char *path, int bpb)
+ {
+     estream_state_t *stream_state = NULL;
+-#if defined(EKEY_OS_LINUX) || defined(EKEY_OS_OPENBSD)
++#if defined(EKEY_OS_LINUX) || defined(EKEY_OS_OPENBSD) || \
++  defined(EKEY_OS_MIRBSD)
+     int fd;
+ 
+     fd = open(path, O_RDWR | O_NOCTTY);
+@
+
+
+1.2
+log
+@this differs more between BSD and Linux than it looks
+(in addition to not being implemented in BSD)
+@
+text
+@d1 1
+a1 1
+$MirOS: ports/security/ekeyd/patches/patch-daemon_krnlop_c,v 1.1 2009/11/14 21:45:31 tg Exp $
+@
+
+
+1.1
+log
+@experimental port for the Simtec eKey control software
+@
+text
+@d1 4
+a4 4
+$MirOS$
+--- daemon/krnlop.c.orig	Fri Nov  6 11:19:55 2009
++++ daemon/krnlop.c	Sat Nov 14 21:48:09 2009
+@@@@ -24,46 +24,80 @@@@
+d17 1
+a17 1
+ #include "krnlop.h"
+d20 1
+a20 1
+-
+d25 3
+a27 3
++ *
++ * #if defined(EKEY_OS_LINUX) || defined(EKEY_OS_OPENBSD) || \
++ *   defined(EKEY_OS_MIRBSD)
+d33 4
+a36 5
+ #ifdef EKEY_OS_LINUX
+-    struct rand_pool_info *rndpool;
+-    rndpool = alloca(sizeof(struct rand_pool_info) + count);
++    struct rand_pool_info rndpool;
+ #endif
+d40 7
+a46 16
++#if defined(EKEY_OS_OPENBSD) || defined(EKEY_OS_MIRBSD)
++    struct rnd_pool_info rndpool;
+ #endif
+     
+-    rndpool->entropy_count = count * krnlop_bpb;
+-    rndpool->buf_size = count;
+-    memcpy(rndpool->buf, buf, count);
++    rndpool.entropy_count = count * krnlop_bpb;
++    rndpool.buf_size = count;
++    /* broken API */
++    rndpool.buf = (void *)buf;
+ 
+-    if (ioctl(fd, RNDADDENTROPY, rndpool) == -1) {
++    if (ioctl(fd, RNDADDENTROPY, &rndpool) == -1) {
+         perror("ioctl");
+         return -1;
+@
+

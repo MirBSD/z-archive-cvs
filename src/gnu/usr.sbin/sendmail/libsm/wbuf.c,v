@@ -1,0 +1,267 @@
+head	1.3;
+access;
+symbols
+	sendmail-8_14_9:1.1.127.2
+	sendmail-8_14_7:1.1.127.1
+	sendmail-8_14_6:1.1.127.1
+	sendmail-8_14_5-ERRATA-1:1.1.127.1
+	mbsd-20101220_mergebase:1.1.1.1.6.1
+	sendmail-8_14_5:1.1.127.1
+	cvs-201107021500:1.1.1.2
+	cvs-20101220:1.1.1.2
+	mbsd-20101220:1.1.1.1.0.6
+	cvs-201012191730:1.1.1.1
+	sendmail-8_14_5_Beta0:1.1.127.1
+	sendmail-8_14_3:1.1.127.1
+	sendmail:1.1.127
+	cvs-200812170000:1.1.1.1
+	cvs-200805071200:1.1.1.1
+	MIRBSD_10:1.1.1.1.0.4
+	MIRBSD_10_BASE:1.1.1.1
+	cvs-200803022030:1.1.1.1
+	cvs-200707152000:1.1.1.1
+	cvs-200704292000:1.1.1.1
+	cvs-200702051700:1.1.1.1
+	cvs-200609121900:1.1.1.1
+	MIRBSD_9_BASE:1.1.1.1
+	cvs-200606151800:1.1.1.1
+	cvs-200603231300:1.1.1.1
+	MIRBSD_8:1.1.1.1.0.2
+	MIRBSD_8_BASE:1.1.1.1
+	cvs-200507211800:1.1.1.1
+	cvs-200504262050:1.1.1.1
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.3
+date	2014.06.09.15.17.35;	author tg;	state Exp;
+branches;
+next	1.2;
+commitid	1005395CFC65E5646F1;
+
+1.2
+date	2011.07.02.15.04.01;	author tg;	state Exp;
+branches;
+next	1.1;
+commitid	1004E0F31C5496AB95F;
+
+1.1
+date	2005.02.05.17.24.27;	author tg;	state Exp;
+branches
+	1.1.1.1
+	1.1.127.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.24.27;	author tg;	state Exp;
+branches
+	1.1.1.1.6.1;
+next	1.1.1.2;
+
+1.1.1.2
+date	2011.07.02.15.00.22;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.1.1.6.1
+date	2011.07.02.15.02.46;	author tg;	state Exp;
+branches;
+next	;
+commitid	1004E0F31C5496AB95F;
+
+1.1.127.1
+date	2010.12.19.14.45.50;	author tg;	state Exp;
+branches;
+next	1.1.127.2;
+commitid	1004D0E1A94384778FD;
+
+1.1.127.2
+date	2014.06.09.14.29.21;	author tg;	state Exp;
+branches;
+next	;
+commitid	1005395C4CC1A6DB9EE;
+
+
+desc
+@@
+
+
+1.3
+log
+@merge
+@
+text
+@/*
+ * Copyright (c) 2000-2001 Proofpoint, Inc. and its suppliers.
+ *      All rights reserved.
+ * Copyright (c) 1990, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Chris Torek.
+ *
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
+ */
+
+#include <sm/gen.h>
+SM_RCSID("@@(#)$Id: wbuf.c,v 1.22 2013-11-22 20:51:44 ca Exp $")
+#include <errno.h>
+#include <sm/io.h>
+#include "local.h"
+
+/* Note: This function is called from a macro located in <sm/io.h> */
+
+/*
+**  SM_WBUF -- write character to and flush (likely now full) buffer
+**
+**  Write the given character into the (probably full) buffer for
+**  the given file.  Flush the buffer out if it is or becomes full,
+**  or if c=='\n' and the file is line buffered.
+**
+**	Parameters:
+**		fp -- the file pointer
+**		timeout -- time to complete operation (milliseconds)
+**		c -- int representation of the character to add
+**
+**	Results:
+**		Failure: -1 and sets errno
+**		Success: int value of 'c'
+*/
+
+int
+sm_wbuf(fp, timeout, c)
+	register SM_FILE_T *fp;
+	int timeout;
+	register int c;
+{
+	register int n;
+
+	/*
+	**  In case we cannot write, or longjmp takes us out early,
+	**  make sure w is 0 (if fully- or un-buffered) or -bf.smb_size
+	**  (if line buffered) so that we will get called again.
+	**  If we did not do this, a sufficient number of sm_io_putc()
+	**  calls might wrap w from negative to positive.
+	*/
+
+	fp->f_w = fp->f_lbfsize;
+	if (cantwrite(fp))
+	{
+		errno = EBADF;
+		return SM_IO_EOF;
+	}
+	c = (unsigned char)c;
+
+	/*
+	**  If it is completely full, flush it out.  Then, in any case,
+	**  stuff c into the buffer.  If this causes the buffer to fill
+	**  completely, or if c is '\n' and the file is line buffered,
+	**  flush it (perhaps a second time).  The second flush will always
+	**  happen on unbuffered streams, where bf.smb_size==1; sm_io_flush()
+	**  guarantees that sm_io_putc() will always call sm_wbuf() by setting
+	**  w to 0, so we need not do anything else.
+	**  Note for the timeout, only one of the sm_io_flush's will get called.
+	*/
+
+	n = fp->f_p - fp->f_bf.smb_base;
+	if (n >= fp->f_bf.smb_size)
+	{
+		if (sm_io_flush(fp, timeout))
+			return SM_IO_EOF; /* sm_io_flush() sets errno */
+		n = 0;
+	}
+	fp->f_w--;
+	*fp->f_p++ = c;
+	if (++n == fp->f_bf.smb_size || (fp->f_flags & SMLBF && c == '\n'))
+		if (sm_io_flush(fp, timeout))
+			return SM_IO_EOF; /* sm_io_flush() sets errno */
+	return c;
+}
+@
+
+
+1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001 Sendmail, Inc. and its suppliers.
+d16 1
+a16 1
+SM_RCSID("@@(#)$Id: wbuf.c,v 1.21 2001/09/11 04:04:49 gshapiro Exp $")
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Sendmail: wbuf.c,v 1.21 2001/09/11 04:04:49 gshapiro Exp $")
+@
+
+
+1.1.127.1
+log
+@Import Sendmail 8.14.3, suitably stripped down by the not yet committed
+contrib/samples/import-3rdpty,v 1.35; we have some new and renamed files
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Id: wbuf.c,v 1.21 2001/09/11 04:04:49 gshapiro Exp $")
+@
+
+
+1.1.127.2
+log
+@Import sendmail 8.14.9
+@
+text
+@d2 1
+a2 1
+ * Copyright (c) 2000-2001 Proofpoint, Inc. and its suppliers.
+d16 1
+a16 1
+SM_RCSID("@@(#)$Id: wbuf.c,v 1.22 2013-11-22 20:51:44 ca Exp $")
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.1.6.1
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Id: wbuf.c,v 1.21 2001/09/11 04:04:49 gshapiro Exp $")
+@
+
+
+1.1.1.2
+log
+@Replace “$Sendmail: ” with “$Id: ” (the latter is used by upstream)
+@
+text
+@d16 1
+a16 1
+SM_RCSID("@@(#)$Id: wbuf.c,v 1.21 2001/09/11 04:04:49 gshapiro Exp $")
+@
+

@@ -1,0 +1,168 @@
+head	1.1;
+branch	1.1.101;
+access;
+symbols
+	MIRBSD_10_BASE:1.1.101.1
+	MIRBSD_9_BASE:1.1.101.1
+	gcc-3_4_6:1.1.101.1
+	MIRBSD_8:1.1.101.1.0.2
+	MIRBSD_8_BASE:1.1.101.1
+	gcc-3_4-20051206:1.1.101.1
+	gcc-3_4-20051115:1.1.101.1
+	gcc-3_4-20050823:1.1.101.1
+	FSF:1.1.101;
+locks; strict;
+comment	@// @;
+
+
+1.1
+date	2005.03.21.12.07.46;	author tg;	state Exp;
+branches
+	1.1.101.1;
+next	;
+
+1.1.101.1
+date	2005.03.21.12.07.46;	author tg;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@// natSelectorImplWin32.cc
+
+/* Copyright (C) 2003  Free Software Foundation
+
+   This file is part of libgcj.
+
+This software is copyrighted work licensed under the terms of the
+Libgcj License.  Please consult the file "LIBGCJ_LICENSE" for
+details.  */
+
+#include <config.h>
+#include <platform.h>
+
+#include <gnu/java/nio/SelectorImpl.h>
+#include <java/lang/Thread.h>
+
+jint
+gnu::java::nio::SelectorImpl::implSelect (jintArray read, jintArray write,
+                                          jintArray except, jlong timeout)
+{
+  // FIXME: The API for implSelect is biased towards POSIX implementations.
+  jint* pReadFD = elements (read);
+  int nNbReadFDs = JvGetArrayLength (read);
+
+  jint* pWriteFD = elements (write);
+  int nNbWriteFDs = JvGetArrayLength (write);
+  
+  int nNbEvents = nNbReadFDs + nNbWriteFDs;
+  
+  // Create and initialize our event wrapper array
+  
+  // FIXME: We're creating fresh WSAEVENTs for each call.
+  // This is inefficient. It would probably be better to cache these
+  // in the Win32 socket implementation class.
+  WSAEventWrapper aArray[nNbEvents];
+
+  int nCurIndex = 0;
+  for (int i=0; i < nNbReadFDs; ++i)
+    aArray[nCurIndex++].init(pReadFD[i], FD_ACCEPT | FD_READ);
+
+  for (int i=0; i < nNbWriteFDs; ++i)
+    aArray[nCurIndex++].init(pWriteFD[i], FD_WRITE);
+
+  // Build our array of WSAEVENTs to wait on. Also throw in our thread's
+  // interrupt event in order to detect thread interruption.
+  HANDLE arh[nNbEvents + 1];
+  for (int i=0; i < nNbEvents; ++i)
+    arh[i] = aArray[i].getEventHandle();
+  arh[nNbEvents] = _Jv_Win32GetInterruptEvent ();
+  
+  // A timeout value of 0 needs to be treated as infinite.
+  if (timeout <= 0)
+    timeout = WSA_INFINITE;
+
+  // Do the select.
+  DWORD dwRet = WSAWaitForMultipleEvents (nNbEvents+1, arh, 0, timeout, false);
+  
+  if (dwRet == WSA_WAIT_FAILED)
+    _Jv_ThrowIOException ();
+
+  // Before we do anything else, clear output file descriptor arrays.
+  memset(pReadFD, 0, sizeof(jint) * nNbReadFDs);
+  memset(pWriteFD, 0, sizeof(jint) * nNbWriteFDs);
+  memset(elements (except), 0, sizeof(jint) * JvGetArrayLength (except));
+  
+  if (dwRet == DWORD(WSA_WAIT_EVENT_0 + nNbEvents))
+    {
+      // We were interrupted. Set the current thread's interrupt
+      // status and get out of here, with nothing selected..
+      ::java::lang::Thread::currentThread ()->interrupt ();
+      return 0;
+    }
+  else if (dwRet < DWORD(WSA_WAIT_EVENT_0 + nNbEvents))
+    {
+      int nSelectedEventIndex = dwRet - WSA_WAIT_EVENT_0;
+
+      // Record the selected file descriptor.
+      // FIXME: This implementation only allows one file descriptor
+      // to be selected at a time. Remedy this by looping on
+      // WSAWaitForMultipleEvents 'til nothing more is selected.
+      jint fd = aArray[nSelectedEventIndex].getFD();
+      if (nSelectedEventIndex < nNbReadFDs)
+        pReadFD[0] = fd;
+      else
+        pWriteFD[0] = fd;
+
+      return 1;  
+    }
+  else
+    // None of the event objects was signalled, so nothing was
+    // selected.
+    return 0;
+}
+@
+
+
+1.1.101.1
+log
+@Import the GNU Compiler Collection 3.4-stable
+from gcc-3.4-20050318.tar.bz2 after having
+* all top-level non-directories (files)
+  - except config.if
+and these directories completely:
+* INSTALL
+* boehm-gc/Mac_files
+* boehm-gc/cord
+* boehm-gc/doc
+* boehm-gc/tests
+* contrib
+  - except texi2pod.pl
+* gcc/f
+* gcc/po
+* gcc/testsuite
+* gcc/treelang
+* include
+* intl
+* libf2c
+* libffi/testsuite
+* libiberty
+* libjava/testsuite
+* libstdc++-v3/docs
+* libstdc++-v3/po
+* libstdc++-v3/scripts
+* libstdc++-v3/testsuite
+* maintainer-scripts
+* zlib
+removed before importing.
+@
+text
+@@

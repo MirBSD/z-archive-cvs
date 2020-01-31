@@ -1,0 +1,681 @@
+head	1.6;
+access;
+symbols
+	MIRBSD_10:1.6.0.2
+	MIRBSD_10_BASE:1.6
+	cvs-200707151930:1.1.1.4
+	OPENBSD_4_0:1.1.1.3
+	MIRBSD_9_BASE:1.3
+	MIRBSD_8:1.3.0.2
+	MIRBSD_8_BASE:1.3
+	cvs-200507211800:1.1.1.2
+	cvs-200504291700:1.1.1.2
+	openbsd:1.1.1;
+locks; strict;
+comment	@ * @;
+
+
+1.6
+date	2007.07.15.20.02.22;	author tg;	state Exp;
+branches;
+next	1.5;
+commitid	100469A7D50041435C3;
+
+1.5
+date	2007.07.15.20.01.09;	author tg;	state Exp;
+branches;
+next	1.4;
+commitid	100469A7CFC300FC2D9;
+
+1.4
+date	2006.10.03.19.22.17;	author tg;	state Exp;
+branches;
+next	1.3;
+commitid	1004522B87E42B315D1;
+
+1.3
+date	2005.04.29.18.35.09;	author tg;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.03.15.18.44.52;	author tg;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.02.05.17.29.34;	author tg;	state Exp;
+branches
+	1.1.1.1;
+next	;
+
+1.1.1.1
+date	2005.02.05.17.29.34;	author tg;	state Exp;
+branches;
+next	1.1.1.2;
+
+1.1.1.2
+date	2005.04.29.17.06.05;	author tg;	state Exp;
+branches;
+next	1.1.1.3;
+
+1.1.1.3
+date	2006.10.03.19.10.03;	author tg;	state Exp;
+branches;
+next	1.1.1.4;
+commitid	1004522B592570E1901;
+
+1.1.1.4
+date	2007.07.15.19.51.38;	author tg;	state Exp;
+branches;
+next	;
+commitid	100469A7AC943312E80;
+
+
+desc
+@@
+
+
+1.6
+log
+@ah k, it wasn't a bug of theirs but an oversight of mine
+it's too fucking damn hot today
+@
+text
+@/*	$OpenBSD: ruserpass.c,v 1.25 2007/06/20 17:56:37 moritz Exp $	*/
+/*	$NetBSD: ruserpass.c,v 1.14 1997/07/20 09:46:01 lukem Exp $	*/
+
+/*
+ * Copyright (c) 1985, 1993, 1994
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include <ctype.h>
+#include <err.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "ftp_var.h"
+
+__SCCSID("@@(#)ruserpass.c	8.4 (Berkeley) 4/27/95");
+__RCSID("$MirOS: src/usr.bin/ftp/ruserpass.c,v 1.5 2007/07/15 20:01:09 tg Exp $");
+
+#ifndef SMALL
+static	int token(void);
+static	FILE *cfile;
+
+#define	DEFAULT	1
+#define	LOGIN	2
+#define	PASSWD	3
+#define	ACCOUNT 4
+#define MACDEF  5
+#define	ID	10
+#define	MACH	11
+
+static char tokval[100];
+
+static struct toktab {
+	char *tokstr;
+	int tval;
+} toktab[]= {
+	{ "default",	DEFAULT },
+	{ "login",	LOGIN },
+	{ "password",	PASSWD },
+	{ "passwd",	PASSWD },
+	{ "account",	ACCOUNT },
+	{ "machine",	MACH },
+	{ "macdef",	MACDEF },
+	{ NULL,		0 }
+};
+
+int
+ruserpass(const char *host, char **aname, char **apass, char **aacct)
+{
+	char *hdir, buf[MAXPATHLEN], *tmp;
+	char myname[MAXHOSTNAMELEN], *mydomain;
+	int t, i, c, usedefault = 0;
+	struct stat stb;
+
+	hdir = getenv("HOME");
+	if (hdir == NULL || *hdir == '\0')
+		return (0);
+	i = snprintf(buf, sizeof(buf), "%s/.netrc", hdir);
+	if (i < 0 || i >= sizeof(buf)) {
+		warnx("%s/.netrc: %s", hdir, strerror(ENAMETOOLONG));
+		return (0);
+	}
+	cfile = fopen(buf, "r");
+	if (cfile == NULL) {
+		if (errno != ENOENT)
+			warn("%s", buf);
+		return (0);
+	}
+	if (gethostname(myname, sizeof(myname)) < 0)
+		myname[0] = '\0';
+	if ((mydomain = strchr(myname, '.')) == NULL)
+		mydomain = "";
+next:
+	while ((t = token()) > 0) switch(t) {
+
+	case DEFAULT:
+		usedefault = 1;
+		/* FALLTHROUGH */
+
+	case MACH:
+		if (!usedefault) {
+			if ((t = token()) == -1)
+				goto bad;
+			if (t != ID)
+				continue;
+			/*
+			 * Allow match either for user's input host name
+			 * or official hostname.  Also allow match of
+			 * incompletely-specified host in local domain.
+			 */
+			if (strcasecmp(host, tokval) == 0)
+				goto match;
+			if (strcasecmp(hostname, tokval) == 0)
+				goto match;
+			if ((tmp = strchr(hostname, '.')) != NULL &&
+			    strcasecmp(tmp, mydomain) == 0 &&
+			    strncasecmp(hostname, tokval,
+			    (size_t)(tmp - hostname)) == 0 &&
+			    tokval[tmp - hostname] == '\0')
+				goto match;
+			if ((tmp = strchr(host, '.')) != NULL &&
+			    strcasecmp(tmp, mydomain) == 0 &&
+			    strncasecmp(host, tokval,
+			    (size_t)(tmp - host)) == 0 &&
+			    tokval[tmp - host] == '\0')
+				goto match;
+			continue;
+		}
+	match:
+		while ((t = token()) > 0 &&
+		    t != MACH && t != DEFAULT) switch(t) {
+
+		case LOGIN:
+			if ((t = token()) == -1)
+				goto bad;
+			if (t) {
+				if (*aname == 0) {
+					if ((*aname = strdup(tokval)) == NULL)
+						err(1, "strdup");
+				} else {
+					if (strcmp(*aname, tokval))
+						goto next;
+				}
+			}
+			break;
+		case PASSWD:
+			if ((*aname == NULL || strcmp(*aname, "anonymous")) &&
+			    fstat(fileno(cfile), &stb) >= 0 &&
+			    (stb.st_mode & 077) != 0) {
+	warnx("Error: .netrc file is readable by others.");
+	warnx("Remove password or make file unreadable by others.");
+				goto bad;
+			}
+			if ((t = token()) == -1)
+				goto bad;
+			if (t && *apass == 0) {
+				if ((*apass = strdup(tokval)) == NULL)
+					err(1, "strdup");
+			}
+			break;
+		case ACCOUNT:
+			if (fstat(fileno(cfile), &stb) >= 0
+			    && (stb.st_mode & 077) != 0) {
+	warnx("Error: .netrc file is readable by others.");
+	warnx("Remove account or make file unreadable by others.");
+				goto bad;
+			}
+			if ((t = token()) == -1)
+				goto bad;
+			if (t && *aacct == 0) {
+				if ((*aacct = strdup(tokval)) == NULL)
+					err(1, "strdup");
+			}
+			break;
+		case MACDEF:
+			if (proxy) {
+				(void)fclose(cfile);
+				return (0);
+			}
+			while ((c = fgetc(cfile)) != EOF)
+				if (c != ' ' && c != '\t')
+					break;
+			if (c == EOF || c == '\n') {
+				fputs("Missing macdef name argument.\n", ttyout);
+				goto bad;
+			}
+			if (macnum == 16) {
+				fputs(
+"Limit of 16 macros have already been defined.\n", ttyout);
+				goto bad;
+			}
+			tmp = macros[macnum].mac_name;
+			*tmp++ = c;
+			for (i=0; i < 8 && (c = fgetc(cfile)) != EOF &&
+			    !isspace(c); ++i) {
+				*tmp++ = c;
+			}
+			if (c == EOF) {
+				fputs(
+"Macro definition missing null line terminator.\n", ttyout);
+				goto bad;
+			}
+			*tmp = '\0';
+			if (c != '\n') {
+				while ((c = fgetc(cfile)) != EOF && c != '\n');
+			}
+			if (c == EOF) {
+				fputs(
+"Macro definition missing null line terminator.\n", ttyout);
+				goto bad;
+			}
+			if (macnum == 0) {
+				macros[macnum].mac_start = macbuf;
+			}
+			else {
+				macros[macnum].mac_start =
+				    macros[macnum-1].mac_end + 1;
+			}
+			tmp = macros[macnum].mac_start;
+			while (tmp != macbuf + 4096) {
+				if ((c = fgetc(cfile)) == EOF) {
+				fputs(
+"Macro definition missing null line terminator.\n", ttyout);
+					goto bad;
+				}
+				*tmp = c;
+				if (*tmp == '\n') {
+					if (tmp == macros[macnum].mac_start) {
+						macros[macnum++].mac_end = tmp;
+						break;
+					} else if (*(tmp-1) == '\0') {
+						macros[macnum++].mac_end =
+						    tmp - 1;
+						break;
+					}
+					*tmp = '\0';
+				}
+				tmp++;
+			}
+			if (tmp == macbuf + 4096) {
+				fputs("4K macro buffer exceeded.\n", ttyout);
+				goto bad;
+			}
+			break;
+		default:
+			warnx("Unknown .netrc keyword %s", tokval);
+			break;
+		}
+		goto done;
+	}
+done:
+	if (t == -1)
+		goto bad;
+	(void)fclose(cfile);
+	return (0);
+bad:
+	(void)fclose(cfile);
+	return (-1);
+}
+
+static int
+token(void)
+{
+	char *cp;
+	int c;
+	struct toktab *t;
+
+	if (feof(cfile) || ferror(cfile))
+		return (0);
+	while ((c = fgetc(cfile)) != EOF &&
+	    (c == '\n' || c == '\t' || c == ' ' || c == ','))
+		continue;
+	if (c == EOF)
+		return (0);
+	cp = tokval;
+	if (c == '"') {
+		while ((c = fgetc(cfile)) != EOF && c != '"') {
+			if (c == '\\' && (c = fgetc(cfile)) == EOF)
+				break;
+			*cp++ = c;
+			if (cp == tokval + sizeof(tokval)) {
+				warnx("Token in .netrc too long");
+				return (-1);
+			}
+		}
+	} else {
+		*cp++ = c;
+		while ((c = fgetc(cfile)) != EOF
+		    && c != '\n' && c != '\t' && c != ' ' && c != ',') {
+			if (c == '\\' && (c = fgetc(cfile)) == EOF)
+				break;
+			*cp++ = c;
+			if (cp == tokval + sizeof(tokval)) {
+				warnx("Token in .netrc too long");
+				return (-1);
+			}
+		}
+	}
+	*cp = 0;
+	if (tokval[0] == 0)
+		return (0);
+	for (t = toktab; t->tokstr; t++)
+		if (!strcmp(t->tokstr, tokval))
+			return (t->tval);
+	return (ID);
+}
+#endif
+@
+
+
+1.5
+log
+@fastmerge and fix their bugs (tree breaker, but they don't seem to care,
+it's been broken for 25 days…)
+@
+text
+@d47 1
+a47 1
+__RCSID("$MirOS: src/usr.bin/ftp/ruserpass.c,v 1.4 2006/10/03 19:22:17 tg Exp $");
+d49 1
+d317 1
+@
+
+
+1.4
+log
+@merge
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: ruserpass.c,v 1.20 2006/05/16 23:43:16 ray Exp $	*/
+d47 1
+a47 1
+__RCSID("$MirOS: src/usr.bin/ftp/ruserpass.c,v 1.3 2005/04/29 18:35:09 tg Exp $");
+d79 1
+a79 1
+	char *hdir, buf[BUFSIZ], *tmp;
+d87 2
+a88 3
+	if (strlen(hdir) + sizeof(".netrc") < sizeof(buf)) {
+		(void)snprintf(buf, sizeof buf, "%s/.netrc", hdir);
+	} else {
+d103 1
+a103 1
+	while ((t = token())) switch(t) {
+d111 3
+a113 1
+			if (token() != ID)
+d139 2
+a140 1
+		while ((t = token()) && t != MACH && t != DEFAULT) switch(t) {
+d143 7
+a149 4
+			if (token()) {
+				if (*aname == 0)
+					*aname = strdup(tokval);
+				else {
+d163 6
+a168 2
+			if (token() && *apass == 0)
+				*apass = strdup(tokval);
+d177 6
+a182 2
+			if (token() && *aacct == 0)
+				*aacct = strdup(tokval);
+d237 7
+a243 3
+					if (*(tmp-1) == '\0') {
+					   macros[macnum++].mac_end = tmp - 1;
+					   break;
+d261 2
+d287 2
+a288 2
+			if (c == '\\')
+				c = fgetc(cfile);
+d290 4
+d299 2
+a300 2
+			if (c == '\\')
+				c = fgetc(cfile);
+d302 4
+@
+
+
+1.3
+log
+@(tentative) merge, more to come
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: ruserpass.c,v 1.18 2004/07/20 03:50:26 deraadt Exp $	*/
+d47 1
+a47 1
+__RCSID("$MirOS: src/usr.bin/ftp/ruserpass.c,v 1.2 2005/03/15 18:44:52 tg Exp $");
+d108 1
+a108 1
+		/* FALL THROUGH */
+@
+
+
+1.2
+log
+@rather than fixing
+/usr/src/usr.bin/ftp/cmds.c:63: warning: 'rcsid' defined but not used
+just convert to __RCSID() macro
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: ruserpass.c,v 1.17 2003/12/16 21:46:22 deraadt Exp $	*/
+d47 1
+a47 1
+__RCSID("$MirOS$");
+d77 1
+a77 3
+ruserpass(host, aname, apass, aacct)
+	const char *host;
+	char **aname, **apass, **aacct;
+d252 1
+a252 1
+token()
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@a32 10
+#ifndef lint
+#if 0
+static char sccsid[] = "@@(#)ruserpass.c	8.4 (Berkeley) 4/27/95";
+#else
+#ifndef SMALL
+static char rcsid[] = "$OpenBSD: ruserpass.c,v 1.17 2003/12/16 21:46:22 deraadt Exp $";
+#endif /* SMALL */
+#endif
+#endif /* not lint */
+
+d46 3
+@
+
+
+1.1.1.1
+log
+@Import the OpenBSD foundation of MirOS BSD
+@
+text
+@@
+
+
+1.1.1.2
+log
+@improve my Frankenstein OS (*wink* you know who you are) further
+sans wchar_t of course
+
+this is the essence of reading >1200 commit messages which suck
+due to not having the new format of ours...
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: ruserpass.c,v 1.18 2004/07/20 03:50:26 deraadt Exp $	*/
+d38 1
+a38 1
+static char rcsid[] = "$OpenBSD: ruserpass.c,v 1.18 2004/07/20 03:50:26 deraadt Exp $";
+d84 3
+a86 1
+ruserpass(const char *host, char **aname, char **apass, char **aacct)
+d261 1
+a261 1
+token(void)
+@
+
+
+1.1.1.3
+log
+@Import OpenBSD 4.0's ftp(1) which downgraded to HTTP/1.0
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: ruserpass.c,v 1.20 2006/05/16 23:43:16 ray Exp $	*/
+d38 1
+a38 1
+static const char rcsid[] = "$OpenBSD: ruserpass.c,v 1.20 2006/05/16 23:43:16 ray Exp $";
+d115 1
+a115 1
+		/* FALLTHROUGH */
+@
+
+
+1.1.1.4
+log
+@the FTP on-the wire protocol must die, but we nevertheless could use -k
+@
+text
+@d1 1
+a1 1
+/*	$OpenBSD: ruserpass.c,v 1.25 2007/06/20 17:56:37 moritz Exp $	*/
+a32 1
+#ifndef SMALL
+d37 3
+a39 1
+static const char rcsid[] = "$OpenBSD: ruserpass.c,v 1.25 2007/06/20 17:56:37 moritz Exp $";
+d86 1
+a86 1
+	char *hdir, buf[MAXPATHLEN], *tmp;
+d94 3
+a96 2
+	i = snprintf(buf, sizeof(buf), "%s/.netrc", hdir);
+	if (i < 0 || i >= sizeof(buf)) {
+d111 1
+a111 1
+	while ((t = token()) > 0) switch(t) {
+d119 1
+a119 3
+			if ((t = token()) == -1)
+				goto bad;
+			if (t != ID)
+d145 1
+a145 2
+		while ((t = token()) > 0 &&
+		    t != MACH && t != DEFAULT) switch(t) {
+d148 4
+a151 7
+			if ((t = token()) == -1)
+				goto bad;
+			if (t) {
+				if (*aname == 0) {
+					if ((*aname = strdup(tokval)) == NULL)
+						err(1, "strdup");
+				} else {
+d165 2
+a166 6
+			if ((t = token()) == -1)
+				goto bad;
+			if (t && *apass == 0) {
+				if ((*apass = strdup(tokval)) == NULL)
+					err(1, "strdup");
+			}
+d175 2
+a176 6
+			if ((t = token()) == -1)
+				goto bad;
+			if (t && *aacct == 0) {
+				if ((*aacct = strdup(tokval)) == NULL)
+					err(1, "strdup");
+			}
+d231 3
+a233 7
+					if (tmp == macros[macnum].mac_start) {
+						macros[macnum++].mac_end = tmp;
+						break;
+					} else if (*(tmp-1) == '\0') {
+						macros[macnum++].mac_end =
+						    tmp - 1;
+						break;
+a250 2
+	if (t == -1)
+		goto bad;
+d275 2
+a276 2
+			if (c == '\\' && (c = fgetc(cfile)) == EOF)
+				break;
+a277 4
+			if (cp == tokval + sizeof(tokval)) {
+				warnx("Token in .netrc too long");
+				return (-1);
+			}
+d283 2
+a284 2
+			if (c == '\\' && (c = fgetc(cfile)) == EOF)
+				break;
+a285 4
+			if (cp == tokval + sizeof(tokval)) {
+				warnx("Token in .netrc too long");
+				return (-1);
+			}
+a295 1
+#endif
+@
+
+
